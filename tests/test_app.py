@@ -129,3 +129,59 @@ def test_bind_hotkeys_tolerates_individual_failures(windows):
     bound = bind_hotkeys(ctx, register)
     # One failure → bound = total - 1.
     assert bound == len(DEFAULT_SHORTCUTS) - 1
+
+
+# ----- DragSession facade (brief §2 #13) ----------------------------
+
+def test_begin_drag_refreshes_monitor_list(windows):
+    ctx = build(Settings(), windows)
+    # Drag session starts with empty monitors; begin_drag should refresh.
+    assert ctx.drag.monitors == []
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    assert len(ctx.drag.monitors) == 1
+    assert ctx.drag.active
+
+
+def test_begin_drag_respects_disable_setting(windows):
+    ctx = build(Settings(drag_to_edge_enabled=False), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    assert not ctx.drag.active
+
+
+def test_end_drag_dispatches_when_zone_held(windows, monkeypatch):
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    # Drive a left-edge mouse position through poll() to cache a hit.
+    ctx.drag_update(2, 540)
+    # Force throttle to allow.
+    ctx.drag._throttle.reset()
+    ctx.drag_poll()
+    action = ctx.end_drag()
+    assert action is Action.LEFT_HALF
+    # Window was dispatched to left half (work area 1920x1040).
+    assert windows.windows[101] == Rect(0, 0, 960, 1040)
+
+
+def test_end_drag_without_zone_returns_none(windows):
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    # No mouse updates → no hit.
+    assert ctx.end_drag() is None
+
+
+def test_cancel_drag_clears_without_dispatching(windows):
+    ctx = build(Settings(), windows)
+    original = windows.windows[101]
+    ctx.begin_drag(original)
+    ctx.drag_update(2, 540)
+    ctx.drag._throttle.reset()
+    ctx.drag_poll()
+    ctx.cancel_drag()
+    assert not ctx.drag.active
+    assert windows.windows[101] == original  # unchanged
+
+
+def test_apply_settings_propagates_gap_to_drag(windows):
+    ctx = build(Settings(gap=0), windows)
+    ctx.apply_settings(Settings(gap=12))
+    assert ctx.drag.gap == 12

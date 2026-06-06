@@ -13,10 +13,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable
 
+from .core.actions import Action
 from .core.cleanup import CleanupRegistry
 from .core.cycle import CycleState
 from .core.dispatcher import Dispatcher
+from .core.dragsession import DragSession
+from .core.geometry import Rect
 from .core.history import History
+from .core.snap import SnapHit
 from .ports.config_store import ConfigStore, Settings
 
 if TYPE_CHECKING:
@@ -38,6 +42,7 @@ class AppContext:
     settings: Settings
     windows: "WindowManager"
     dispatcher: Dispatcher
+    drag: DragSession
     cleanup: CleanupRegistry = field(default_factory=CleanupRegistry)
     hotkeys: "Hotkeys | None" = None
     config_store: ConfigStore | None = None
@@ -52,6 +57,41 @@ class AppContext:
         # Cycle idle timeout is on the CycleState, not the Dispatcher.
         # The dispatcher uses whichever CycleState we gave it.
         self.dispatcher._cycle.idle_timeout = settings.cycle_idle_timeout
+        self.drag.gap = settings.gap
+
+    # ----- drag-to-edge facade (brief §2 #13) ------------------------
+
+    def begin_drag(self, window: Rect) -> None:
+        """Start a drag-snap session for `window`. Refreshes monitor list
+        so a hotplug between drags is picked up.
+        """
+        if not self.settings.drag_to_edge_enabled:
+            return
+        self.drag.monitors = self.windows.list_monitors()
+        self.drag.gap = self.settings.gap
+        self.drag.start(window)
+
+    def drag_update(self, x: int, y: int) -> None:
+        """Mouse-hook hot-path callback. O(1)."""
+        self.drag.update(x, y)
+
+    def drag_poll(self) -> SnapHit | None:
+        """UI timer callback (~60 Hz). Returns current preview or None."""
+        return self.drag.poll()
+
+    def end_drag(self) -> Action | None:
+        """Mouse-up: dispatch the snap action if a zone is held, else None.
+        Returns the dispatched Action so callers can show feedback.
+        """
+        hit = self.drag.finish()
+        if hit is None or hit.action is None:
+            return None
+        self.dispatcher.dispatch(hit.action)
+        return hit.action
+
+    def cancel_drag(self) -> None:
+        """Escape press / drag abort: drop the session without dispatching."""
+        self.drag.cancel()
 
     def shutdown(self) -> int:
         """Run every registered cleanup (brief §5 #11). Returns count."""
@@ -77,10 +117,14 @@ def build(
         cycle=cycle,
         history=History(),
     )
+    # DragSession's monitor list is refreshed in begin_drag, so an empty
+    # initial list is fine — we never poll it before start().
+    drag = DragSession(monitors=[], gap=settings.gap)
     ctx = AppContext(
         settings=settings,
         windows=windows,
         dispatcher=dispatcher,
+        drag=drag,
         cleanup=cleanup if cleanup is not None else CleanupRegistry(),
         hotkeys=hotkeys,
         config_store=config_store,
