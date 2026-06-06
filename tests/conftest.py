@@ -1,0 +1,63 @@
+"""Shared test fixtures, including an in-memory WindowManager fake."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from windows_rectangle.core.geometry import Rect
+from windows_rectangle.ports.window_manager import MonitorInfo, WindowHandle
+
+
+@dataclass(slots=True)
+class FakeWindowManager:
+    """In-memory implementation of the WindowManager Protocol.
+
+    Tests construct one with monitors + windows, then drive the dispatcher.
+    """
+
+    monitors: list[MonitorInfo] = field(default_factory=list)
+    windows: dict[WindowHandle, Rect] = field(default_factory=dict)
+    active: WindowHandle | None = None
+    blocked: set[WindowHandle] = field(default_factory=set)
+    move_log: list[tuple[WindowHandle, Rect]] = field(default_factory=list)
+
+    # ----- WindowManager protocol -----
+
+    def get_active_window(self) -> WindowHandle | None:
+        return self.active
+
+    def get_window_rect(self, handle: WindowHandle) -> Rect:
+        return self.windows[handle]
+
+    def set_window_rect(self, handle: WindowHandle, rect: Rect) -> bool:
+        if handle in self.blocked:
+            return False
+        self.windows[handle] = rect
+        self.move_log.append((handle, rect))
+        return True
+
+    def is_window_valid(self, handle: WindowHandle) -> bool:
+        return handle in self.windows
+
+    def list_monitors(self) -> list[MonitorInfo]:
+        return list(self.monitors)
+
+    def monitor_for_window(self, handle: WindowHandle) -> MonitorInfo | None:
+        if handle not in self.windows:
+            return None
+        # Pick the monitor with the largest overlap.
+        rect = self.windows[handle]
+        best: tuple[int, MonitorInfo] | None = None
+        for m in self.monitors:
+            area = rect.clamp_to(m.bounds).area
+            if best is None or area > best[0]:
+                best = (area, m)
+        return best[1] if best else None
+
+
+def make_monitor(handle: int, x: int, y: int, w: int, h: int,
+                 taskbar: int = 40, primary: bool = False) -> MonitorInfo:
+    """Build a MonitorInfo with a taskbar-sized strip removed from the bottom."""
+    bounds = Rect(x, y, w, h)
+    work = Rect(x, y, w, h - taskbar)
+    return MonitorInfo(handle=handle, bounds=bounds, work_area=work, is_primary=primary)

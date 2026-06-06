@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Hashable
+from typing import Callable, Hashable
 
 from .actions import Action
 
@@ -50,7 +50,7 @@ class CycleState:
 
     idle_timeout: float = 1.5  # seconds; brief §5.9 "short idle timeout"
     _entries: dict[tuple[Hashable, tuple[Action, ...]], _Entry] = field(default_factory=dict)
-    _clock: callable = field(default=time.monotonic)
+    _clock: Callable[[], float] = field(default=time.monotonic)
 
     def next_action(self, window_id: Hashable, requested: Action) -> Action:
         """Return the action to actually execute for this key-press.
@@ -79,7 +79,7 @@ class CycleState:
         """Drop all cycle state for the given window (used when HWND closes)."""
         self._entries = {k: v for k, v in self._entries.items() if k[0] != window_id}
 
-    def prune_stale(self, is_alive: callable) -> int:
+    def prune_stale(self, is_alive: Callable[[Hashable], bool]) -> int:
         """Drop entries whose window_id no longer passes `is_alive(id)`. Returns count dropped."""
         dead = {k for k in self._entries if not is_alive(k[0])}
         for k in dead:

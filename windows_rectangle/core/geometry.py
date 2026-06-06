@@ -75,25 +75,6 @@ class Rect:
             max(0, self.height - 2 * gap),
         )
 
-    def shrink_for_outer_gap(self, gap: int, *, edges: "EdgeFlags") -> "Rect":
-        """Apply a half-gap to each edge that abuts a neighbour.
-
-        Tiling with a uniform `gap` means the *gutter* between two windows
-        is one gap-width wide — each window contributes half. Edges that
-        sit on the work-area boundary are not inset.
-        """
-        if gap <= 0:
-            return self
-        half = gap // 2
-        # Use ceil-division on the opposite edge so total gutter == gap
-        # even when gap is odd.
-        other_half = gap - half
-        left = self.x + (half if edges.left else 0)
-        top = self.y + (half if edges.top else 0)
-        right = self.right - (other_half if edges.right else 0)
-        bottom = self.bottom - (other_half if edges.bottom else 0)
-        return Rect.from_ltrb(left, top, max(left, right), max(top, bottom))
-
     def clamp_to(self, bounds: "Rect") -> "Rect":
         """Clip this rect so it lies entirely within `bounds`."""
         left = max(self.left, bounds.left)
