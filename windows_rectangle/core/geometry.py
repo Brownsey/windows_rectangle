@@ -153,21 +153,20 @@ def tile_edges(left: Fraction | float, top: Fraction | float,
 
 
 def apply_gap(work_area: Rect, tile: Rect, edges: EdgeFlags, gap: int) -> Rect:
-    """Apply an outer gap (around the work area) and an inner half-gap per edge.
+    """Apply an outer gap (around the work area) and an inner half-gap per shared edge.
 
     Rectangle's gap setting affects both the screen-edge inset and the gutter
-    between tiles. We model that here.
+    between tiles. Each interior gutter is `gap` wide (each neighbour
+    contributes half). Each outer edge is inset by the full `gap`.
     """
     if gap <= 0:
         return tile
-    # Inset all four outer edges by `gap` against the work area, but only
-    # apply to edges that actually touch the work area boundary.
     half = gap // 2
-    other = gap - half
-    left = tile.left + (half if edges.left else gap if tile.left == work_area.left else 0)
-    top = tile.top + (half if edges.top else gap if tile.top == work_area.top else 0)
-    right = tile.right - (other if edges.right else gap if tile.right == work_area.right else 0)
-    bottom = tile.bottom - (other if edges.bottom else gap if tile.bottom == work_area.bottom else 0)
+    other = gap - half  # ceil half — ensures total interior gutter == gap when odd
+    left = tile.left + (half if edges.left else gap)
+    top = tile.top + (half if edges.top else gap)
+    right = tile.right - (other if edges.right else gap)
+    bottom = tile.bottom - (other if edges.bottom else gap)
     return Rect.from_ltrb(left, top, max(left, right), max(top, bottom))
 
 
