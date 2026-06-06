@@ -26,7 +26,16 @@ from .ports.config_store import ConfigStore, Settings
 if TYPE_CHECKING:
     from .ports.autostart import AutoStart
     from .ports.hotkeys import Hotkeys
+    from .ports.single_instance import SingleInstance
     from .ports.window_manager import WindowManager
+
+
+class SecondInstanceError(RuntimeError):
+    """Raised by `build()` when the SingleInstance guard is already held.
+
+    Main entrypoint should catch this, surface the existing tray icon,
+    and exit cleanly (brief §6).
+    """
 
 
 _log = logging.getLogger(__name__)
@@ -49,6 +58,7 @@ class AppContext:
     config_store: ConfigStore | None = None
     autostart: "AutoStart | None" = None
     autostart_command_line: str | None = None
+    single_instance: "SingleInstance | None" = None
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -128,12 +138,22 @@ def build(
     config_store: ConfigStore | None = None,
     autostart: "AutoStart | None" = None,
     autostart_command_line: str | None = None,
+    single_instance: "SingleInstance | None" = None,
     cleanup: CleanupRegistry | None = None,
 ) -> AppContext:
     """Construct an AppContext with the supplied (typically faked) ports.
 
     Production code uses `bind_win32()` instead.
     """
+    # Acquire the single-instance guard *before* constructing anything
+    # expensive — if a second instance is detected we want to exit
+    # without spinning up the dispatcher or hotkey threads.
+    if single_instance is not None:
+        if not single_instance.acquire():
+            raise SecondInstanceError(
+                "another instance is already running — exit and surface its tray icon"
+            )
+
     cycle = CycleState(idle_timeout=settings.cycle_idle_timeout)
     dispatcher = Dispatcher(
         windows,
@@ -154,9 +174,12 @@ def build(
         config_store=config_store,
         autostart=autostart,
         autostart_command_line=autostart_command_line,
+        single_instance=single_instance,
     )
     if hotkeys is not None:
         ctx.cleanup.register(hotkeys.unregister_all)
+    if single_instance is not None:
+        ctx.cleanup.register(single_instance.release)
     # Reconcile registry state on startup so a setting flipped while the
     # app wasn't running gets re-applied.
     ctx.sync_autostart()

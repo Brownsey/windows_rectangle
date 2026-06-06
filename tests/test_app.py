@@ -4,7 +4,7 @@ from typing import Callable
 
 import pytest
 
-from windows_rectangle.app import AppContext, bind_hotkeys, build
+from windows_rectangle.app import AppContext, SecondInstanceError, bind_hotkeys, build
 from windows_rectangle.core.actions import Action, DEFAULT_SHORTCUTS
 from windows_rectangle.core.cleanup import CleanupRegistry
 from windows_rectangle.core.geometry import Rect
@@ -234,3 +234,38 @@ def test_autostart_failure_does_not_crash(windows):
     # Should log + swallow — not raise.
     build(Settings(launch_at_login=True), windows,
           autostart=BrokenAutoStart(), autostart_command_line=r"C:\app.exe")
+
+
+# ----- SingleInstance wiring (brief §6) -----------------------------
+
+def test_build_with_unheld_single_instance_acquires(windows):
+    from windows_rectangle.adapters.single_instance import MemorySingleInstance
+    MemorySingleInstance._held.clear()
+    si = MemorySingleInstance("Local\\TestApp")
+    ctx = build(Settings(), windows, single_instance=si)
+    assert ctx.single_instance is si
+    # Lock was acquired.
+    assert "Local\\TestApp" in MemorySingleInstance._held
+    MemorySingleInstance._held.clear()
+
+
+def test_build_with_held_single_instance_raises(windows):
+    from windows_rectangle.adapters.single_instance import MemorySingleInstance
+    MemorySingleInstance._held.clear()
+    first = MemorySingleInstance("Local\\TestApp")
+    first.acquire()
+    second = MemorySingleInstance("Local\\TestApp")
+    with pytest.raises(SecondInstanceError):
+        build(Settings(), windows, single_instance=second)
+    first.release()
+    MemorySingleInstance._held.clear()
+
+
+def test_shutdown_releases_single_instance(windows):
+    from windows_rectangle.adapters.single_instance import MemorySingleInstance
+    MemorySingleInstance._held.clear()
+    si = MemorySingleInstance("Local\\TestApp")
+    ctx = build(Settings(), windows, single_instance=si)
+    assert "Local\\TestApp" in MemorySingleInstance._held
+    ctx.shutdown()
+    assert "Local\\TestApp" not in MemorySingleInstance._held
