@@ -14,6 +14,7 @@ from ..ports.window_manager import WindowManager
 from . import monitors as monitors_mod
 from .actions import Action, apply, is_geometry_action
 from .cycle import CycleState
+from .eligibility import Capability, classify
 from .geometry import Rect
 from .history import History
 
@@ -81,9 +82,23 @@ class Dispatcher:
         if monitor is None:
             return DispatchResult(action, handle, None, None, False, "no_monitor")
 
+        cap = classify(self._windows.get_window_flags(handle))
+        if cap is Capability.NONE:
+            return DispatchResult(action, handle, None, None, False, "ineligible")
+
         effective = self._cycle.next_action(handle, action)
         before = self._windows.get_window_rect(handle)
         target = apply(effective, before, monitor.work_area, self._gap)
+
+        if Capability.RESIZE not in cap:
+            # Move-only window (e.g. fixed-size dialog) — keep its size,
+            # center it at the target rect's center.
+            target = Rect(
+                target.center_x - before.width // 2,
+                target.center_y - before.height // 2,
+                before.width,
+                before.height,
+            ).clamp_to(monitor.work_area)
 
         return self._move(handle, action, before, target)
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Hashable, Protocol
 
+from ..core.eligibility import WindowFlags
 from ..core.geometry import Rect
 
 
@@ -50,6 +51,11 @@ class WindowManager(Protocol):
 
     def is_window_valid(self, handle: WindowHandle) -> bool:
         """`IsWindow(hwnd)` — used to prune cycle/history state."""
+
+    def get_window_flags(self, handle: WindowHandle) -> WindowFlags:
+        """Style/state flags used by `core.eligibility.classify` to decide
+        whether the window may be moved, resized, both, or skipped (brief §5 #10).
+        """
 
     def is_maximized(self, handle: WindowHandle) -> bool:
         """True if the window is in a maximized or OS-snapped state.

@@ -5,6 +5,7 @@ import pytest
 from windows_rectangle.core.actions import Action
 from windows_rectangle.core.cycle import CycleState
 from windows_rectangle.core.dispatcher import Dispatcher
+from windows_rectangle.core.eligibility import WindowFlags
 from windows_rectangle.core.geometry import Rect
 from windows_rectangle.core.history import History
 
@@ -193,3 +194,39 @@ def test_restore_action_does_not_trigger_pre_restore(fake_wm, dispatcher):
     dispatcher.dispatch(Action.RESTORE)
     # RESTORE bypasses _move's pre-restore logic.
     assert fake_wm.restore_log == []
+
+
+# ----- Eligibility (brief §5 #10) -----------------------------------
+
+def test_ineligible_window_is_skipped(fake_wm, dispatcher):
+    # Tool window (no caption either) → Capability.NONE
+    fake_wm.flags[101] = WindowFlags(is_tool_window=True)
+    result = dispatcher.dispatch(Action.LEFT_HALF)
+    assert not result.moved
+    assert result.reason == "ineligible"
+    # Nothing should have been moved.
+    assert fake_wm.move_log == []
+
+
+def test_move_only_window_keeps_size_centered_at_target(fake_wm, dispatcher):
+    # Fixed-size dialog: caption present, no thick frame -> Capability.MOVE only.
+    fake_wm.windows[101] = Rect(100, 100, 400, 300)
+    fake_wm.flags[101] = WindowFlags(has_caption=True, has_thick_frame=False)
+    dispatcher.dispatch(Action.LEFT_HALF)
+    r = fake_wm.windows[101]
+    # Size preserved.
+    assert r.width == 400 and r.height == 300
+    # Center sits at the left-half's center: x=480 (960/2), y=520 (1040/2).
+    assert abs(r.center_x - 480) <= 1
+    assert abs(r.center_y - 520) <= 1
+
+
+def test_move_only_window_clamped_to_work_area(fake_wm, dispatcher):
+    # A move-only window wider than the work-area's half would otherwise spill.
+    fake_wm.windows[101] = Rect(0, 0, 1500, 1000)  # huge
+    fake_wm.flags[101] = WindowFlags(has_caption=True, has_thick_frame=False)
+    dispatcher.dispatch(Action.LEFT_HALF)
+    r = fake_wm.windows[101]
+    # Must stay inside work area.
+    assert r.left >= 0 and r.top >= 0
+    assert r.right <= 1920 and r.bottom <= 1040

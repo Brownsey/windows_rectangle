@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from windows_rectangle.core.eligibility import WindowFlags
 from windows_rectangle.core.geometry import Rect
 from windows_rectangle.ports.window_manager import MonitorInfo, WindowHandle
 
@@ -20,6 +21,10 @@ class FakeWindowManager:
     active: WindowHandle | None = None
     blocked: set[WindowHandle] = field(default_factory=set)
     maximized: set[WindowHandle] = field(default_factory=set)
+    flags: dict[WindowHandle, WindowFlags] = field(default_factory=dict)
+    default_flags: WindowFlags = field(
+        default_factory=lambda: WindowFlags(has_caption=True, has_thick_frame=True)
+    )
     move_log: list[tuple[WindowHandle, Rect]] = field(default_factory=list)
     restore_log: list[WindowHandle] = field(default_factory=list)
 
@@ -40,6 +45,9 @@ class FakeWindowManager:
 
     def is_window_valid(self, handle: WindowHandle) -> bool:
         return handle in self.windows
+
+    def get_window_flags(self, handle: WindowHandle) -> WindowFlags:
+        return self.flags.get(handle, self.default_flags)
 
     def is_maximized(self, handle: WindowHandle) -> bool:
         return handle in self.maximized
