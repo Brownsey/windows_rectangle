@@ -185,3 +185,52 @@ def test_apply_settings_propagates_gap_to_drag(windows):
     ctx = build(Settings(gap=0), windows)
     ctx.apply_settings(Settings(gap=12))
     assert ctx.drag.gap == 12
+
+
+# ----- AutoStart wiring (brief §2 #16) ------------------------------
+
+def test_build_syncs_autostart_to_settings_true(windows):
+    from windows_rectangle.adapters.winreg_autostart import MemoryAutoStart
+    a = MemoryAutoStart()
+    build(Settings(launch_at_login=True), windows,
+          autostart=a, autostart_command_line=r"C:\app.exe")
+    assert a.is_enabled()
+    assert a.command_line == r"C:\app.exe"
+
+
+def test_build_syncs_autostart_to_settings_false(windows):
+    from windows_rectangle.adapters.winreg_autostart import MemoryAutoStart
+    a = MemoryAutoStart(enabled=True, command_line=r"C:\old.exe")
+    build(Settings(launch_at_login=False), windows,
+          autostart=a, autostart_command_line=r"C:\app.exe")
+    assert not a.is_enabled()
+
+
+def test_apply_settings_toggles_autostart(windows):
+    from windows_rectangle.adapters.winreg_autostart import MemoryAutoStart
+    a = MemoryAutoStart()
+    ctx = build(Settings(launch_at_login=False), windows,
+                autostart=a, autostart_command_line=r"C:\app.exe")
+    assert not a.is_enabled()
+    ctx.apply_settings(Settings(launch_at_login=True))
+    assert a.is_enabled()
+    ctx.apply_settings(Settings(launch_at_login=False))
+    assert not a.is_enabled()
+
+
+def test_sync_autostart_noop_without_command_line(windows):
+    from windows_rectangle.adapters.winreg_autostart import MemoryAutoStart
+    a = MemoryAutoStart()
+    # No command_line supplied → sync should do nothing.
+    ctx = build(Settings(launch_at_login=True), windows, autostart=a)
+    assert not a.is_enabled()
+
+
+def test_autostart_failure_does_not_crash(windows):
+    class BrokenAutoStart:
+        def is_enabled(self): raise OSError("registry hosed")
+        def enable(self, cl): raise OSError("nope")
+        def disable(self): raise OSError("nope")
+    # Should log + swallow — not raise.
+    build(Settings(launch_at_login=True), windows,
+          autostart=BrokenAutoStart(), autostart_command_line=r"C:\app.exe")

@@ -24,6 +24,7 @@ from .core.snap import SnapHit
 from .ports.config_store import ConfigStore, Settings
 
 if TYPE_CHECKING:
+    from .ports.autostart import AutoStart
     from .ports.hotkeys import Hotkeys
     from .ports.window_manager import WindowManager
 
@@ -46,6 +47,8 @@ class AppContext:
     cleanup: CleanupRegistry = field(default_factory=CleanupRegistry)
     hotkeys: "Hotkeys | None" = None
     config_store: ConfigStore | None = None
+    autostart: "AutoStart | None" = None
+    autostart_command_line: str | None = None
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -58,6 +61,25 @@ class AppContext:
         # The dispatcher uses whichever CycleState we gave it.
         self.dispatcher._cycle.idle_timeout = settings.cycle_idle_timeout
         self.drag.gap = settings.gap
+        self.sync_autostart()
+
+    def sync_autostart(self) -> None:
+        """Reconcile the AutoStart adapter with `settings.launch_at_login`.
+
+        No-op if no autostart adapter or command line was wired. Failures
+        are logged, not raised — a registry hiccup must not crash the app.
+        """
+        if self.autostart is None or self.autostart_command_line is None:
+            return
+        target = self.settings.launch_at_login
+        try:
+            currently = self.autostart.is_enabled()
+            if target and not currently:
+                self.autostart.enable(self.autostart_command_line)
+            elif not target and currently:
+                self.autostart.disable()
+        except Exception:  # noqa: BLE001 — registry failure should never kill the app
+            _log.exception("autostart sync failed")
 
     # ----- drag-to-edge facade (brief §2 #13) ------------------------
 
@@ -104,6 +126,8 @@ def build(
     *,
     hotkeys: "Hotkeys | None" = None,
     config_store: ConfigStore | None = None,
+    autostart: "AutoStart | None" = None,
+    autostart_command_line: str | None = None,
     cleanup: CleanupRegistry | None = None,
 ) -> AppContext:
     """Construct an AppContext with the supplied (typically faked) ports.
@@ -128,9 +152,14 @@ def build(
         cleanup=cleanup if cleanup is not None else CleanupRegistry(),
         hotkeys=hotkeys,
         config_store=config_store,
+        autostart=autostart,
+        autostart_command_line=autostart_command_line,
     )
     if hotkeys is not None:
         ctx.cleanup.register(hotkeys.unregister_all)
+    # Reconcile registry state on startup so a setting flipped while the
+    # app wasn't running gets re-applied.
+    ctx.sync_autostart()
     return ctx
 
 
