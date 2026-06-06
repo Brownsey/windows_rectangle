@@ -61,11 +61,15 @@ class Combo:
 
 
 def parse(combo: str) -> Combo:
-    """Parse a user-supplied combo string. Case-insensitive, accepts `+` or `-`."""
+    """Parse a user-supplied combo string. Case-insensitive, `+`-separated.
+
+    `-` is *not* a separator because `-` is itself a bindable key
+    (e.g. Rectangle's "smaller" action is `Ctrl+Alt+-`).
+    """
     if not combo or not combo.strip():
         raise ShortcutParseError("empty combo")
-    # Normalise separators.
-    raw = combo.strip().lower().replace("-", "+")
+    raw = combo.strip().lower()
+    # Split on `+` but preserve a trailing/standalone `-` token (the minus key).
     tokens = [t.strip() for t in raw.split("+") if t.strip()]
     if not tokens:
         raise ShortcutParseError(f"no tokens in {combo!r}")

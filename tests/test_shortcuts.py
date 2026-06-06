@@ -22,8 +22,9 @@ def test_parse_case_insensitive():
     assert parse("CTRL+Alt+LEFT") == Combo(("ctrl", "alt"), "left")
 
 
-def test_parse_dash_separator():
-    assert parse("ctrl-alt-left") == Combo(("ctrl", "alt"), "left")
+def test_parse_minus_key_is_preserved():
+    # `-` is the SMALLER action's key (Ctrl+Alt+-) and must not be confused with a separator.
+    assert parse("ctrl+alt+-") == Combo(("ctrl", "alt"), "-")
 
 
 def test_parse_extra_spaces():
@@ -70,7 +71,7 @@ def test_parse_rejects_two_non_modifier_keys():
 
 def test_normalise_roundtrips():
     assert normalise("Ctrl+Alt+Left") == "ctrl+alt+left"
-    assert normalise("win-shift-alt-ctrl-a") == "ctrl+alt+shift+win+a"
+    assert normalise("Win+Shift+Alt+Ctrl+a") == "ctrl+alt+shift+win+a"
 
 
 def test_normalise_idempotent():
@@ -88,7 +89,7 @@ def test_normalise_different_typing_same_canonical():
 def test_conflicts_detects_duplicates():
     result = conflicts({
         "left_half": "Ctrl+Alt+Left",
-        "first_third": "ctrl-alt-left",  # canonically identical
+        "first_third": "ctrl+alt+left",  # canonically identical
         "right_half": "Ctrl+Alt+Right",
     })
     # Whichever key was first gets listed as the owner; the other is in the conflict list.
