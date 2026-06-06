@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "windows_rectangle"
+version = "0.1.0"
+description = "A Rectangle-for-Windows window manager"
+requires-python = ">=3.11"
+readme = "BRIEF.md"
+license = { text = "MIT" }
+authors = [{ name = "Windows Rectangle contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+win = ["pywin32>=306", "PySide6>=6.6"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["windows_rectangle*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["windows_rectangle/core"]
