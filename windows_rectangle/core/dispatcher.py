@@ -118,6 +118,11 @@ class Dispatcher:
     def _move(self, handle: object, action: Action, before: Rect, target: Rect) -> DispatchResult:
         if target == before:
             return DispatchResult(action, handle, before, before, False, "no_change")
+        # Brief §5 #4: SetWindowPos misbehaves on maximized/snapped windows.
+        # Restore first; the dispatcher's `before` rect is still the pre-action
+        # rect for the undo entry, so RESTORE re-maximizes via the recorded shape.
+        if self._windows.is_maximized(handle):
+            self._windows.restore_window(handle)
         if self._record:
             self._history.push(handle, before)
         ok = self._windows.set_window_rect(handle, target)

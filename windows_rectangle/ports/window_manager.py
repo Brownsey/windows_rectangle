@@ -51,6 +51,16 @@ class WindowManager(Protocol):
     def is_window_valid(self, handle: WindowHandle) -> bool:
         """`IsWindow(hwnd)` — used to prune cycle/history state."""
 
+    def is_maximized(self, handle: WindowHandle) -> bool:
+        """True if the window is in a maximized or OS-snapped state.
+
+        SetWindowPos misbehaves on maximized windows (brief §5 #4); the
+        dispatcher restores first.
+        """
+
+    def restore_window(self, handle: WindowHandle) -> None:
+        """`ShowWindow(SW_RESTORE)` — used before moving a maximized window."""
+
     def list_monitors(self) -> list[MonitorInfo]:
         """All monitors, in a stable order — used for next/prev display."""
 

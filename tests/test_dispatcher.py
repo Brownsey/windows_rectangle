@@ -167,3 +167,29 @@ def test_prune_stale_drops_closed_window_state(fake_wm):
     fake_wm.active = None
     dropped = d.prune_stale_state()
     assert dropped >= 1
+
+
+# ----- Maximized/snapped pre-restore (brief §5 #4) -----------------
+
+def test_maximized_window_is_restored_before_move(fake_wm, dispatcher):
+    fake_wm.maximized.add(101)
+    dispatcher.dispatch(Action.LEFT_HALF)
+    # The pre-restore call happened, and the window is at left-half.
+    assert fake_wm.restore_log == [101]
+    assert 101 not in fake_wm.maximized
+    assert fake_wm.windows[101] == Rect(0, 0, 960, 1040)
+
+
+def test_non_maximized_window_skips_restore(fake_wm, dispatcher):
+    dispatcher.dispatch(Action.LEFT_HALF)
+    assert fake_wm.restore_log == []
+
+
+def test_restore_action_does_not_trigger_pre_restore(fake_wm, dispatcher):
+    # First push something into history so RESTORE has work to do.
+    dispatcher.dispatch(Action.LEFT_HALF)
+    fake_wm.maximized.add(101)
+    fake_wm.restore_log.clear()
+    dispatcher.dispatch(Action.RESTORE)
+    # RESTORE bypasses _move's pre-restore logic.
+    assert fake_wm.restore_log == []

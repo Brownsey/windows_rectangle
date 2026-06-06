@@ -1,5 +1,7 @@
 """Tests for windows_rectangle.app composition root."""
 
+from typing import Callable
+
 import pytest
 
 from windows_rectangle.app import AppContext, bind_hotkeys, build
@@ -16,7 +18,7 @@ M1 = make_monitor(1, 0, 0, 1920, 1080, primary=True)
 
 class FakeHotkeys:
     def __init__(self):
-        self.registered: dict[int, tuple[str, callable]] = {}
+        self.registered: dict[int, tuple[str, Callable[[], None]]] = {}
         self._next = 0
         self.unregister_all_calls = 0
 

@@ -19,7 +19,9 @@ class FakeWindowManager:
     windows: dict[WindowHandle, Rect] = field(default_factory=dict)
     active: WindowHandle | None = None
     blocked: set[WindowHandle] = field(default_factory=set)
+    maximized: set[WindowHandle] = field(default_factory=set)
     move_log: list[tuple[WindowHandle, Rect]] = field(default_factory=list)
+    restore_log: list[WindowHandle] = field(default_factory=list)
 
     # ----- WindowManager protocol -----
 
@@ -38,6 +40,13 @@ class FakeWindowManager:
 
     def is_window_valid(self, handle: WindowHandle) -> bool:
         return handle in self.windows
+
+    def is_maximized(self, handle: WindowHandle) -> bool:
+        return handle in self.maximized
+
+    def restore_window(self, handle: WindowHandle) -> None:
+        self.maximized.discard(handle)
+        self.restore_log.append(handle)
 
     def list_monitors(self) -> list[MonitorInfo]:
         return list(self.monitors)
