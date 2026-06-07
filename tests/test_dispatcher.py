@@ -287,3 +287,17 @@ def test_no_change_when_target_equals_before(fake_wm):
     result = d.dispatch(Action.LEFT_HALF)
     assert not result.moved
     assert result.reason == "no_change"
+
+
+def test_dispatcher_default_almost_maximize_scale_uses_module_constant(fake_wm):
+    """When Dispatcher.almost_maximize_scale is left as None (tests that
+    don't go through build()), the ALMOST_MAXIMIZE dispatch falls back
+    to the module ALMOST_MAXIMIZE_SCALE = 0.85 — matching pre-iter-60
+    behaviour so no test that doesn't care about scale gets broken."""
+    d = Dispatcher(fake_wm)
+    assert d.almost_maximize_scale is None  # default, not threaded from Settings
+    d.dispatch(Action.ALMOST_MAXIMIZE)
+    r = fake_wm.windows[101]
+    # 1920 × 1040 work area × 0.85 = 1632 × 884.
+    assert r.width == int(1920 * 0.85)
+    assert r.height == int(1040 * 0.85)
