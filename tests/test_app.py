@@ -347,6 +347,47 @@ def test_drain_drag_preview_active_with_hit_shows(windows):
     assert shown[0] == Rect(0, 0, 960, 1040)
 
 
+def test_drain_drag_preview_hides_after_cursor_leaves_zone_mid_drag(windows):
+    """Drag stays active, cursor was in a zone (overlay shown), then
+    cursor moves to a non-zone area → on_hide must fire exactly once
+    while the session is still active."""
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    ctx.drag_update(2, 540)                 # left edge → hit
+    ctx.drag._throttle.reset()
+    shown: list = []
+    hidden: list = []
+
+    def go():
+        return ctx.drain_drag_preview(
+            on_show=lambda r: shown.append(r),
+            on_hide=lambda: hidden.append(True),
+        )
+
+    assert go() is True                     # overlay shown
+    # Cursor moves to a non-zone area (mid-screen).
+    ctx.drag_update(960, 540)
+    ctx.drag._throttle.reset()
+    assert go() is False
+    assert hidden == [True]                 # exactly one hide
+
+
+def test_bind_hotkeys_via_bus_tolerates_failures(windows):
+    """bind_hotkeys_via_bus must keep going when one register call raises."""
+    hot = FakeHotkeys()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    calls: list = []
+
+    def register(combo, cb):
+        calls.append(combo)
+        if "ctrl+alt+left" in combo:
+            raise RuntimeError("OS clash")
+        return len(calls)
+
+    bound = bind_hotkeys_via_bus(ctx, register)
+    assert bound == len(DEFAULT_SHORTCUTS) - 1
+
+
 def test_drain_drag_preview_dedup_same_rect(windows):
     """Two consecutive ticks at the same snap target → on_show fires once."""
     ctx = build(Settings(), windows)

@@ -123,6 +123,32 @@ def test_validate_blocks_on_out_of_range_gap():
     assert any("gap" in e for e in report.errors)
 
 
+def test_validate_blocks_on_out_of_range_almost_maximize_scale():
+    pc = PrefsController(baseline=Settings())
+    pc.staged.almost_maximize_scale = 5.0  # bypass clamp
+    report = pc.validate()
+    assert not report.ok
+    assert any("almost_maximize_scale" in e for e in report.errors)
+
+
+def test_validate_blocks_on_out_of_range_cycle_idle_timeout():
+    pc = PrefsController(baseline=Settings())
+    pc.staged.cycle_idle_timeout = -1.0
+    report = pc.validate()
+    assert not report.ok
+    assert any("cycle_idle_timeout" in e for e in report.errors)
+
+
+def test_validate_flags_unparseable_combo_as_error():
+    pc = PrefsController(baseline=Settings())
+    # Bypass set_shortcut (which would raise) to plant a combo with
+    # only modifiers (parse rejects "no non-modifier key").
+    pc.staged.shortcuts[Action.LEFT_HALF] = "ctrl+alt"
+    report = pc.validate()
+    assert not report.ok
+    assert any("cannot parse" in e for e in report.errors)
+
+
 def test_commit_calls_callbacks_and_promotes_staged():
     saved: list[Settings] = []
     applied: list[Settings] = []
