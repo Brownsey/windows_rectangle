@@ -84,6 +84,11 @@ class PrefsController:
     staged: Settings = field(init=False)
 
     def __post_init__(self) -> None:
+        # Snapshot baseline too — otherwise it aliases the caller's
+        # Settings instance, and any later external mutation of that
+        # object (e.g. ctx.apply_settings firing while prefs is open)
+        # would silently change what `is_dirty` compares against.
+        self.baseline = self._snapshot(self.baseline)
         self.staged = self._snapshot(self.baseline)
 
     # ----- staging mutators -------------------------------------------

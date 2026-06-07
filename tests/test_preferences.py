@@ -193,6 +193,22 @@ def test_staged_shortcuts_independent_from_baseline():
     assert pc.baseline.shortcuts[Action.LEFT_HALF] != "ctrl+alt+x"
 
 
+def test_baseline_independent_from_constructor_arg():
+    """The Settings instance passed at construction must not alias
+    pc.baseline — otherwise an external mutation (e.g. ctx.apply_settings
+    firing while prefs is open) would silently shift is_dirty."""
+    live = Settings(gap=10)
+    pc = PrefsController(baseline=live)
+    assert pc.staged.gap == 10
+    assert not pc.is_dirty
+    # External mutation: someone else changes the live Settings.
+    live.gap = 99
+    # PrefsController's baseline and staged stay anchored at 10.
+    assert pc.baseline.gap == 10
+    assert pc.staged.gap == 10
+    assert not pc.is_dirty
+
+
 def test_validation_report_ok_property():
     assert ValidationReport().ok
     assert not ValidationReport(errors=("x",)).ok
