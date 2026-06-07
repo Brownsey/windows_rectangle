@@ -21,89 +21,103 @@ from .app import SecondInstanceError, bind_win32
 _log = logging.getLogger("windows_rectangle")
 
 
+_EPILOG = """\
+examples:
+  windows_rectangle                        run the tray app
+  windows_rectangle --headless             run without Qt (hotkeys only)
+  windows_rectangle --check-install        verify the install
+  windows_rectangle --list-shortcuts       print current shortcuts
+  windows_rectangle --print-monitors       dump monitor geometry
+  windows_rectangle --export-config s.json snapshot settings to s.json
+  windows_rectangle --import-config s.json restore settings from s.json
+
+The "informational" flags short-circuit before any Win32 wiring or the
+single-instance mutex, so they're safe to run while another tray copy
+is already open.
+"""
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    p = argparse.ArgumentParser(prog="windows_rectangle")
+    p = argparse.ArgumentParser(
+        prog="windows_rectangle",
+        description="Rectangle-for-Windows window manager.",
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--version", action="version", version=__version__)
-    p.add_argument(
+
+    runtime = p.add_argument_group("runtime")
+    runtime.add_argument(
         "--headless",
         action="store_true",
-        help="run without Qt — hotkeys + dispatcher only, no tray UI",
+        help="run without Qt - hotkeys + dispatcher only, no tray UI",
     )
-    p.add_argument(
+    runtime.add_argument(
         "--command-line",
         default=None,
         help="full command line used for the launch-at-login registry entry",
     )
-    p.add_argument(
+    runtime.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="root logger threshold (default: INFO)",
     )
-    # ----- quick informational subcommands ---------------------------
-    # These short-circuit before any adapter wiring / single-instance
-    # acquisition so users can `WindowsRectangle.exe --print-config-path`
-    # safely while another copy is running in the tray.
-    p.add_argument(
+
+    info = p.add_argument_group(
+        "informational",
+        description=(
+            "These flags print state and exit. They do NOT start the tray, "
+            "take the single-instance mutex, or install hotkeys - safe to "
+            "run while another copy is active."
+        ),
+    )
+    info.add_argument(
         "--print-config-path",
         action="store_true",
-        help=(
-            "print the on-disk config path and exit "
-            "(does not start the app or take the single-instance mutex)"
-        ),
+        help="print the on-disk config path",
     )
-    p.add_argument(
+    info.add_argument(
         "--list-shortcuts",
         action="store_true",
-        help=(
-            "print the currently-configured shortcuts and exit "
-            "(reads %%APPDATA%%\\windows_rectangle\\config.json)"
-        ),
+        help="print every action and its currently-configured shortcut",
     )
-    p.add_argument(
+    info.add_argument(
         "--check-install",
         action="store_true",
-        help=(
-            "run a self-diagnostic (version, dep importability, config "
-            "path) and exit with code 0 if everything looks OK. Safe to "
-            "run while another tray copy is open."
-        ),
+        help="self-diagnostic; exits 0 when every required check passed",
     )
-    p.add_argument(
+    info.add_argument(
         "--check-install-json",
         action="store_true",
-        help="like --check-install but emit machine-readable JSON.",
+        help="like --check-install but emit machine-readable JSON",
     )
-    p.add_argument(
+    info.add_argument(
+        "--print-monitors",
+        action="store_true",
+        help="dump monitor bounds + work_area + primary flag (Windows only)",
+    )
+    info.add_argument(
+        "--print-monitors-json",
+        action="store_true",
+        help="like --print-monitors but emit machine-readable JSON",
+    )
+
+    migration = p.add_argument_group(
+        "migration",
+        description="Backup + restore settings for cross-machine moves.",
+    )
+    migration.add_argument(
         "--export-config",
         metavar="PATH",
         default=None,
-        help=(
-            "snapshot the current %%APPDATA%%\\windows_rectangle\\config.json "
-            "to PATH and exit. Use for backups or moving settings to "
-            "another machine."
-        ),
+        help="snapshot the current config to PATH and exit",
     )
-    p.add_argument(
+    migration.add_argument(
         "--import-config",
         metavar="PATH",
         default=None,
-        help=(
-            "load settings from PATH and overwrite the current config, "
-            "then exit. Take effect on the next launch."
-        ),
-    )
-    p.add_argument(
-        "--print-monitors",
-        action="store_true",
-        help=(
-            "enumerate every monitor (bounds + work_area + primary flag) "
-            "and exit. Helps debug multi-monitor / DPI surprises."
-        ),
-    )
-    p.add_argument(
-        "--print-monitors-json",
-        action="store_true",
-        help="like --print-monitors but emit machine-readable JSON.",
+        help="load settings from PATH, persist to the user config, and exit",
     )
     return p.parse_args(argv)
 

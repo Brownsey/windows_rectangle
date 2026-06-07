@@ -50,6 +50,14 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
   pure `monitors_view` formatter (test-covered).
 
 ### Changed
+- `--help` output is reorganised into **runtime**, **informational**,
+  and **migration** argument groups with an examples epilog. The
+  argument set hasn't changed; only the rendering has.
+- `Build-Exe.ps1` runs `WindowsRectangle.exe --check-install` as the
+  final step so a missing-hidden-import in the bundle fails the build
+  loudly instead of waiting for a user to discover it at runtime.
+
+### Changed
 - Tray tooltip now appends ` • paused` when the user has clicked
   **Pause shortcuts**, so an `0/22 bound` count looks intentional
   instead of broken.

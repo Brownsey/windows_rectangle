@@ -146,6 +146,18 @@ Step "Done"
 Write-Host ("    {0}  ({1:N1} MB)" -f $exePath, $size) -ForegroundColor Green
 Write-Host "    Double-click to launch, or copy somewhere on PATH."
 
+Step "Self-check"
+# Quick smoke test: --check-install short-circuits before any tray /
+# hotkey wiring, so it's a cheap way to confirm the bundle imports
+# everything it should. A non-zero return is a hard error.
+$checkOutput = & $exePath --check-install 2>&1
+$checkRc = $LASTEXITCODE
+Write-Host ($checkOutput -join [Environment]::NewLine)
+if ($checkRc -ne 0) {
+    Write-Error "Self-check failed (exit $checkRc). The bundle is missing a required module."
+    exit $checkRc
+}
+
 if ($InstallStartMenuShortcut) {
     Step "Installing Start Menu shortcut"
     # Per-user Programs folder — no elevation needed; survives reboots and
