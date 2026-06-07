@@ -115,13 +115,22 @@ def _run_qt(ctx) -> int:
     app._tray = tray  # type: ignore[attr-defined]
     app._overlay = overlay  # type: ignore[attr-defined]
 
+    # Hoist the overlay show/hide closures so they aren't reallocated
+    # 60×/sec on the Qt timer. (drain_drag_preview already dedups so they
+    # rarely actually fire, but the lambda creation happens every tick.)
+    if overlay is not None:
+        def _on_show(rect) -> None:
+            overlay_show_for(overlay, rect)
+
+        def _on_hide() -> None:
+            overlay_hide(overlay)
+    else:
+        _on_show = _on_hide = None  # type: ignore[assignment]
+
     def _tick() -> None:
         ctx.drain_actions()
         if overlay is not None:
-            ctx.drain_drag_preview(
-                on_show=lambda rect: overlay_show_for(overlay, rect),
-                on_hide=lambda: overlay_hide(overlay),
-            )
+            ctx.drain_drag_preview(on_show=_on_show, on_hide=_on_hide)
         ctx.maintenance()  # rate-limited cycle/history prune (brief §5 #9)
 
     timer = QtCore.QTimer()
