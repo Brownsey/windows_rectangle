@@ -248,6 +248,24 @@ def test_import_from_bad_json_raises(store, tmp_path):
         store.import_from(bad)
 
 
+def test_load_corrupt_json_logs_warning(store, caplog):
+    """A user with a syntactically-broken config gets defaults back, but
+    also a log line with the path — otherwise the silent revert leaves
+    them wondering why their bindings are gone."""
+    import logging
+
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text("not { json }", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="windows_rectangle.adapters.json_config"):
+        settings = store.load()
+    assert settings == Settings()
+    # Path mentioned + the word "unreadable" make the line searchable in logs.
+    assert any(
+        str(store.path) in r.message and "unreadable" in r.message
+        for r in caplog.records
+    )
+
+
 def test_export_then_import_round_trips(store, tmp_path):
     """Lock in the migration contract: export from A, import to B,
     settings come back equal field-for-field."""

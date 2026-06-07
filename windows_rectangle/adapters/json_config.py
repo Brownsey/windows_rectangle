@@ -8,6 +8,7 @@ is a single helper so tests can inject any path.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from dataclasses import asdict
@@ -17,6 +18,8 @@ from ..core.actions import DEFAULT_SHORTCUTS, Action
 from ..ports.config_store import Settings
 
 SCHEMA_VERSION = 1
+
+_log = logging.getLogger(__name__)
 
 
 def default_config_path() -> Path:
@@ -44,9 +47,18 @@ class JsonConfigStore:
             return Settings()
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            # Corrupt or unreadable — fall back to defaults rather than crash.
-            # The composition root will log; we just return clean state.
+        except (OSError, json.JSONDecodeError) as e:
+            # Corrupt or unreadable: fall back to defaults rather than
+            # crash, but log a warning so the user sees *something*
+            # (otherwise a partially-zapped config silently reverts to
+            # defaults and the user is left wondering why their custom
+            # shortcuts didn't load). Hand-edit bugs are the most common
+            # cause; the log line gives the path to look at.
+            _log.warning(
+                "config at %s is unreadable, falling back to defaults: %s",
+                self.path,
+                e,
+            )
             return Settings()
         return _from_dict(raw)
 

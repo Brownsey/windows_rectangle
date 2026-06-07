@@ -204,6 +204,19 @@ removes the per-user Start-Menu shortcut, and removes the `HKCU\…\Run`
 The `.exe` and source tree are left in place — delete them by hand if
 you want them gone too.
 
+## Doctor — collect a support package for bug reports
+
+```powershell
+.\Doctor.ps1            # writes $env:TEMP\windows_rectangle_doctor.txt
+.\Doctor.ps1 -Show      # opens it in your default text editor
+```
+
+`Doctor.ps1` runs `--check-install`, `--print-monitors`, `--list-shortcuts`
+against either `dist\WindowsRectangle.exe` (preferred) or
+`python -m windows_rectangle`, plus the last 50 lines of
+`windows_rectangle.log` and your PowerShell + OS build info. Review for
+anything you'd rather not share before pasting into a bug report.
+
 ## Troubleshooting
 
 - **Tray icon doesn't appear.** Make sure your tray "Notification area"

@@ -49,6 +49,10 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
   unexpected on multi-monitor / mixed-DPI setups. Backed by the
   pure `monitors_view` formatter (test-covered).
 
+- **`Doctor.ps1`** — one-shot support-package collector. Runs the
+  bundled diagnostic flags + tails the log + records OS info into a
+  text file users can attach to a bug report. `-Show` opens it.
+
 ### Changed
 - `--help` output is reorganised into **runtime**, **informational**,
   and **migration** argument groups with an examples epilog. The
@@ -56,6 +60,10 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
 - `Build-Exe.ps1` runs `WindowsRectangle.exe --check-install` as the
   final step so a missing-hidden-import in the bundle fails the build
   loudly instead of waiting for a user to discover it at runtime.
+- `JsonConfigStore.load` now logs a warning (with the path + reason)
+  when the config JSON is unreadable, instead of silently falling back
+  to defaults. The user gets a searchable log line pointing at the
+  file to fix.
 
 ### Changed
 - Tray tooltip now appends ` • paused` when the user has clicked
