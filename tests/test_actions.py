@@ -97,6 +97,30 @@ def test_maximize_height_applies_top_bottom_gap():
     assert r.height == WORK.height - 20
 
 
+def test_almost_maximize_uses_default_scale():
+    """Without an override, almost_maximize uses the module-level
+    ALMOST_MAXIMIZE_SCALE (0.85)."""
+    r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK)
+    assert r.width == int(WORK.width * 0.85)
+    assert r.height == int(WORK.height * 0.85)
+
+
+def test_almost_maximize_honours_scale_override():
+    """When apply() is given almost_maximize_scale, it overrides the
+    module-level default — closes the brief-§2-#7 prefs-slider gap."""
+    r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK, almost_maximize_scale=0.5)
+    assert r.width == int(WORK.width * 0.5)
+    assert r.height == int(WORK.height * 0.5)
+
+
+def test_almost_maximize_scale_ignored_for_other_actions():
+    """Other geometry actions don't read almost_maximize_scale."""
+    r = apply(Action.LEFT_HALF, WIN, WORK, almost_maximize_scale=0.5)
+    # Left half of 1920×1040 = 960×1040 at origin.
+    assert r.width == 960
+    assert r.x == 0
+
+
 def test_almost_maximize_centered_and_smaller():
     r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK)
     assert r.width < WORK.width

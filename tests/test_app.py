@@ -72,6 +72,23 @@ def test_apply_settings_updates_gap_live(windows):
     assert ctx.dispatcher.gap == 20
 
 
+def test_build_threads_almost_maximize_scale_into_dispatcher(windows):
+    ctx = build(Settings(almost_maximize_scale=0.5), windows)
+    assert ctx.dispatcher.almost_maximize_scale == 0.5
+
+
+def test_apply_settings_updates_almost_maximize_scale(windows):
+    ctx = build(Settings(almost_maximize_scale=0.85), windows)
+    ctx.apply_settings(Settings(almost_maximize_scale=0.5))
+    assert ctx.dispatcher.almost_maximize_scale == 0.5
+    # And the next ALMOST_MAXIMIZE dispatch uses 0.5, not 0.85.
+    ctx.dispatcher.dispatch(Action.ALMOST_MAXIMIZE)
+    # Work area 1920×1040; 50% = 960×520.
+    r = windows.windows[101]
+    assert r.width == int(1920 * 0.5)
+    assert r.height == int(1040 * 0.5)
+
+
 def test_apply_settings_updates_cycle_timeout(windows):
     ctx = build(Settings(cycle_idle_timeout=1.0), windows)
     ctx.apply_settings(Settings(cycle_idle_timeout=5.5))

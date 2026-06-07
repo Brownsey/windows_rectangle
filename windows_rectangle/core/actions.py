@@ -152,10 +152,22 @@ def maximize_height(window: Rect, work_area: Rect, gap: int) -> Rect:
     return target.clamp_to(work_area)
 
 
-def almost_maximize(window: Rect, work_area: Rect, gap: int) -> Rect:
-    """A scaled-down maximize — Rectangle uses ~85% by default."""
-    w = int(work_area.width * ALMOST_MAXIMIZE_SCALE)
-    h = int(work_area.height * ALMOST_MAXIMIZE_SCALE)
+def almost_maximize(
+    window: Rect,
+    work_area: Rect,
+    gap: int,
+    *,
+    scale: float = ALMOST_MAXIMIZE_SCALE,
+) -> Rect:
+    """A scaled-down maximize — Rectangle uses ~85% by default.
+
+    `scale` overrides the default so the user-configurable
+    `Settings.almost_maximize_scale` actually takes effect (previously
+    the prefs slider was wired to nothing — the module-level constant
+    was always used).
+    """
+    w = int(work_area.width * scale)
+    h = int(work_area.height * scale)
     base = Rect(0, 0, w, h)
     return base.centered_in(work_area)
 
@@ -200,16 +212,29 @@ _HANDLERS: dict[Action, ActionFn] = {
 }
 
 
-def apply(action: Action, window: Rect, work_area: Rect, gap: int = 0) -> Rect:
+def apply(
+    action: Action,
+    window: Rect,
+    work_area: Rect,
+    gap: int = 0,
+    *,
+    almost_maximize_scale: float | None = None,
+) -> Rect:
     """Compute the target rect for `action` applied to `window` in `work_area`.
 
     Raises KeyError for actions that aren't pure geometry transforms
     (RESTORE, NEXT_DISPLAY, PREV_DISPLAY) — those are dispatcher-level.
+
+    `almost_maximize_scale` is honoured only for `Action.ALMOST_MAXIMIZE`;
+    other actions ignore it. Passed as a kwarg so we can keep the public
+    surface stable for callers that don't care.
     """
     try:
         handler = _HANDLERS[action]
     except KeyError as e:
         raise KeyError(f"{action} is not a pure geometry action") from e
+    if action is Action.ALMOST_MAXIMIZE and almost_maximize_scale is not None:
+        return almost_maximize(window, work_area, gap, scale=almost_maximize_scale)
     return handler(window, work_area, gap)
 
 

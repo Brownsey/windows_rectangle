@@ -95,6 +95,7 @@ class AppContext:
         # Cycle idle timeout is on the CycleState, not the Dispatcher.
         # The dispatcher uses whichever CycleState we gave it.
         self.dispatcher._cycle.idle_timeout = settings.cycle_idle_timeout
+        self.dispatcher.almost_maximize_scale = settings.almost_maximize_scale
         self.drag.gap = settings.gap
         if shortcuts_changed and self.hotkeys is not None:
             self.rebind_hotkeys()
@@ -337,6 +338,7 @@ def build(
         gap=settings.gap,
         cycle=cycle,
         history=History(),
+        almost_maximize_scale=settings.almost_maximize_scale,
     )
     # DragSession's monitor list is refreshed in begin_drag, so an empty
     # initial list is fine — we never poll it before start().

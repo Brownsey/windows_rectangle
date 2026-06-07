@@ -42,12 +42,17 @@ class Dispatcher:
         cycle: CycleState | None = None,
         history: History | None = None,
         record_history: bool = True,
+        almost_maximize_scale: float | None = None,
     ) -> None:
         self._windows = windows
         self._gap = gap
         self._cycle = cycle if cycle is not None else CycleState()
         self._history = history if history is not None else History()
         self._record = record_history
+        # None → use the module-level default. Settings-driven callers
+        # pass settings.almost_maximize_scale explicitly so the prefs
+        # slider takes effect at runtime.
+        self.almost_maximize_scale = almost_maximize_scale
 
     # ----- public API -----
 
@@ -94,7 +99,10 @@ class Dispatcher:
 
         effective = self._cycle.next_action(handle, action)
         before = self._windows.get_window_rect(handle)
-        target = apply(effective, before, monitor.work_area, self._gap)
+        target = apply(
+            effective, before, monitor.work_area, self._gap,
+            almost_maximize_scale=self.almost_maximize_scale,
+        )
 
         if Capability.RESIZE not in cap:
             # Move-only window (e.g. fixed-size dialog) — keep its size,
