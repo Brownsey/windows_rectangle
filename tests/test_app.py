@@ -349,6 +349,50 @@ def test_drain_drag_preview_hides_once_after_being_shown(windows):
     assert hidden == [True]
 
 
+def test_subscribe_settings_fires_on_apply(windows):
+    ctx = build(Settings(), windows)
+    seen: list = []
+    ctx.subscribe_settings(seen.append)
+    ctx.apply_settings(Settings(gap=42))
+    assert len(seen) == 1
+    assert seen[0].gap == 42
+
+
+def test_subscribe_settings_fires_after_state_is_wired(windows):
+    """Subscribers must observe a fully-applied AppContext — not a
+    half-mutated one — so e.g. the tooltip they paint matches dispatcher.gap."""
+    ctx = build(Settings(gap=0), windows)
+
+    seen_gap: list[int] = []
+
+    def sub(_settings):
+        # Reading dispatcher.gap (already mutated) at the time the
+        # subscriber fires; must equal the new value.
+        seen_gap.append(ctx.dispatcher.gap)
+
+    ctx.subscribe_settings(sub)
+    ctx.apply_settings(Settings(gap=15))
+    assert seen_gap == [15]
+
+
+def test_subscribe_settings_isolates_exceptions(windows):
+    """A buggy subscriber must not poison the next subscriber, nor crash
+    apply_settings."""
+    ctx = build(Settings(), windows)
+    a_called: list = []
+    c_called: list = []
+
+    def bad(_):
+        raise RuntimeError("boom")
+
+    ctx.subscribe_settings(a_called.append)
+    ctx.subscribe_settings(bad)
+    ctx.subscribe_settings(c_called.append)
+    ctx.apply_settings(Settings(gap=7))
+    assert len(a_called) == 1
+    assert len(c_called) == 1
+
+
 def test_maintenance_rate_limits_pruning(windows):
     """Two calls within prune_interval → second one is a noop and never
     walks the dicts."""

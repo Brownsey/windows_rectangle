@@ -79,6 +79,20 @@ def install(
     tc.icon = tray
     tc.menu = menu
     tc.actions = {"launch_at_login": launch, "preferences": prefs, "quit": quit_action}
+
+    # Keep the visible tray state in sync with prefs-driven changes —
+    # otherwise the tooltip + checkbox lag the actual Settings until
+    # the next app restart.
+    def _on_settings(settings) -> None:
+        try:
+            tray.setToolTip(f"Windows Rectangle {settings.gap}px gap")
+            launch.blockSignals(True)
+            launch.setChecked(bool(settings.launch_at_login))
+            launch.blockSignals(False)
+        except Exception:  # noqa: BLE001 — tray refresh failure is non-fatal
+            _log.debug("tray refresh failed", exc_info=True)
+
+    ctx.subscribe_settings(_on_settings)
     return tc
 
 

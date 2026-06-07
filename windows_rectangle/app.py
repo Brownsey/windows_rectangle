@@ -73,6 +73,13 @@ class AppContext:
     # 16ms would call IsWindow() across the whole history dict each tick.
     _last_prune: float = field(default=float("-inf"), init=False, repr=False)
     prune_interval: float = 60.0
+    # Subscribers invoked after apply_settings has fully wired the new
+    # state. Used by the tray to refresh tooltip + "launch at login"
+    # checkbox when the user changes prefs (and by anything else that
+    # caches a derived view of Settings).
+    _settings_subscribers: list[Callable[[Settings], None]] = field(
+        default_factory=list, init=False, repr=False
+    )
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -92,6 +99,23 @@ class AppContext:
         if shortcuts_changed and self.hotkeys is not None:
             self.rebind_hotkeys()
         self.sync_autostart()
+        # Notify subscribers AFTER everything has been wired through, so
+        # they observe a coherent state (and a subscriber's exception
+        # can't leave us half-applied).
+        for sub in self._settings_subscribers:
+            try:
+                sub(settings)
+            except Exception:  # noqa: BLE001
+                _log.exception("settings subscriber raised")
+
+    def subscribe_settings(self, callback: Callable[[Settings], None]) -> None:
+        """Register a callback invoked after every apply_settings.
+
+        The callback receives the new Settings and is expected to update
+        any derived UI state (tray tooltip, prefs preview, etc.). Errors
+        are caught and logged so a buggy subscriber can't poison the rest.
+        """
+        self._settings_subscribers.append(callback)
 
     def rebind_hotkeys(self) -> int:
         """Unregister every hotkey and re-register from `self.settings.shortcuts`.
