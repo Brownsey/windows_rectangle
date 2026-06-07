@@ -10,8 +10,9 @@ fake, as the tests demonstrate.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from .core.actionbus import ActionBus
 from .core.actions import Action
@@ -51,15 +52,15 @@ class AppContext:
     """
 
     settings: Settings
-    windows: "WindowManager"
+    windows: WindowManager
     dispatcher: Dispatcher
     drag: DragSession
     cleanup: CleanupRegistry = field(default_factory=CleanupRegistry)
-    hotkeys: "Hotkeys | None" = None
+    hotkeys: Hotkeys | None = None
     config_store: ConfigStore | None = None
-    autostart: "AutoStart | None" = None
+    autostart: AutoStart | None = None
     autostart_command_line: str | None = None
-    single_instance: "SingleInstance | None" = None
+    single_instance: SingleInstance | None = None
     bus: ActionBus = field(default_factory=ActionBus)
 
     def apply_settings(self, settings: Settings) -> None:
@@ -192,13 +193,13 @@ class AppContext:
 
 def build(
     settings: Settings,
-    windows: "WindowManager",
+    windows: WindowManager,
     *,
-    hotkeys: "Hotkeys | None" = None,
+    hotkeys: Hotkeys | None = None,
     config_store: ConfigStore | None = None,
-    autostart: "AutoStart | None" = None,
+    autostart: AutoStart | None = None,
     autostart_command_line: str | None = None,
-    single_instance: "SingleInstance | None" = None,
+    single_instance: SingleInstance | None = None,
     bus: ActionBus | None = None,
     cleanup: CleanupRegistry | None = None,
 ) -> AppContext:
@@ -209,11 +210,10 @@ def build(
     # Acquire the single-instance guard *before* constructing anything
     # expensive — if a second instance is detected we want to exit
     # without spinning up the dispatcher or hotkey threads.
-    if single_instance is not None:
-        if not single_instance.acquire():
-            raise SecondInstanceError(
-                "another instance is already running — exit and surface its tray icon"
-            )
+    if single_instance is not None and not single_instance.acquire():
+        raise SecondInstanceError(
+            "another instance is already running — exit and surface its tray icon"
+        )
 
     cycle = CycleState(idle_timeout=settings.cycle_idle_timeout)
     dispatcher = Dispatcher(
@@ -292,7 +292,7 @@ def bind_hotkeys_via_bus(ctx: AppContext,
 def bind_win32(
     *,
     command_line: str | None = None,
-    config_path: "str | None" = None,
+    config_path: str | None = None,
 ) -> AppContext:
     """Production wiring — all Win32 adapters in one call.
 

@@ -7,8 +7,8 @@ an injected callback to avoid stale entries (brief §5.9).
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
-from typing import Callable, Hashable
 
 from .geometry import Rect
 

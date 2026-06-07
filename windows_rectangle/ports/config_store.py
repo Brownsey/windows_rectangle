@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from ..core.actions import Action, DEFAULT_SHORTCUTS
+from ..core.actions import DEFAULT_SHORTCUTS, Action
 
 
 @dataclass(slots=True)

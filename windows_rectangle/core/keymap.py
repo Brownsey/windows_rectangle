@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from .shortcuts import Combo
 
-
 # --- Win32 RegisterHotKey modifier flags ---
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002

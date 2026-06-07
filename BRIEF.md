@@ -59,6 +59,8 @@ no Swift is copied.
 Pro-only / out of scope v1: Stage-manager features, "Todo mode", custom
 named layouts, cascade. Park as backlog.
 
+Note - all the shortcuts should be customisable when opening the app. It should be an .exe or quickly that once opened - all shortcuts can be configured. Then when running the app those shortcuts work, when app is closed the features are turned off.
+
 > Note: Windows already ships **Snap** (`Win+←/→`) and PowerToys **FancyZones**.
 > Differentiator = Rectangle's exact shortcut ergonomics, thirds/sixths,
 > repeat-cycling, undo, and macOS-style edge snapping with gaps.

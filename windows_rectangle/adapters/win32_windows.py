@@ -25,8 +25,7 @@ from ..core.geometry import Rect
 from ..ports.window_manager import MonitorInfo, WindowHandle
 
 if TYPE_CHECKING:
-    import ctypes
-    from ctypes import wintypes
+    pass
 
 
 _log = logging.getLogger(__name__)

@@ -22,18 +22,21 @@ callbacks. This keeps the controller importable without any adapters.
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from ..core.actions import Action
 from ..core.shortcuts import (
     ShortcutParseError,
-    conflicts as shortcut_conflicts,
     is_reserved,
+)
+from ..core.shortcuts import (
+    conflicts as shortcut_conflicts,
+)
+from ..core.shortcuts import (
     normalise as normalise_combo,
 )
 from ..ports.config_store import Settings
-
 
 # Gap is a single int in physical pixels. Negative gaps make no sense;
 # very large gaps just look silly — clamp at 256 (≈¼ of a 1080p height).

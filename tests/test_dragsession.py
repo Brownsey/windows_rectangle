@@ -6,7 +6,6 @@ from windows_rectangle.core.snap import SnapZone
 
 from .conftest import make_monitor
 
-
 M1 = make_monitor(1, 0, 0, 1920, 1080, primary=True)
 
 

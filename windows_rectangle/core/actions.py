@@ -6,10 +6,10 @@ the target rect for the given window inside the given monitor work area.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
-from typing import Callable
 
 from .geometry import Rect, apply_gap, fraction_rect, tile_edges
 
@@ -137,7 +137,8 @@ def _tile_handler(action: Action) -> ActionFn:
             work_area,
             left=spec.left, top=spec.top, right=spec.right, bottom=spec.bottom,
         )
-        return apply_gap(work_area, tile, tile_edges(spec.left, spec.top, spec.right, spec.bottom), gap)
+        edges = tile_edges(spec.left, spec.top, spec.right, spec.bottom)
+        return apply_gap(work_area, tile, edges, gap)
 
     return handler
 

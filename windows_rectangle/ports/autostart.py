@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Protocol
 
-
 # App-wide identifier used as the registry value name and the
 # CreateMutexW name (brief §6 single-instance guard).
 APP_ID = "WindowsRectangle"

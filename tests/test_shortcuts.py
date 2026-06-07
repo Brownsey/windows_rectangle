@@ -11,7 +11,6 @@ from windows_rectangle.core.shortcuts import (
     parse,
 )
 
-
 # ----- parse() --------------------------------------------------------
 
 def test_parse_simple():

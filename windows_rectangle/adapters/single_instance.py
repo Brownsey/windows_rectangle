@@ -12,7 +12,6 @@ import sys
 
 from ..ports.single_instance import DEFAULT_MUTEX_NAME
 
-
 _log = logging.getLogger(__name__)
 
 # Win32 error: the mutex already existed → another instance is running.
@@ -85,7 +84,9 @@ class WindowsMutexSingleInstance:
         self._handle = None
 
 
-def best_available(name: str = DEFAULT_MUTEX_NAME) -> "WindowsMutexSingleInstance | MemorySingleInstance":
+def best_available(
+    name: str = DEFAULT_MUTEX_NAME,
+) -> WindowsMutexSingleInstance | MemorySingleInstance:
     if sys.platform == "win32":
         return WindowsMutexSingleInstance(name)
     return MemorySingleInstance(name)

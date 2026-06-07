@@ -3,7 +3,6 @@
 from windows_rectangle.core.geometry import Rect
 from windows_rectangle.core.history import History
 
-
 R1 = Rect(0, 0, 100, 100)
 R2 = Rect(10, 10, 200, 200)
 R3 = Rect(20, 20, 300, 300)

@@ -10,7 +10,6 @@ from typing import Protocol
 
 from .autostart import APP_ID
 
-
 # Per-user named mutex — `Local\` prefix scopes to the user session so
 # multiple users can each run their own instance.
 DEFAULT_MUTEX_NAME = f"Local\\{APP_ID}.SingleInstance"

@@ -3,13 +3,12 @@
 import pytest
 
 from windows_rectangle.core.actions import (
-    Action,
     DEFAULT_SHORTCUTS,
+    Action,
     apply,
     is_geometry_action,
 )
 from windows_rectangle.core.geometry import Rect
-
 
 WORK = Rect(0, 0, 1920, 1080)
 WIN = Rect(100, 100, 800, 600)

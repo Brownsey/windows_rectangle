@@ -8,7 +8,6 @@ from windows_rectangle.core.borders import (
 )
 from windows_rectangle.core.geometry import Rect
 
-
 WINDOW_RECT = Rect(93, 100, 814, 607)
 EXTENDED = Rect(100, 100, 800, 600)
 

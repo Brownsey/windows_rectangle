@@ -14,11 +14,10 @@ from __future__ import annotations
 
 import logging
 import queue
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from .actions import Action
-
 
 _log = logging.getLogger(__name__)
 

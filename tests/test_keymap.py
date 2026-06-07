@@ -16,7 +16,6 @@ from windows_rectangle.core.keymap import (
 )
 from windows_rectangle.core.shortcuts import parse
 
-
 # ----- vkey_for -------------------------------------------------------
 
 @pytest.mark.parametrize("key,expected", [

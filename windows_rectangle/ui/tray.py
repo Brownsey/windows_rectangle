@@ -12,8 +12,9 @@ Menu items:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..app import AppContext
@@ -30,21 +31,24 @@ class TrayController:
     instance so the GC doesn't reap it under Qt's parent-tracking model.
     """
 
-    ctx: "AppContext"
+    ctx: AppContext
     icon: object | None = None
     menu: object | None = None
     actions: dict[str, object] | None = None
     on_open_preferences: Callable[[], None] | None = None
 
 
-def install(ctx: "AppContext", *, on_open_preferences: Callable[[], None] | None = None) -> TrayController:
+def install(
+    ctx: AppContext,
+    *,
+    on_open_preferences: Callable[[], None] | None = None,
+) -> TrayController:
     """Create + show the tray icon. Requires PySide6 + a running QApplication.
 
     Returns a `TrayController` holding strong refs to the Qt objects so
     they outlive this function's frame.
     """
     from PySide6 import QtGui, QtWidgets
-    from PySide6.QtCore import Qt
 
     tc = TrayController(ctx=ctx, on_open_preferences=on_open_preferences)
 
@@ -85,7 +89,7 @@ def _build_icon(QtGui):
     return QtGui.QIcon(pixmap)
 
 
-def _toggle_launch(ctx: "AppContext", checked: bool) -> None:
+def _toggle_launch(ctx: AppContext, checked: bool) -> None:
     ctx.settings.launch_at_login = bool(checked)
     ctx.sync_autostart()
     if ctx.config_store is not None:
@@ -95,7 +99,7 @@ def _toggle_launch(ctx: "AppContext", checked: bool) -> None:
             _log.exception("config save failed")
 
 
-def _quit(ctx: "AppContext") -> None:
+def _quit(ctx: AppContext) -> None:
     try:
         ctx.shutdown()
     finally:

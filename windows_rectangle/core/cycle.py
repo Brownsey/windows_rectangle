@@ -10,11 +10,10 @@ State is keyed by `(window_id, group)` so each window cycles independently.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
-from typing import Callable, Hashable
 
 from .actions import Action
-
 
 # Cycle groups: pressing any action in the list advances to the next member.
 CYCLE_GROUPS: list[tuple[Action, ...]] = [

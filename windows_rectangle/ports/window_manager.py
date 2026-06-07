@@ -6,12 +6,12 @@ Tests provide an in-memory fake.
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Hashable, Protocol
+from typing import Protocol
 
 from ..core.eligibility import WindowFlags
 from ..core.geometry import Rect
-
 
 # A handle that uniquely identifies a window. On Windows this is the HWND
 # (int); we keep it `Hashable` so tests/fakes can use anything.

@@ -6,9 +6,9 @@ work area (i.e. excluding the Windows taskbar).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Iterable
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +26,7 @@ class Rect:
     # ----- factories ---------------------------------------------------
 
     @classmethod
-    def from_ltrb(cls, left: int, top: int, right: int, bottom: int) -> "Rect":
+    def from_ltrb(cls, left: int, top: int, right: int, bottom: int) -> Rect:
         return cls(left, top, right - left, bottom - top)
 
     # ----- properties --------------------------------------------------
@@ -64,7 +64,7 @@ class Rect:
 
     # ----- structural helpers -----------------------------------------
 
-    def with_gap(self, gap: int) -> "Rect":
+    def with_gap(self, gap: int) -> Rect:
         """Inset all sides by `gap` pixels. A zero/negative gap is a no-op."""
         if gap <= 0:
             return self
@@ -75,7 +75,7 @@ class Rect:
             max(0, self.height - 2 * gap),
         )
 
-    def clamp_to(self, bounds: "Rect") -> "Rect":
+    def clamp_to(self, bounds: Rect) -> Rect:
         """Clip this rect so it lies entirely within `bounds`."""
         left = max(self.left, bounds.left)
         top = max(self.top, bounds.top)
@@ -85,7 +85,7 @@ class Rect:
             return Rect(bounds.x, bounds.y, 0, 0)
         return Rect.from_ltrb(left, top, right, bottom)
 
-    def scaled(self, factor: float) -> "Rect":
+    def scaled(self, factor: float) -> Rect:
         """Resize about the center by `factor`. Width/height clamped to >= 1."""
         new_w = max(1, int(round(self.width * factor)))
         new_h = max(1, int(round(self.height * factor)))
@@ -93,7 +93,7 @@ class Rect:
         new_y = self.center_y - new_h // 2
         return Rect(new_x, new_y, new_w, new_h)
 
-    def centered_in(self, bounds: "Rect") -> "Rect":
+    def centered_in(self, bounds: Rect) -> Rect:
         """Move (without resizing) so this rect is centered inside `bounds`."""
         x = bounds.x + (bounds.width - self.width) // 2
         y = bounds.y + (bounds.height - self.height) // 2

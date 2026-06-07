@@ -10,15 +10,14 @@ The adapter does the mouse hook + overlay; we just compute.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Sequence
 
 from ..ports.window_manager import MonitorInfo
+from . import monitors as monitors_mod
 from .actions import Action, apply
 from .geometry import Rect
-from . import monitors as monitors_mod
-
 
 # Hot-zone thickness in pixels. Rectangle uses ~30px on macOS; Windows
 # users running at 1080p won't notice 24px any less.

@@ -30,6 +30,16 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+# UP042 (StrEnum migration): switching `class X(str, Enum)` to StrEnum
+# changes `str(X.MEMBER)` semantics — purely cosmetic to migrate; not
+# worth the behaviour audit.
+# E741 ambiguous-name on a 4-tuple unpack is fine.
+ignore = ["UP042", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are allowed long expressive lines and the occasional dead var
+# captured for assertion clarity.
+"tests/*" = ["E501", "F841"]
 
 [tool.mypy]
 python_version = "3.11"

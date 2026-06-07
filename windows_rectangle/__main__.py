@@ -17,7 +17,6 @@ import time
 from . import __version__
 from .app import SecondInstanceError, bind_win32
 
-
 _log = logging.getLogger("windows_rectangle")
 
 
@@ -60,12 +59,12 @@ def _run_headless(ctx) -> int:
         nonlocal stop
         stop = True
 
+    import contextlib
+
     signal.signal(signal.SIGINT, _on_sig)
     if hasattr(signal, "SIGTERM"):
-        try:
-            signal.signal(signal.SIGTERM, _on_sig)
-        except ValueError:
-            pass  # not main thread
+        with contextlib.suppress(ValueError):
+            signal.signal(signal.SIGTERM, _on_sig)  # ValueError off main thread
 
     _log.info("running headless — Ctrl+C to exit")
     while not stop:
@@ -83,7 +82,8 @@ def _run_qt(ctx) -> int:
     """
     from PySide6 import QtCore, QtWidgets
 
-    from .ui.overlay import OverlayController, hide as overlay_hide
+    from .ui.overlay import OverlayController
+    from .ui.overlay import hide as overlay_hide
     from .ui.overlay import install as install_overlay
     from .ui.overlay import show_for as overlay_show_for
     from .ui.tray import install as install_tray

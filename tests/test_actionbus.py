@@ -2,8 +2,8 @@
 
 import threading
 
-from windows_rectangle.core.actions import Action
 from windows_rectangle.core.actionbus import ActionBus
+from windows_rectangle.core.actions import Action
 
 
 def test_submit_and_drain_roundtrip():

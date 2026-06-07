@@ -11,9 +11,8 @@ crash still unwinds.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Callable, Iterator
-
 
 _log = logging.getLogger(__name__)
 
@@ -59,10 +58,15 @@ class CleanupRegistry:
             count += 1
         return count
 
-    def __enter__(self) -> "CleanupRegistry":
+    def __enter__(self) -> CleanupRegistry:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object,
+    ) -> None:
         # Always unwind, even on exception.
         self.run()
 

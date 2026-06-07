@@ -9,7 +9,7 @@ from windows_rectangle.adapters.json_config import (
     JsonConfigStore,
     default_config_path,
 )
-from windows_rectangle.core.actions import Action, DEFAULT_SHORTCUTS
+from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.ports.config_store import Settings
 
 

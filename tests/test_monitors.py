@@ -5,7 +5,6 @@ from windows_rectangle.core.geometry import Rect
 
 from .conftest import make_monitor
 
-
 M1 = make_monitor(1, 0, 0, 1920, 1080, primary=True)
 M2 = make_monitor(2, 1920, 0, 1920, 1080)
 M3 = make_monitor(3, -1920, 100, 1920, 1080)

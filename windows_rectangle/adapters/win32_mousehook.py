@@ -18,8 +18,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-from typing import Callable
-
+from collections.abc import Callable
 
 _log = logging.getLogger(__name__)
 

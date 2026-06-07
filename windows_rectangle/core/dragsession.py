@@ -21,14 +21,13 @@ Usage (from adapters):
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Sequence
 
 from ..ports.window_manager import MonitorInfo
 from .geometry import Rect
 from .snap import SnapHit, SnapZone, find_snap
 from .throttle import LatestValue, Throttle
-
 
 # 16ms ≈ 60 Hz — matches typical Win32 mouse-move event cadence and Qt
 # repaint rate. Anything faster is wasted compute.

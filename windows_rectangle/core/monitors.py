@@ -6,7 +6,7 @@ functions to pick which monitor a window should move to.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from ..ports.window_manager import MonitorInfo
 from .geometry import Rect, apply_relative_position, relative_position

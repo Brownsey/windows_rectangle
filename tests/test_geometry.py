@@ -15,7 +15,6 @@ from windows_rectangle.core.geometry import (
     union,
 )
 
-
 WORK = Rect(0, 0, 1920, 1080)
 
 

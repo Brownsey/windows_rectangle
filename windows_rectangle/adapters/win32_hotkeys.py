@@ -17,12 +17,10 @@ import logging
 import queue
 import sys
 import threading
-from typing import Callable
 
 from ..core.keymap import UnsupportedKeyError, translate
 from ..core.shortcuts import ShortcutParseError, parse
 from ..ports.hotkeys import HotkeyCallback, HotkeyRegistrationError
-
 
 _log = logging.getLogger(__name__)
 

@@ -1,23 +1,21 @@
 """Tests for windows_rectangle.app composition root."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import pytest
 
 from windows_rectangle.app import (
-    AppContext,
     SecondInstanceError,
     bind_hotkeys,
     bind_hotkeys_via_bus,
     build,
 )
-from windows_rectangle.core.actions import Action, DEFAULT_SHORTCUTS
+from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.core.cleanup import CleanupRegistry
 from windows_rectangle.core.geometry import Rect
 from windows_rectangle.ports.config_store import Settings
 
 from .conftest import FakeWindowManager, make_monitor
-
 
 M1 = make_monitor(1, 0, 0, 1920, 1080, primary=True)
 

@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 
 from ..ports.autostart import APP_ID, RUN_KEY_PATH
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -85,7 +84,7 @@ class WinregAutoStart:
             return  # Already absent — desired state.
 
 
-def best_available() -> "WinregAutoStart | MemoryAutoStart":
+def best_available() -> WinregAutoStart | MemoryAutoStart:
     """Pick `WinregAutoStart` on Windows, `MemoryAutoStart` everywhere else."""
     if sys.platform == "win32":
         return WinregAutoStart()

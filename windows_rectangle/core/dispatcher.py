@@ -7,8 +7,8 @@ Wires `actions`, `cycle`, `history`, `monitors` together against the
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from ..ports.window_manager import WindowManager
 from . import monitors as monitors_mod

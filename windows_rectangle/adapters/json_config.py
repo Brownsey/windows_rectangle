@@ -13,9 +13,8 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
-from ..core.actions import Action, DEFAULT_SHORTCUTS
+from ..core.actions import DEFAULT_SHORTCUTS, Action
 from ..ports.config_store import Settings
-
 
 SCHEMA_VERSION = 1
 
@@ -52,11 +51,13 @@ class JsonConfigStore:
         return _from_dict(raw)
 
     def save(self, settings: Settings) -> None:
+        import contextlib
+
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = _to_dict(settings)
         # Atomic write: temp file in the same directory, then rename.
         # Same-directory rename is atomic on Windows + POSIX.
-        tmp = tempfile.NamedTemporaryFile(
+        tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 -- delete=False is correct here
             mode="w",
             encoding="utf-8",
             dir=str(self.path.parent),
@@ -71,10 +72,8 @@ class JsonConfigStore:
             tmp.close()
             os.replace(tmp.name, self.path)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp.name)
-            except OSError:
-                pass
             raise
 
 
@@ -108,5 +107,7 @@ def _from_dict(raw: dict) -> Settings:
         launch_at_login=bool(raw.get("launch_at_login", defaults.launch_at_login)),
         cycle_idle_timeout=float(raw.get("cycle_idle_timeout", defaults.cycle_idle_timeout)),
         drag_to_edge_enabled=bool(raw.get("drag_to_edge_enabled", defaults.drag_to_edge_enabled)),
-        almost_maximize_scale=float(raw.get("almost_maximize_scale", defaults.almost_maximize_scale)),
+        almost_maximize_scale=float(
+            raw.get("almost_maximize_scale", defaults.almost_maximize_scale)
+        ),
     )

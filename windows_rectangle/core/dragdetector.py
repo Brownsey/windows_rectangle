@@ -26,10 +26,9 @@ the adapter own that (they look up the active window for begin, etc.).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable
-
 
 # Squared-distance threshold. 5 pixels² ≈ a click-and-release-with-jitter
 # noise floor on a 1080p display. Tuned conservatively — Rectangle uses a
