@@ -142,11 +142,11 @@ def test_next_display_preserves_relative_position(fake_wm):
 def test_next_display_single_monitor_no_op(fake_wm):
     fake_wm.monitors = [M1]
     d = Dispatcher(fake_wm)
-    r = dispatcher_before = fake_wm.windows[101]
+    before = fake_wm.windows[101]
     result = d.dispatch(Action.NEXT_DISPLAY)
     assert not result.moved
     assert result.reason == "single_monitor"
-    assert fake_wm.windows[101] == r
+    assert fake_wm.windows[101] == before
 
 
 def test_prev_display_wraps(fake_wm):
