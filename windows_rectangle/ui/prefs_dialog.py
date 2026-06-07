@@ -171,13 +171,35 @@ def build_dialog(pc: PrefsController):
     buttons.accepted.connect(dlg.accept)
     buttons.rejected.connect(dlg.reject)
 
+    # "Reset shortcuts" wipes staged shortcuts back to DEFAULT_SHORTCUTS
+    # then repaints the table from `pc.staged.shortcuts`. We toggle the
+    # itemChanged signal off while re-populating so the change-callback
+    # doesn't fire 22× and re-stage what we just reset.
+    reset_btn = QtWidgets.QPushButton("Reset shortcuts to defaults")
+
+    def on_reset_shortcuts():
+        pc.reset_shortcuts_to_defaults()
+        shortcuts_table.blockSignals(True)
+        try:
+            for row, action in enumerate(actions_list):
+                combo = pc.staged.shortcuts.get(action, "")
+                # Replace text rather than the QTableWidgetItem object
+                # so any UI styling the user/Qt applied is preserved.
+                shortcuts_table.item(row, 1).setText(combo)
+        finally:
+            shortcuts_table.blockSignals(False)
+        refresh_validation()
+
+    reset_btn.clicked.connect(on_reset_shortcuts)
+
     shortcuts_group = QtWidgets.QGroupBox("Shortcuts")
     sg_layout = QtWidgets.QVBoxLayout(shortcuts_group)
     sg_layout.addWidget(shortcuts_table)
+    sg_layout.addWidget(reset_btn, alignment=QtCore.Qt.AlignRight)
     root.addWidget(shortcuts_group)
     root.addWidget(validation)
     root.addWidget(buttons)
 
     refresh_validation()
-    dlg.resize(560, 540)
+    dlg.resize(560, 580)
     return dlg

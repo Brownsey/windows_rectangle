@@ -5,6 +5,7 @@ even on systems without Qt. Tests don't need a display to load this file.
 
 Menu items:
     Launch at login          ← checkable, toggles ctx.settings.launch_at_login
+    Pause shortcuts          ← checkable, unregisters/re-registers all hotkeys
     Preferences…             ← opens the rebind-shortcuts dialog
     Cheat sheet…             ← read-only popup listing every action + combo
     Binding status…          ← X of Y bound; details of any failed combos
@@ -70,6 +71,11 @@ def install(
     launch.toggled.connect(lambda checked: _toggle_launch(ctx, checked))
     menu.addAction(launch)
 
+    pause = QtGui.QAction("Pause shortcuts", menu, checkable=True)
+    pause.setChecked(bool(getattr(ctx, "paused", False)))
+    pause.toggled.connect(lambda checked: _toggle_pause(ctx, checked))
+    menu.addAction(pause)
+
     prefs = QtGui.QAction("Preferences…", menu)
     prefs.triggered.connect(lambda: (on_open_preferences or _noop)())
     menu.addAction(prefs)
@@ -107,6 +113,7 @@ def install(
     tc.menu = menu
     tc.actions = {
         "launch_at_login": launch,
+        "pause": pause,
         "preferences": prefs,
         "cheat_sheet": cheat,
         "binding_status": binding_status,
@@ -125,6 +132,9 @@ def install(
             launch.blockSignals(True)
             launch.setChecked(bool(ctx.settings.launch_at_login))
             launch.blockSignals(False)
+            pause.blockSignals(True)
+            pause.setChecked(bool(getattr(ctx, "paused", False)))
+            pause.blockSignals(False)
         except Exception:  # noqa: BLE001 — tray refresh failure is non-fatal
             _log.debug("tray refresh failed", exc_info=True)
 
@@ -175,6 +185,18 @@ def _build_icon(QtGui):
     finally:
         painter.end()
     return QtGui.QIcon(pixmap)
+
+
+def _toggle_pause(ctx: AppContext, checked: bool) -> None:
+    """Tray "Pause shortcuts" handler. Errors are caught + logged — a
+    failure to flip the OS-level registration must not crash the tray."""
+    try:
+        if checked:
+            ctx.pause_hotkeys()
+        else:
+            ctx.resume_hotkeys()
+    except Exception:  # noqa: BLE001
+        _log.exception("pause/resume toggle failed")
 
 
 def _toggle_launch(ctx: AppContext, checked: bool) -> None:

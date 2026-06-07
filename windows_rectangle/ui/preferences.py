@@ -234,6 +234,25 @@ class PrefsController:
         """Throw away staged changes and start fresh from baseline."""
         self.staged = self._snapshot(self.baseline)
 
+    def reset_shortcuts_to_defaults(self) -> None:
+        """Replace staged shortcuts with `DEFAULT_SHORTCUTS`.
+
+        Useful for the dialog's "Reset shortcuts" button: a user who's
+        rebound several actions and now wants the macOS-Rectangle
+        defaults back doesn't have to retype each combo.
+
+        Leaves non-shortcut fields (gap, drag-to-edge, etc.) untouched —
+        users typically want to keep their gap setting even when
+        nuking shortcut customisations.
+        """
+        # Import here so the controller module stays Settings-only at
+        # module-load time (matches the lazy-Qt pattern elsewhere).
+        from ..core.actions import DEFAULT_SHORTCUTS
+
+        # Copy DEFAULT_SHORTCUTS so the user's subsequent edits don't
+        # pollute the module-level constant.
+        self.staged.shortcuts = dict(DEFAULT_SHORTCUTS)
+
     # ----- internals --------------------------------------------------
 
     @staticmethod

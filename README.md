@@ -29,6 +29,9 @@ You have two ways to run Windows Rectangle:
 4. Right-click the tray icon → **Preferences…** to rebind shortcuts,
    change the gap, enable launch-at-login, etc.
 5. Other tray menu items:
+   - **Pause shortcuts** — checkable. Unregisters every hotkey at the OS
+     level so other apps (full-screen games, RDP sessions) get the keys
+     back. Uncheck to resume. Settings are kept; no reload required.
    - **Cheat sheet…** — at-a-glance list of every action and its current combo.
    - **Binding status…** — shows "X of Y shortcuts bound" plus the specific
      combos and error messages for any failures (e.g. another app already
@@ -37,7 +40,9 @@ You have two ways to run Windows Rectangle:
    - **Open config folder…** — jumps to `%APPDATA%\windows_rectangle\` in
      Explorer (created if missing).
    - **About…** — version + license.
-6. Right-click the tray icon → **Quit** to fully stop the app (all
+6. Preferences dialog has a **Reset shortcuts to defaults** button under
+   the shortcuts table — handy after experimenting with custom combos.
+7. Right-click the tray icon → **Quit** to fully stop the app (all
    shortcuts and the mouse hook are released).
 
 Windows SmartScreen may warn the first time you run an unsigned `.exe` —

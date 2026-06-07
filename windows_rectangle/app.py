@@ -144,6 +144,13 @@ class AppContext:
     # toggle; without this guard each install would push a duplicate
     # cleanup handler.
     _mousehook_cleanup_registered: bool = field(default=False, init=False, repr=False)
+    # User-driven pause flag for the global hotkey set. When True we
+    # unregister every combo but keep the Settings/Dispatcher state
+    # intact so the next `resume_hotkeys()` re-registers without
+    # touching `Settings.shortcuts`. Used by the tray "Pause shortcuts"
+    # toggle so a user can free up the keymap during full-screen apps
+    # without losing their bindings.
+    paused: bool = field(default=False, init=False, repr=False)
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -182,6 +189,63 @@ class AppContext:
         for sub in self._settings_subscribers:
             try:
                 sub(settings)
+            except Exception:  # noqa: BLE001
+                _log.exception("settings subscriber raised")
+
+    def pause_hotkeys(self) -> bool:
+        """Unregister every hotkey but keep Settings/bindings intact.
+
+        Returns True iff the pause took effect (i.e. there was a hotkeys
+        adapter to unregister against and we weren't already paused).
+        Idempotent: a second call while paused is a no-op.
+
+        Notify subscribers so the tray's "Pause shortcuts" checkbox
+        stays in sync with the truth.
+        """
+        if self.hotkeys is None or self.paused:
+            return False
+        try:
+            self.hotkeys.unregister_all()
+        except Exception:  # noqa: BLE001
+            _log.exception("pause_hotkeys: unregister_all raised")
+            return False
+        self.paused = True
+        # Report becomes a synthetic "0 of N bound" so the tray tooltip
+        # reflects the paused state. We carry the previously-bound
+        # entries into `failed` with the pause reason so the
+        # "Binding status…" dialog can still hint at what would
+        # re-register on resume.
+        prev = self.last_binding_report
+        if prev.total > 0:
+            self.last_binding_report = BindingReport(
+                bound=(),
+                failed=tuple((a, c, "paused") for a, c in prev.bound) +
+                       tuple((a, c, e) for a, c, e in prev.failed),
+            )
+        self._notify_settings_subscribers()
+        return True
+
+    def resume_hotkeys(self) -> bool:
+        """Re-register every hotkey from the current Settings.
+
+        Returns True iff we transitioned from paused → running. The
+        re-registration goes through the ActionBus path so callbacks
+        still don't run on the pump thread.
+        """
+        if self.hotkeys is None or not self.paused:
+            return False
+        self.paused = False
+        bind_hotkeys_via_bus(self, self.hotkeys.register)
+        self._notify_settings_subscribers()
+        return True
+
+    def _notify_settings_subscribers(self) -> None:
+        """Push the current Settings to every subscriber. Used by the
+        pause/resume helpers so the tray refreshes its tooltip + check
+        states without us having to round-trip through apply_settings."""
+        for sub in self._settings_subscribers:
+            try:
+                sub(self.settings)
             except Exception:  # noqa: BLE001
                 _log.exception("settings subscriber raised")
 
