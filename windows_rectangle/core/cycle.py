@@ -75,12 +75,30 @@ class CycleState:
         return group[new_index]
 
     def evict(self, window_id: Hashable) -> None:
-        """Drop all cycle state for the given window (used when HWND closes)."""
-        self._entries = {k: v for k, v in self._entries.items() if k[0] != window_id}
+        """Drop all cycle state for the given window (used when HWND closes).
+
+        O(len(CYCLE_GROUPS)) rather than O(len(self._entries)) — we know
+        which (window_id, group) keys could exist for this window without
+        scanning the whole dict.
+        """
+        for group in CYCLE_GROUPS:
+            self._entries.pop((window_id, group), None)
 
     def prune_stale(self, is_alive: Callable[[Hashable], bool]) -> int:
-        """Drop entries whose window_id no longer passes `is_alive(id)`. Returns count dropped."""
-        dead = {k for k in self._entries if not is_alive(k[0])}
+        """Drop entries whose window_id no longer passes `is_alive(id)`. Returns count dropped.
+
+        Memoizes `is_alive(window_id)` across the scan — each window has
+        up to len(CYCLE_GROUPS) entries, so without memoization we'd
+        issue ~5× more IsWindow syscalls than necessary.
+        """
+        alive_cache: dict[Hashable, bool] = {}
+
+        def _alive(wid: Hashable) -> bool:
+            if wid not in alive_cache:
+                alive_cache[wid] = is_alive(wid)
+            return alive_cache[wid]
+
+        dead = {k for k in self._entries if not _alive(k[0])}
         for k in dead:
             del self._entries[k]
         return len(dead)
