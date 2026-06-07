@@ -75,9 +75,17 @@ def _run_headless(ctx) -> int:
 
 
 def _run_qt(ctx) -> int:
-    """Qt loop with a 16ms QTimer that drains the ActionBus on the GUI thread."""
+    """Qt loop with a 16ms QTimer that drains the ActionBus + drag preview.
+
+    Single Qt event loop, single drain timer (brief §5 #8 "competing event
+    loops"). The mouse hook + hotkey pump each have their own daemon
+    Win32 message loops; both marshal back here via ActionBus/LatestValue.
+    """
     from PySide6 import QtCore, QtWidgets
 
+    from .ui.overlay import OverlayController, hide as overlay_hide
+    from .ui.overlay import install as install_overlay
+    from .ui.overlay import show_for as overlay_show_for
     from .ui.tray import install as install_tray
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -85,12 +93,29 @@ def _run_qt(ctx) -> int:
     # QApplication.quit() which unwinds the event loop.
     tray = install_tray(ctx)
     _log.info("tray installed")
-    # Keep a strong reference on the QApplication so it lives as long as the loop.
+    # Snap-preview overlay (frameless translucent click-through, brief §3).
+    overlay: OverlayController | None = None
+    try:
+        overlay = install_overlay()
+        _log.info("snap-preview overlay installed")
+    except Exception:  # noqa: BLE001 — overlay is non-essential
+        _log.warning("snap-preview overlay install failed", exc_info=True)
+
+    # Keep strong refs on the QApplication so they live as long as the loop.
     app._tray = tray  # type: ignore[attr-defined]
+    app._overlay = overlay  # type: ignore[attr-defined]
+
+    def _tick() -> None:
+        ctx.drain_actions()
+        if overlay is not None:
+            ctx.drain_drag_preview(
+                on_show=lambda rect: overlay_show_for(overlay, rect),
+                on_hide=lambda: overlay_hide(overlay),
+            )
 
     timer = QtCore.QTimer()
     timer.setInterval(16)  # ~60 Hz; brief §5 #7 mouse-snap throttle target
-    timer.timeout.connect(ctx.drain_actions)
+    timer.timeout.connect(_tick)
     timer.start()
     rc = app.exec()
     timer.stop()

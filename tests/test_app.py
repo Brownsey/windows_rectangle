@@ -207,6 +207,51 @@ def test_begin_drag_for_active_window_returns_false_when_no_active(windows):
     assert not ctx.drag.active
 
 
+def test_drain_drag_preview_inactive_session_hides_only(windows):
+    ctx = build(Settings(), windows)
+    shown: list = []
+    hidden: list = []
+    visible = ctx.drain_drag_preview(
+        on_show=lambda r: shown.append(r),
+        on_hide=lambda: hidden.append(True),
+    )
+    assert visible is False
+    assert shown == []
+    assert hidden == [True]
+
+
+def test_drain_drag_preview_active_no_hit_hides(windows):
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    # No coords pushed yet → poll returns None.
+    shown: list = []
+    hidden: list = []
+    visible = ctx.drain_drag_preview(
+        on_show=lambda r: shown.append(r),
+        on_hide=lambda: hidden.append(True),
+    )
+    assert visible is False
+    assert shown == []
+    assert hidden == [True]
+
+
+def test_drain_drag_preview_active_with_hit_shows(windows):
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    ctx.drag_update(2, 540)              # left edge
+    ctx.drag._throttle.reset()           # allow poll
+    shown: list = []
+    hidden: list = []
+    visible = ctx.drain_drag_preview(
+        on_show=lambda r: shown.append(r),
+        on_hide=lambda: hidden.append(True),
+    )
+    assert visible is True
+    assert hidden == []
+    assert len(shown) == 1
+    assert shown[0] == Rect(0, 0, 960, 1040)
+
+
 def test_begin_drag_for_active_window_handles_rect_lookup_failure():
     """If the adapter raises looking up the window rect (e.g. window
     closed between get_active_window and get_window_rect), we treat it

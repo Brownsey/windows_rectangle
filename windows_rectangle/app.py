@@ -156,6 +156,35 @@ class AppContext:
         """
         return self.bus.drain(self.dispatcher.dispatch)
 
+    # ----- Drag-preview pump (brief §2 #13) --------------------------
+
+    def drain_drag_preview(
+        self,
+        on_show: Callable[[Rect], None],
+        on_hide: Callable[[], None],
+    ) -> bool:
+        """Drive the overlay from the current drag-session state.
+
+        Called by the Qt main thread on the same timer as drain_actions.
+        Polls the session for a snap hit; if one is current shows the
+        overlay at the target rect, otherwise hides it. Returns True iff
+        the overlay should be visible after this call — useful for tests
+        and for the caller to short-circuit redundant Qt redraws.
+
+        Hot-path safety: when no drag session is active, this returns
+        immediately without allocating or polling — the timer ticks 60×/s
+        most of the time idle, so the no-op path matters.
+        """
+        if not self.drag.active:
+            on_hide()
+            return False
+        hit = self.drag.poll()
+        if hit is not None and hit.target is not None:
+            on_show(hit.target)
+            return True
+        on_hide()
+        return False
+
     def shutdown(self) -> int:
         """Run every registered cleanup (brief §5 #11). Returns count."""
         return self.cleanup.run()
