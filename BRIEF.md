@@ -273,5 +273,20 @@ verify on real windows for adapters.
   per-phase effort estimates (~10–13 days total); move-to-display preserves
   relative fraction. Remaining candidate edits are padding, not improvement —
   **brief is converged; loop stopped.**
+- **v5** — Post-converge user-experience pass (brief is a spec; the app
+  still needed packaging + onboarding):
+  (a) `README.md` separates user docs from this technical brief;
+  (b) `Build-Exe.ps1`/`.bat` produce `dist\WindowsRectangle.exe` in one
+  shot — auto-installs PyInstaller / PySide6 / pywin32 if missing; the
+  PS variant supports `-InstallStartMenuShortcut` for per-user Start
+  Menu entry;
+  (c) `Run-Dev.ps1`/`.bat` are the from-source fast path for
+  contributors;
+  (d) tray gains Cheat sheet…, About…, **Reload config from disk**,
+  **Open config folder…** entries; programmatic 4-pane blue icon
+  replaces the white-square placeholder; first-run welcome balloon
+  fires when `bind_win32` detects no existing config file;
+  (e) `AppContext` exposes `first_run`, `reload_config()`, and
+  `config_folder()` so tray + tests share a single source of truth.
 </content>
 </invoke>

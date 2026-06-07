@@ -28,7 +28,13 @@ You have two ways to run Windows Rectangle:
    notification area (small blue tile with a 2×2 grid — right-click it).
 4. Right-click the tray icon → **Preferences…** to rebind shortcuts,
    change the gap, enable launch-at-login, etc.
-5. Right-click the tray icon → **Quit** to fully stop the app (all
+5. Other tray menu items:
+   - **Cheat sheet…** — at-a-glance list of every action and its current combo.
+   - **Reload config from disk** — re-reads the JSON after you hand-edit it.
+   - **Open config folder…** — jumps to `%APPDATA%\windows_rectangle\` in
+     Explorer (created if missing).
+   - **About…** — version + license.
+6. Right-click the tray icon → **Quit** to fully stop the app (all
    shortcuts and the mouse hook are released).
 
 Windows SmartScreen may warn the first time you run an unsigned `.exe` —

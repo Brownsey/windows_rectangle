@@ -141,6 +141,45 @@ class AppContext:
             except Exception:  # noqa: BLE001
                 _log.exception("settings subscriber raised")
 
+    def reload_config(self) -> bool:
+        """Re-read Settings from the ConfigStore and apply them.
+
+        Useful when the user hand-edits `%APPDATA%\\windows_rectangle\\
+        config.json` while the app is running. No-op (returns False) if
+        no config_store is wired. Returns True on a successful load+
+        apply; False on either a missing store or a load error (errors
+        are logged — never raised at the caller, which is usually a
+        tray click handler).
+        """
+        if self.config_store is None:
+            return False
+        try:
+            new_settings = self.config_store.load()
+        except Exception:  # noqa: BLE001 — surface as toast in UI, not crash
+            _log.exception("reload_config: load failed")
+            return False
+        self.apply_settings(new_settings)
+        return True
+
+    def config_folder(self) -> str | None:
+        """Filesystem directory holding the config file, or None if no
+        store is wired. Used by tray's "Open config folder…" so the
+        user can hand-edit JSON / back up / share the file. Doesn't
+        touch the disk — pure derivation from the store's path.
+        """
+        if self.config_store is None:
+            return None
+        # JsonConfigStore exposes `.path`; we don't import it here to
+        # avoid an adapter dep — the duck-typed read keeps the AppContext
+        # core/ports-only.
+        path = getattr(self.config_store, "path", None)
+        if path is None:
+            return None
+        try:
+            return str(path.parent)
+        except AttributeError:
+            return None
+
     def subscribe_settings(self, callback: Callable[[Settings], None]) -> None:
         """Register a callback invoked after every apply_settings.
 

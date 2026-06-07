@@ -4,11 +4,13 @@ Lazy-imports PySide6 inside `install(...)` so the module is import-clean
 even on systems without Qt. Tests don't need a display to load this file.
 
 Menu items:
-    Launch at login       ← checkable, toggles ctx.settings.launch_at_login
-    Preferences…          ← opens the rebind-shortcuts dialog
-    Cheat sheet…          ← read-only popup listing every action + combo
-    About…                ← version + project link
-    Quit                  ← runs ctx.shutdown() + QApplication.quit()
+    Launch at login          ← checkable, toggles ctx.settings.launch_at_login
+    Preferences…             ← opens the rebind-shortcuts dialog
+    Cheat sheet…             ← read-only popup listing every action + combo
+    Reload config from disk  ← re-reads JSON config (handy for power users)
+    Open config folder…      ← opens %APPDATA%\\windows_rectangle in Explorer
+    About…                   ← version + project link
+    Quit                     ← runs ctx.shutdown() + QApplication.quit()
 """
 
 from __future__ import annotations
@@ -75,6 +77,14 @@ def install(
     cheat.triggered.connect(lambda: _show_cheat_sheet(ctx))
     menu.addAction(cheat)
 
+    reload_action = QtGui.QAction("Reload config from disk", menu)
+    reload_action.triggered.connect(lambda: _reload_config(ctx, tray))
+    menu.addAction(reload_action)
+
+    open_folder = QtGui.QAction("Open config folder…", menu)
+    open_folder.triggered.connect(lambda: _open_config_folder(ctx, tray))
+    menu.addAction(open_folder)
+
     about = QtGui.QAction("About…", menu)
     about.triggered.connect(_show_about)
     menu.addAction(about)
@@ -94,6 +104,8 @@ def install(
         "launch_at_login": launch,
         "preferences": prefs,
         "cheat_sheet": cheat,
+        "reload_config": reload_action,
+        "open_config_folder": open_folder,
         "about": about,
         "quit": quit_action,
     }
@@ -115,11 +127,10 @@ def install(
     # First-run welcome balloon — fires only if AppContext was marked
     # first_run by bind_win32 (no config file on disk). Keeps repeat
     # launches noiseless. Best-effort: missing tray-notification
-    # support / muted notifications must not break startup.
+    # support / muted notifications must not break startup. QtWidgets
+    # is already imported above (we constructed QSystemTrayIcon from it).
     if getattr(ctx, "first_run", False):
         try:
-            from PySide6 import QtWidgets
-
             tray.showMessage(
                 "Windows Rectangle is running",
                 "Right-click the tray icon for Preferences, Cheat sheet, or Quit.",
@@ -168,6 +179,63 @@ def _toggle_launch(ctx: AppContext, checked: bool) -> None:
             ctx.config_store.save(ctx.settings)
         except Exception:  # noqa: BLE001
             _log.exception("config save failed")
+
+
+def _reload_config(ctx: AppContext, tray) -> None:
+    """Re-read JSON config and apply. Shows a tray balloon either way so
+    the user gets visible feedback (otherwise the click is silent and
+    looks broken when settings happen to be unchanged)."""
+    from PySide6 import QtWidgets
+
+    ok = False
+    try:
+        ok = ctx.reload_config()
+    except Exception:  # noqa: BLE001
+        _log.exception("reload_config raised")
+    if ok:
+        msg, kind = "Config reloaded from disk.", QtWidgets.QSystemTrayIcon.Information
+    else:
+        msg, kind = (
+            "Could not reload — no config store or load failed (see log).",
+            QtWidgets.QSystemTrayIcon.Warning,
+        )
+    try:
+        tray.showMessage("Windows Rectangle", msg, kind, 3500)
+    except Exception:  # noqa: BLE001
+        _log.debug("reload toast failed", exc_info=True)
+
+
+def _open_config_folder(ctx: AppContext, tray) -> None:
+    """Open `%APPDATA%\\windows_rectangle\\` in Explorer.
+
+    Uses `QDesktopServices.openUrl` so we stay on the Qt side of the
+    Win32 boundary — no need to spawn `explorer.exe` ourselves. The
+    folder is created if missing so the open never lands on a phantom
+    directory (config might not have been saved yet on a totally fresh
+    install path).
+    """
+    from pathlib import Path
+
+    from PySide6 import QtCore, QtGui, QtWidgets
+
+    folder = ctx.config_folder()
+    if folder is None:
+        try:
+            tray.showMessage(
+                "Windows Rectangle",
+                "No config store wired — nothing to open.",
+                QtWidgets.QSystemTrayIcon.Warning,
+                3500,
+            )
+        except Exception:  # noqa: BLE001
+            _log.debug("open-folder toast failed", exc_info=True)
+        return
+    try:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        url = QtCore.QUrl.fromLocalFile(folder)
+        QtGui.QDesktopServices.openUrl(url)
+    except Exception:  # noqa: BLE001
+        _log.exception("open config folder failed: %s", folder)
 
 
 def _show_cheat_sheet(ctx: AppContext) -> None:

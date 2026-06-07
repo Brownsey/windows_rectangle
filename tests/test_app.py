@@ -64,6 +64,72 @@ def test_build_propagates_explicit_first_run_flag(windows):
     assert ctx.first_run is True
 
 
+class _FakeConfigStore:
+    """In-memory ConfigStore + a stub `.path` attr for config_folder()."""
+
+    def __init__(self, settings, *, path=None):
+        self.next = settings
+        self.path = path
+        self.loads = 0
+        self.saves: list = []
+
+    def load(self):
+        self.loads += 1
+        return self.next
+
+    def save(self, settings):
+        self.saves.append(settings)
+
+
+def test_reload_config_returns_false_without_store(windows):
+    ctx = build(Settings(), windows)
+    assert ctx.reload_config() is False
+
+
+def test_reload_config_applies_loaded_settings(windows):
+    store = _FakeConfigStore(Settings(gap=42))
+    ctx = build(Settings(gap=0), windows, config_store=store)
+    assert ctx.reload_config() is True
+    assert ctx.settings.gap == 42
+    # Dispatcher also reflects the reloaded value, otherwise the reload
+    # doesn't actually take effect.
+    assert ctx.dispatcher.gap == 42
+
+
+def test_reload_config_returns_false_when_load_raises(windows):
+    class Boom:
+        path = None
+        def load(self):
+            raise RuntimeError("kaboom")
+        def save(self, settings): pass
+
+    ctx = build(Settings(gap=7), windows, config_store=Boom())
+    assert ctx.reload_config() is False
+    # Settings stay untouched after a failed reload.
+    assert ctx.settings.gap == 7
+
+
+def test_config_folder_none_without_store(windows):
+    ctx = build(Settings(), windows)
+    assert ctx.config_folder() is None
+
+
+def test_config_folder_returns_parent_of_path(windows, tmp_path):
+    cfg_path = tmp_path / "windows_rectangle" / "config.json"
+    store = _FakeConfigStore(Settings(), path=cfg_path)
+    ctx = build(Settings(), windows, config_store=store)
+    assert ctx.config_folder() == str(cfg_path.parent)
+
+
+def test_config_folder_none_when_store_has_no_path(windows):
+    class PathlessStore:
+        def load(self): return Settings()
+        def save(self, s): pass
+
+    ctx = build(Settings(), windows, config_store=PathlessStore())
+    assert ctx.config_folder() is None
+
+
 def test_build_sets_cycle_idle_timeout(windows):
     ctx = build(Settings(cycle_idle_timeout=3.0), windows)
     # The Dispatcher uses the CycleState we passed.
