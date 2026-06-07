@@ -161,6 +161,17 @@ class Dispatcher:
 
         If `is_alive` not supplied, falls back to the WindowManager port.
         Returns total entries dropped.
+
+        Memoizes is_alive across the cycle + history sweeps so a HWND
+        that appears in both data structures (the common case after the
+        user has dispatched anything) only costs one IsWindow syscall.
         """
-        check = is_alive if is_alive is not None else self._windows.is_window_valid
+        raw = is_alive if is_alive is not None else self._windows.is_window_valid
+        cache: dict[object, bool] = {}
+
+        def check(wid: object) -> bool:
+            if wid not in cache:
+                cache[wid] = raw(wid)
+            return cache[wid]
+
         return self._cycle.prune_stale(check) + self._history.prune_stale(check)

@@ -169,6 +169,23 @@ def test_prune_stale_drops_closed_window_state(fake_wm):
     assert dropped >= 1
 
 
+def test_prune_stale_state_memoizes_across_cycle_and_history(fake_wm):
+    """A HWND with both cycle + history entries should only be checked
+    once by is_alive when prune_stale_state runs the cross-structure sweep."""
+    d = Dispatcher(fake_wm)
+    d.dispatch(Action.LEFT_HALF)  # writes both cycle + history for 101
+
+    calls: list = []
+
+    def is_alive(wid):
+        calls.append(wid)
+        return False
+
+    d.prune_stale_state(is_alive=is_alive)
+    # Exactly one call for window 101 despite it being in both data structures.
+    assert calls == [101]
+
+
 # ----- Maximized/snapped pre-restore (brief §5 #4) -----------------
 
 def test_maximized_window_is_restored_before_move(fake_wm, dispatcher):
