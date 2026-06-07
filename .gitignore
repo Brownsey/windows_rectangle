@@ -9,3 +9,5 @@ dist/
 .venv/
 venv/
 *.spec
+# Keep our hand-tuned PyInstaller spec (brief §6).
+!windows_rectangle.spec
