@@ -80,6 +80,11 @@ class AppContext:
     _settings_subscribers: list[Callable[[Settings], None]] = field(
         default_factory=list, init=False, repr=False
     )
+    # Live (hook, detector) pair when WH_MOUSE_LL is installed. Owned by
+    # start_mousehook / stop_mousehook so the drag-to-edge toggle in
+    # prefs can flip without restarting the app (lifts the documented
+    # restriction noted on bind_mousehook).
+    _mousehook: object | None = field(default=None, init=False, repr=False)
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -90,6 +95,9 @@ class AppContext:
         note: "all shortcuts can be configured... those shortcuts work").
         """
         shortcuts_changed = settings.shortcuts != self.settings.shortcuts
+        drag_toggle_changed = (
+            settings.drag_to_edge_enabled != self.settings.drag_to_edge_enabled
+        )
         self.settings = settings
         self.dispatcher.gap = settings.gap
         # Cycle idle timeout is on the CycleState, not the Dispatcher.
@@ -99,6 +107,15 @@ class AppContext:
         self.drag.gap = settings.gap
         if shortcuts_changed and self.hotkeys is not None:
             self.rebind_hotkeys()
+        # Mirror the drag-to-edge toggle into the WH_MOUSE_LL lifecycle.
+        # Lifts the restart restriction that bind_mousehook used to
+        # document — enabling drag-to-edge now installs the hook on the
+        # spot; disabling tears it down.
+        if drag_toggle_changed:
+            if settings.drag_to_edge_enabled:
+                self.start_mousehook()
+            else:
+                self.stop_mousehook()
         self.sync_autostart()
         # Notify subscribers AFTER everything has been wired through, so
         # they observe a coherent state (and a subscriber's exception
@@ -302,6 +319,56 @@ class AppContext:
         except Exception:  # noqa: BLE001 — IsWindow can race; never crash the tick
             _log.debug("maintenance prune raised", exc_info=True)
             return 0
+
+    # ----- mouse hook lifecycle (brief §2 #13, runtime toggle) -------
+
+    def start_mousehook(self) -> bool:
+        """Install the WH_MOUSE_LL hook if not already running.
+
+        No-op when `drag_to_edge_enabled` is False, when a hook is
+        already installed, or when the platform/Win32 layer rejects the
+        install (logged at debug). Returns True iff a hook is active
+        after this call.
+
+        Called from `apply_settings` on the False → True drag-to-edge
+        toggle so the prefs change takes effect without restart.
+        """
+        if self._mousehook is not None:
+            return True
+        if not self.settings.drag_to_edge_enabled:
+            return False
+        try:
+            from .adapters.win32_mousehook import Win32MouseHook
+        except ImportError:
+            _log.debug("win32_mousehook not importable; skipping install")
+            return False
+        on_event, detector = make_drag_event_dispatcher(self)
+        try:
+            hook = Win32MouseHook(on_event=on_event)
+        except Exception:  # noqa: BLE001 — install can fail on non-Windows / blocked
+            _log.warning("mouse hook install failed", exc_info=True)
+            return False
+        self._mousehook = (hook, detector)
+        # Register shutdown so app exit always unwinds. stop_mousehook
+        # is idempotent so re-registering on later start_mousehook calls
+        # is safe.
+        self.cleanup.register(self.stop_mousehook)
+        return True
+
+    def stop_mousehook(self) -> None:
+        """Tear down the WH_MOUSE_LL hook if it's running. Idempotent."""
+        if self._mousehook is None:
+            return
+        hook, detector = self._mousehook  # type: ignore[misc]
+        self._mousehook = None
+        try:
+            hook.shutdown()
+        except Exception:  # noqa: BLE001
+            _log.warning("mouse hook shutdown raised", exc_info=True)
+        try:
+            detector.reset()
+        except Exception:  # noqa: BLE001
+            _log.debug("detector reset raised", exc_info=True)
 
     def shutdown(self) -> int:
         """Run every registered cleanup (brief §5 #11). Returns count."""
@@ -519,37 +586,21 @@ def make_drag_event_dispatcher(
 
 
 def bind_mousehook(ctx: AppContext) -> bool:
-    """Install Win32MouseHook and route its events through a DragDetector
-    into `ctx`'s drag-snap facade. Registers shutdown in `ctx.cleanup`.
+    """Install Win32MouseHook and route its events through a DragDetector.
 
-    Skips installation entirely if `ctx.settings.drag_to_edge_enabled` is
-    False — WH_MOUSE_LL fires hundreds of times per second when the mouse
-    moves; even a fast-return hook proc costs an OS-wide context switch
-    per event, so don't run one for a disabled feature. Returns True iff
-    the hook was installed.
+    Thin wrapper over `ctx.start_mousehook()` for compatibility with the
+    older startup-flow API. The lifecycle (install/uninstall + shutdown
+    registration) lives on AppContext so apply_settings can flip it
+    when the user toggles drag-to-edge in prefs (no restart required).
 
-    Toggling drag-to-edge from False → True in prefs currently requires
-    an app restart to take effect (the runtime-toggle path is intentionally
-    deferred — it adds install/uninstall lifecycle complexity that's not
-    worth it for what we expect to be a config-once setting).
+    Returns True iff the hook is now active.
 
-    The detector's `on_begin` calls back into the WindowManager on the
-    hook thread to look up the active window. That's a fast read of
-    GetForegroundWindow / GetWindowRect — well within the WH_MOUSE_LL
-    latency budget (brief §5 #7).
-
-    Update + end run on the hook thread too. `drag.update()` only sets
-    a LatestValue (O(1), brief §5 #7). `end_drag_via_bus()` enqueues the
-    final dispatch onto the bus so the Qt thread actually runs it.
+    Hot-path notes: the detector's `on_begin` calls back into the
+    WindowManager on the hook thread to look up the active window. That's
+    a fast read of GetForegroundWindow / GetWindowRect — well within the
+    WH_MOUSE_LL latency budget (brief §5 #7). Update + end run on the
+    hook thread too. `drag.update()` only sets a LatestValue (O(1));
+    `end_drag_via_bus()` enqueues the dispatch onto the bus so the Qt
+    thread actually runs it.
     """
-    if not ctx.settings.drag_to_edge_enabled:
-        _log.info("drag-to-edge disabled in settings — skipping mouse hook install")
-        return False
-
-    from .adapters.win32_mousehook import Win32MouseHook
-
-    on_event, detector = make_drag_event_dispatcher(ctx)
-    hook = Win32MouseHook(on_event=on_event)
-    ctx.cleanup.register(hook.shutdown)
-    ctx.cleanup.register(detector.reset)
-    return True
+    return ctx.start_mousehook()

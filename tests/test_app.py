@@ -103,6 +103,101 @@ def test_apply_settings_toggles_drag_to_edge_enabled(windows):
     assert not ctx.drag.active
 
 
+class _FakeMouseHook:
+    """Stand-in for Win32MouseHook usable on non-Windows hosts."""
+
+    instances: list = []
+
+    def __init__(self, on_event):
+        self.on_event = on_event
+        self.shutdown_called = False
+        _FakeMouseHook.instances.append(self)
+
+    def shutdown(self):
+        self.shutdown_called = True
+
+
+def _install_fake_mousehook(monkeypatch):
+    """Patch the lazy import inside AppContext.start_mousehook."""
+    import windows_rectangle.adapters.win32_mousehook as adapter_mod
+
+    monkeypatch.setattr(adapter_mod, "Win32MouseHook", _FakeMouseHook)
+    _FakeMouseHook.instances.clear()
+
+
+def test_start_mousehook_skipped_when_drag_disabled(windows):
+    ctx = build(Settings(drag_to_edge_enabled=False), windows)
+    assert ctx.start_mousehook() is False
+    assert ctx._mousehook is None
+
+
+def test_start_mousehook_installs_when_enabled(windows, monkeypatch):
+    _install_fake_mousehook(monkeypatch)
+    ctx = build(Settings(drag_to_edge_enabled=True), windows)
+    assert ctx.start_mousehook() is True
+    assert ctx._mousehook is not None
+    assert len(_FakeMouseHook.instances) == 1
+
+
+def test_start_mousehook_is_idempotent(windows, monkeypatch):
+    _install_fake_mousehook(monkeypatch)
+    ctx = build(Settings(drag_to_edge_enabled=True), windows)
+    ctx.start_mousehook()
+    ctx.start_mousehook()
+    ctx.start_mousehook()
+    # Only one hook ever constructed.
+    assert len(_FakeMouseHook.instances) == 1
+
+
+def test_stop_mousehook_shuts_down_hook(windows, monkeypatch):
+    _install_fake_mousehook(monkeypatch)
+    ctx = build(Settings(drag_to_edge_enabled=True), windows)
+    ctx.start_mousehook()
+    hook = _FakeMouseHook.instances[-1]
+    ctx.stop_mousehook()
+    assert hook.shutdown_called
+    assert ctx._mousehook is None
+
+
+def test_stop_mousehook_is_idempotent_when_no_hook(windows):
+    ctx = build(Settings(), windows)
+    ctx.stop_mousehook()  # must not raise
+    ctx.stop_mousehook()
+
+
+def test_apply_settings_installs_hook_on_drag_re_enable(windows, monkeypatch):
+    """The headline fix: starting with drag_to_edge_enabled=False, no
+    hook is installed. After apply_settings flips to True, the hook IS
+    installed — no restart needed."""
+    _install_fake_mousehook(monkeypatch)
+    ctx = build(Settings(drag_to_edge_enabled=False), windows)
+    assert ctx._mousehook is None
+    ctx.apply_settings(Settings(drag_to_edge_enabled=True))
+    assert ctx._mousehook is not None
+
+
+def test_apply_settings_uninstalls_hook_on_drag_disable(windows, monkeypatch):
+    """And the opposite direction: disabling tears the hook down."""
+    _install_fake_mousehook(monkeypatch)
+    ctx = build(Settings(drag_to_edge_enabled=True), windows)
+    ctx.start_mousehook()
+    hook = _FakeMouseHook.instances[-1]
+    ctx.apply_settings(Settings(drag_to_edge_enabled=False))
+    assert hook.shutdown_called
+    assert ctx._mousehook is None
+
+
+def test_shutdown_tears_down_running_mousehook(windows, monkeypatch):
+    """ctx.shutdown() running cleanup must unwind a live hook (brief §5
+    #11 — leaked WH_MOUSE_LL degrades the whole OS)."""
+    _install_fake_mousehook(monkeypatch)
+    ctx = build(Settings(drag_to_edge_enabled=True), windows)
+    ctx.start_mousehook()
+    hook = _FakeMouseHook.instances[-1]
+    ctx.shutdown()
+    assert hook.shutdown_called
+
+
 def test_apply_settings_drag_re_enable_takes_effect_without_restart(windows):
     """The opposite toggle direction: False → True must also let
     begin_drag start a session. The bind_mousehook install/uninstall
