@@ -70,6 +70,32 @@ def test_main_print_config_path_short_circuits_before_bind_win32(monkeypatch, ca
     assert "config.json" in out
 
 
+def test_main_check_install_short_circuits_before_bind_win32(monkeypatch, capsys):
+    """--check-install must NOT call bind_win32 — running it while a
+    tray copy is open shouldn't disturb the running instance."""
+    import windows_rectangle.__main__ as m
+
+    def fail_bind(**_):
+        raise AssertionError("bind_win32 was called for --check-install")
+
+    monkeypatch.setattr(m, "bind_win32", fail_bind)
+    rc = m.main(["--check-install"])
+    assert rc in (0, 1)  # depends on whether PySide6 happens to be installed
+    out = capsys.readouterr().out
+    assert "OVERALL:" in out
+
+
+def test_main_check_install_json_emits_json(monkeypatch, capsys):
+    import windows_rectangle.__main__ as m
+    import json as json_mod
+
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+    rc = m.main(["--check-install-json"])
+    assert rc in (0, 1)
+    parsed = json_mod.loads(capsys.readouterr().out)
+    assert "version" in parsed
+
+
 def test_main_list_shortcuts_short_circuits_before_bind_win32(monkeypatch, capsys, tmp_path):
     """--list-shortcuts reads the JSON config, formats via cheat_sheet_text,
     and exits — no Win32 wiring along the way."""

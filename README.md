@@ -144,6 +144,12 @@ These short-circuit before any Win32 wiring, so they're safe to run while
 a tray copy is open:
 
 ```powershell
+# Self-diagnostic — version, dep importability, config path
+.\dist\WindowsRectangle.exe --check-install
+
+# Same, but JSON for scripting / CI
+.\dist\WindowsRectangle.exe --check-install-json
+
 # Print the on-disk config path
 .\dist\WindowsRectangle.exe --print-config-path
 

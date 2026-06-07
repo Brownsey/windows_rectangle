@@ -58,6 +58,20 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "(reads %%APPDATA%%\\windows_rectangle\\config.json)"
         ),
     )
+    p.add_argument(
+        "--check-install",
+        action="store_true",
+        help=(
+            "run a self-diagnostic (version, dep importability, config "
+            "path) and exit with code 0 if everything looks OK. Safe to "
+            "run while another tray copy is open."
+        ),
+    )
+    p.add_argument(
+        "--check-install-json",
+        action="store_true",
+        help="like --check-install but emit machine-readable JSON.",
+    )
     return p.parse_args(argv)
 
 
@@ -189,6 +203,11 @@ def _run_informational(args: argparse.Namespace) -> int:
         settings = store.load()
         print(cheat_sheet_text(settings.shortcuts))
         return 0
+
+    if args.check_install or args.check_install_json:
+        from .diagnostics import run_check_install
+
+        return run_check_install(json_output=args.check_install_json)
 
     return -1
 

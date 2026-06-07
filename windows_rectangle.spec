@@ -39,6 +39,8 @@ HIDDEN = [
     "windows_rectangle.ui.cheat_sheet",
     # Tray's "Binding status…" popup likewise lazy-imports the formatter.
     "windows_rectangle.ui.binding_status_view",
+    # --check-install subcommand lazy-imports the diagnostics module.
+    "windows_rectangle.diagnostics",
     # PySide6 plugins that QApplication needs at runtime.
     "PySide6.QtCore",
     "PySide6.QtGui",

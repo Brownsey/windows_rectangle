@@ -23,6 +23,13 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
 - **`--print-config-path`** and **`--list-shortcuts`** CLI subcommands
   short-circuit before any Win32 wiring, so they're safe to run while
   a tray copy is open.
+- **`--check-install`** / **`--check-install-json`** self-diagnostic
+  — version, Python info, dep importability for `core/`, `ports/`,
+  `adapters/json_config`, plus optional PySide6 / pywin32 probes, and
+  the on-disk config path. Exits 0/1 so it pipes into CI. Backed by
+  `windows_rectangle.diagnostics` (pure, 100% test-covered).
+- **`CONTRIBUTING.md`** — fast-path commands, project layout,
+  conventions for lazy Qt imports + pure formatters, PR checklist.
 - **Troubleshooting** section in `README.md` covering tray-icon
   visibility, hotkey conflicts, elevated windows, PyInstaller lock
   errors, SmartScreen, and missing PySide6.
