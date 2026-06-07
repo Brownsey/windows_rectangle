@@ -106,6 +106,8 @@ def test_lazy_adapter_imports_are_hidden():
         "windows_rectangle.diagnostics",
         # __main__'s _setup_logging lazy-imports this.
         "windows_rectangle.log_file",
+        # --print-monitors lazy-imports this.
+        "windows_rectangle.monitors_view",
     ):
         assert must in hidden, f"{must} missing from hiddenimports"
 

@@ -43,6 +43,11 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
   persists them as the new config. Both flags short-circuit before
   `bind_win32`, so they're safe to use while a tray copy is open.
   Designed for backups + moving config between machines.
+- **`--print-monitors`** / **`--print-monitors-json`** dump every
+  monitor's bounds, work area, primary flag, and inferred taskbar
+  reservation. Helps users debug why an action lands somewhere
+  unexpected on multi-monitor / mixed-DPI setups. Backed by the
+  pure `monitors_view` formatter (test-covered).
 
 ### Changed
 - Tray tooltip now appends ` • paused` when the user has clicked

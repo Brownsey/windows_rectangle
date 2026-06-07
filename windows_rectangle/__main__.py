@@ -92,6 +92,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "then exit. Take effect on the next launch."
         ),
     )
+    p.add_argument(
+        "--print-monitors",
+        action="store_true",
+        help=(
+            "enumerate every monitor (bounds + work_area + primary flag) "
+            "and exit. Helps debug multi-monitor / DPI surprises."
+        ),
+    )
+    p.add_argument(
+        "--print-monitors-json",
+        action="store_true",
+        help="like --print-monitors but emit machine-readable JSON.",
+    )
     return p.parse_args(argv)
 
 
@@ -258,6 +271,35 @@ def _run_informational(args: argparse.Namespace) -> int:
             return 1
         print(f"imported settings from: {args.import_config}")
         print(f"saved to: {store.path}")
+        return 0
+
+    if args.print_monitors or args.print_monitors_json:
+        # Lazy import: Win32WindowManager is Windows-only; the formatter
+        # is portable so an off-Windows host gets a clear error rather
+        # than an ImportError mid-print.
+        from .monitors_view import monitors_to_json, monitors_to_text
+
+        try:
+            from .adapters.win32_windows import Win32WindowManager
+        except ImportError:
+            print(
+                "--print-monitors requires Windows (pywin32). "
+                "Run on a Windows host or in a Win32 venv.",
+                file=sys.stderr,
+            )
+            return 1
+
+        try:
+            wm = Win32WindowManager()
+            monitors = wm.list_monitors()
+        except Exception as e:  # noqa: BLE001 — surface as exit code 1
+            print(f"failed to enumerate monitors: {e}", file=sys.stderr)
+            return 1
+
+        if args.print_monitors_json:
+            print(monitors_to_json(monitors))
+        else:
+            print(monitors_to_text(monitors))
         return 0
 
     return -1

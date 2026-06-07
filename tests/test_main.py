@@ -165,6 +165,75 @@ def test_import_missing_file_returns_1(monkeypatch, capsys, tmp_path):
     assert "import failed" in err
 
 
+def test_print_monitors_uses_win32_adapter(monkeypatch, capsys):
+    """Verify --print-monitors short-circuits before bind_win32 and calls
+    Win32WindowManager.list_monitors. The adapter is monkey-patched so
+    the test passes on a Windows host with pywin32 OR a non-Windows host
+    (the import fallback is exercised in the next test)."""
+    import sys as sys_mod
+    import types
+
+    import windows_rectangle.__main__ as m
+    from windows_rectangle.core.geometry import Rect
+    from windows_rectangle.ports.window_manager import MonitorInfo
+
+    def fail_bind(**_):
+        raise AssertionError("bind_win32 was called for --print-monitors")
+
+    monkeypatch.setattr(m, "bind_win32", fail_bind)
+
+    class FakeWin32WindowManager:
+        def list_monitors(self):
+            return [
+                MonitorInfo(
+                    handle=1,
+                    bounds=Rect(0, 0, 1920, 1080),
+                    work_area=Rect(0, 0, 1920, 1040),
+                    is_primary=True,
+                ),
+            ]
+
+    fake_mod = types.ModuleType("windows_rectangle.adapters.win32_windows")
+    fake_mod.Win32WindowManager = FakeWin32WindowManager  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys_mod.modules, "windows_rectangle.adapters.win32_windows", fake_mod)
+
+    rc = m.main(["--print-monitors"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Monitor 1" in out
+    assert "(primary)" in out
+
+
+def test_print_monitors_json_outputs_parseable(monkeypatch, capsys):
+    import sys as sys_mod
+    import types
+    import json as json_mod
+
+    import windows_rectangle.__main__ as m
+    from windows_rectangle.core.geometry import Rect
+    from windows_rectangle.ports.window_manager import MonitorInfo
+
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+
+    class FakeWin32WindowManager:
+        def list_monitors(self):
+            return [
+                MonitorInfo(
+                    handle=42, bounds=Rect(0, 0, 1024, 768),
+                    work_area=Rect(0, 0, 1024, 728), is_primary=True,
+                )
+            ]
+
+    fake_mod = types.ModuleType("windows_rectangle.adapters.win32_windows")
+    fake_mod.Win32WindowManager = FakeWin32WindowManager  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys_mod.modules, "windows_rectangle.adapters.win32_windows", fake_mod)
+
+    rc = m.main(["--print-monitors-json"])
+    assert rc == 0
+    parsed = json_mod.loads(capsys.readouterr().out)
+    assert parsed[0]["bounds"]["width"] == 1024
+
+
 def test_import_bad_json_returns_1(monkeypatch, capsys, tmp_path):
     import windows_rectangle.__main__ as m
 
