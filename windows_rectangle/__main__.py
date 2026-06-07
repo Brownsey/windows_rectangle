@@ -67,10 +67,15 @@ def _run_headless(ctx) -> int:
             signal.signal(signal.SIGTERM, _on_sig)  # ValueError off main thread
 
     _log.info("running headless — Ctrl+C to exit")
+    # No overlay to repaint in headless mode, so 60 Hz is wasteful.
+    # 30 Hz keeps hotkey latency under ~33 ms (still imperceptible) and
+    # halves CPU usage while idle.
+    HEADLESS_POLL_HZ = 30
+    period = 1.0 / HEADLESS_POLL_HZ
     while not stop:
         ctx.drain_actions()
         ctx.maintenance()
-        time.sleep(1.0 / 60)
+        time.sleep(period)
     return 0
 
 
