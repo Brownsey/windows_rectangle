@@ -76,10 +76,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _setup_logging(level_name: str) -> None:
+    level = getattr(logging, level_name)
     logging.basicConfig(
-        level=getattr(logging, level_name),
+        level=level,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # Best-effort rotating file handler under %APPDATA% — survives a
+    # crash so users can attach the log to bug reports. Failures (e.g.
+    # locked-down %APPDATA%) are silent: console logging still works.
+    from .log_file import install_file_handler
+
+    install_file_handler(level=level)
 
 
 def _run_headless(ctx) -> int:

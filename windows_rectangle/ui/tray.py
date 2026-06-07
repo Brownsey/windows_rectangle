@@ -11,6 +11,7 @@ Menu items:
     Binding status…          ← X of Y bound; details of any failed combos
     Reload config from disk  ← re-reads JSON config (handy for power users)
     Open config folder…      ← opens %APPDATA%\\windows_rectangle in Explorer
+    Open log file…           ← opens windows_rectangle.log for bug reports
     About…                   ← version + project link
     Quit                     ← runs ctx.shutdown() + QApplication.quit()
 """
@@ -96,6 +97,10 @@ def install(
     open_folder.triggered.connect(lambda: _open_config_folder(ctx, tray))
     menu.addAction(open_folder)
 
+    open_log = QtGui.QAction("Open log file…", menu)
+    open_log.triggered.connect(lambda: _open_log_file(ctx, tray))
+    menu.addAction(open_log)
+
     about = QtGui.QAction("About…", menu)
     about.triggered.connect(_show_about)
     menu.addAction(about)
@@ -119,6 +124,7 @@ def install(
         "binding_status": binding_status,
         "reload_config": reload_action,
         "open_config_folder": open_folder,
+        "open_log_file": open_log,
         "about": about,
         "quit": quit_action,
     }
@@ -212,18 +218,19 @@ def _toggle_launch(ctx: AppContext, checked: bool) -> None:
 def _tooltip_for(ctx: AppContext) -> str:
     """Compose the hover-text shown over the tray icon.
 
-    Shows gap (always) and binding count when a binding has fired
-    (i.e. the report has any entries). Total is "X / Y bound" so a
-    user with hotkey clashes can spot the issue from the tooltip
-    alone — no extra click needed.
+    Shows gap (always), binding count when a binding has fired, and
+    a paused indicator so a user can't be fooled into thinking
+    "0/22 bound" means broken when it actually means paused.
     """
     gap = getattr(ctx.settings, "gap", 0)
+    paused = bool(getattr(ctx, "paused", False))
     report = getattr(ctx, "last_binding_report", None)
+    suffix = " • paused" if paused else ""
     if report is None or report.total == 0:
-        return f"Windows Rectangle • {gap}px gap"
+        return f"Windows Rectangle • {gap}px gap{suffix}"
     return (
         f"Windows Rectangle • {gap}px gap • "
-        f"{report.bound_count}/{report.total} shortcuts bound"
+        f"{report.bound_count}/{report.total} shortcuts bound{suffix}"
     )
 
 
@@ -273,6 +280,41 @@ def _reload_config(ctx: AppContext, tray) -> None:
         tray.showMessage("Windows Rectangle", msg, kind, 3500)
     except Exception:  # noqa: BLE001
         _log.debug("reload toast failed", exc_info=True)
+
+
+def _open_log_file(ctx: AppContext, tray) -> None:
+    """Open the rotating log file in the user's default text app.
+
+    If the file doesn't exist yet (no log line has been emitted), open
+    the parent folder instead so the user can find it once activity
+    starts. Toast on "log not configured" so the click never feels broken.
+    """
+    from pathlib import Path
+
+    from PySide6 import QtCore, QtGui, QtWidgets
+
+    path = ctx.log_file_path()
+    if path is None:
+        try:
+            tray.showMessage(
+                "Windows Rectangle",
+                "Logging is not configured for this session.",
+                QtWidgets.QSystemTrayIcon.Warning,
+                3500,
+            )
+        except Exception:  # noqa: BLE001
+            _log.debug("open-log toast failed", exc_info=True)
+        return
+    target = Path(path)
+    try:
+        if target.exists():
+            url = QtCore.QUrl.fromLocalFile(str(target))
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            url = QtCore.QUrl.fromLocalFile(str(target.parent))
+        QtGui.QDesktopServices.openUrl(url)
+    except Exception:  # noqa: BLE001
+        _log.exception("open log file failed: %s", path)
 
 
 def _open_config_folder(ctx: AppContext, tray) -> None:

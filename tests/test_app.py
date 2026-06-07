@@ -130,6 +130,16 @@ def test_config_folder_none_when_store_has_no_path(windows):
     assert ctx.config_folder() is None
 
 
+def test_log_file_path_returns_str_under_appdata(windows, monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    ctx = build(Settings(), windows)
+    p = ctx.log_file_path()
+    assert p is not None
+    assert "windows_rectangle.log" in p
+    # Path-shaped — useful for the "Open log…" tray click.
+    assert "windows_rectangle" in p
+
+
 def test_build_sets_cycle_idle_timeout(windows):
     ctx = build(Settings(cycle_idle_timeout=3.0), windows)
     # The Dispatcher uses the CycleState we passed.

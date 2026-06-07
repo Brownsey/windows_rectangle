@@ -41,6 +41,8 @@ HIDDEN = [
     "windows_rectangle.ui.binding_status_view",
     # --check-install subcommand lazy-imports the diagnostics module.
     "windows_rectangle.diagnostics",
+    # __main__'s _setup_logging lazy-imports this for the rotating file handler.
+    "windows_rectangle.log_file",
     # PySide6 plugins that QApplication needs at runtime.
     "PySide6.QtCore",
     "PySide6.QtGui",

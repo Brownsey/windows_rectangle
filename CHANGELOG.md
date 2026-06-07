@@ -30,6 +30,17 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
   `windows_rectangle.diagnostics` (pure, 100% test-covered).
 - **`CONTRIBUTING.md`** — fast-path commands, project layout,
   conventions for lazy Qt imports + pure formatters, PR checklist.
+- **Rotating log file** at `%APPDATA%\windows_rectangle\windows_rectangle.log`
+  (1 MB × 4 generations = ≤ 4 MB total). Installed by `_setup_logging`
+  in `__main__`; idempotent so repeat startup paths don't double-up
+  handlers. Tray gets a matching **"Open log file…"** menu item that
+  opens the log in the user's default text app (or its parent folder
+  if nothing has been logged yet).
+
+### Changed
+- Tray tooltip now appends ` • paused` when the user has clicked
+  **Pause shortcuts**, so an `0/22 bound` count looks intentional
+  instead of broken.
 - **Troubleshooting** section in `README.md` covering tray-icon
   visibility, hotkey conflicts, elevated windows, PyInstaller lock
   errors, SmartScreen, and missing PySide6.

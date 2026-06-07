@@ -28,6 +28,69 @@ def test_tray_controller_defaults():
     assert tc.on_open_preferences is None
 
 
+def test_tooltip_for_paused_state():
+    """When ctx.paused is True the tooltip must say so — otherwise
+    "0/22 bound" looks broken instead of intentional."""
+    from windows_rectangle.ui.tray import _tooltip_for
+
+    class FakeReport:
+        bound_count = 0
+        total = 22
+
+    class FakeSettings:
+        gap = 8
+
+    class FakeCtx:
+        settings = FakeSettings()
+        last_binding_report = FakeReport()
+        paused = True
+
+    s = _tooltip_for(FakeCtx())
+    assert "paused" in s
+    assert "0/22" in s
+
+
+def test_tooltip_for_active_state_does_not_say_paused():
+    from windows_rectangle.ui.tray import _tooltip_for
+
+    class FakeReport:
+        bound_count = 22
+        total = 22
+
+    class FakeSettings:
+        gap = 4
+
+    class FakeCtx:
+        settings = FakeSettings()
+        last_binding_report = FakeReport()
+        paused = False
+
+    s = _tooltip_for(FakeCtx())
+    assert "paused" not in s
+    assert "22/22" in s
+
+
+def test_tooltip_for_initial_no_report():
+    """Before any bind has fired the tooltip just shows the gap."""
+    from windows_rectangle.ui.tray import _tooltip_for
+
+    class FakeReport:
+        bound_count = 0
+        total = 0
+
+    class FakeSettings:
+        gap = 0
+
+    class FakeCtx:
+        settings = FakeSettings()
+        last_binding_report = FakeReport()
+        paused = False
+
+    s = _tooltip_for(FakeCtx())
+    assert "shortcuts bound" not in s
+    assert "0px gap" in s
+
+
 def test_tray_does_not_eagerly_import_pyside6():
     """Brief §5 #8 + §6: lazy Qt imports keep non-Windows CI clean.
     Importing the module must not pull PySide6 in at module-load time."""

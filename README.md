@@ -32,6 +32,7 @@ You have two ways to run Windows Rectangle:
    - **Pause shortcuts** — checkable. Unregisters every hotkey at the OS
      level so other apps (full-screen games, RDP sessions) get the keys
      back. Uncheck to resume. Settings are kept; no reload required.
+     The tooltip appends ` • paused` while active.
    - **Cheat sheet…** — at-a-glance list of every action and its current combo.
    - **Binding status…** — shows "X of Y shortcuts bound" plus the specific
      combos and error messages for any failures (e.g. another app already
@@ -39,6 +40,8 @@ You have two ways to run Windows Rectangle:
    - **Reload config from disk** — re-reads the JSON after you hand-edit it.
    - **Open config folder…** — jumps to `%APPDATA%\windows_rectangle\` in
      Explorer (created if missing).
+   - **Open log file…** — opens the rotating log file (or its folder if
+     nothing has been logged yet). Attach the contents to a bug report.
    - **About…** — version + license.
 6. Preferences dialog has a **Reset shortcuts to defaults** button under
    the shortcuts table — handy after experimenting with custom combos.

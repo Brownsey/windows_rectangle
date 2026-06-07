@@ -104,6 +104,8 @@ def test_lazy_adapter_imports_are_hidden():
         "windows_rectangle.ui.binding_status_view",
         # --check-install lazy-imports the diagnostics module.
         "windows_rectangle.diagnostics",
+        # __main__'s _setup_logging lazy-imports this.
+        "windows_rectangle.log_file",
     ):
         assert must in hidden, f"{must} missing from hiddenimports"
 

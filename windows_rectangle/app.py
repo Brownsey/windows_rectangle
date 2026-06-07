@@ -269,6 +269,22 @@ class AppContext:
         self.apply_settings(new_settings)
         return True
 
+    def log_file_path(self) -> str | None:
+        """Filesystem path of the rotating log file, or None if no
+        store/log is configured yet.
+
+        Used by the tray "Open log file…" item. Pure derivation from
+        the on-disk default (`log_file.default_log_path`) — never
+        returns a non-existent path you can't act on.
+        """
+        from .log_file import default_log_path
+
+        try:
+            return str(default_log_path())
+        except Exception:  # noqa: BLE001 — never crash the tray click
+            _log.debug("log_file_path lookup failed", exc_info=True)
+            return None
+
     def config_folder(self) -> str | None:
         """Filesystem directory holding the config file, or None if no
         store is wired. Used by tray's "Open config folder…" so the
