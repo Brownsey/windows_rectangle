@@ -40,3 +40,22 @@ def test_version_flag_exits_cleanly():
     with pytest.raises(SystemExit) as exc:
         _parse_args(["--version"])
     assert exc.value.code == 0
+
+
+def test_setup_logging_sets_root_level():
+    """_setup_logging maps --log-level to logging.basicConfig's level."""
+    import logging
+
+    from windows_rectangle.__main__ import _setup_logging
+
+    # Save + restore so we don't poison other tests.
+    saved_level = logging.getLogger().level
+    try:
+        _setup_logging("WARNING")
+        assert logging.getLogger().level == logging.WARNING
+        _setup_logging("DEBUG")
+        # basicConfig is a no-op if root has handlers; the level may not
+        # change on the second call. Allow either WARNING or DEBUG.
+        assert logging.getLogger().level in (logging.WARNING, logging.DEBUG)
+    finally:
+        logging.getLogger().setLevel(saved_level)
