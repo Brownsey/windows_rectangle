@@ -198,6 +198,21 @@ def test_shutdown_tears_down_running_mousehook(windows, monkeypatch):
     assert hook.shutdown_called
 
 
+def test_mousehook_toggles_do_not_grow_cleanup(windows, monkeypatch):
+    """Toggling drag-to-edge N times must only ever push one
+    stop_mousehook handler into ctx.cleanup. Otherwise a chatty user
+    would queue N duplicate shutdowns over an app session."""
+    _install_fake_mousehook(monkeypatch)
+    ctx = build(Settings(drag_to_edge_enabled=True), windows)
+    before = len(list(ctx.cleanup))
+    for _ in range(5):
+        ctx.start_mousehook()
+        ctx.stop_mousehook()
+    # Across 5 full start/stop cycles, exactly one stop_mousehook entry
+    # got registered (on the first install).
+    assert len(list(ctx.cleanup)) - before == 1
+
+
 def test_apply_settings_drag_re_enable_takes_effect_without_restart(windows):
     """The opposite toggle direction: False → True. begin_drag reads
     ctx.settings.drag_to_edge_enabled on every call, so flipping it

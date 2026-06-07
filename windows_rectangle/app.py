@@ -85,6 +85,11 @@ class AppContext:
     # prefs can flip without restarting the app (lifts the documented
     # restriction noted on bind_mousehook).
     _mousehook: object | None = field(default=None, init=False, repr=False)
+    # One-shot guard for stop_mousehook cleanup registration. start_mousehook
+    # is called once at startup and again on every False→True drag-to-edge
+    # toggle; without this guard each install would push a duplicate
+    # cleanup handler.
+    _mousehook_cleanup_registered: bool = field(default=False, init=False, repr=False)
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -349,10 +354,12 @@ class AppContext:
             _log.warning("mouse hook install failed", exc_info=True)
             return False
         self._mousehook = (hook, detector)
-        # Register shutdown so app exit always unwinds. stop_mousehook
-        # is idempotent so re-registering on later start_mousehook calls
-        # is safe.
-        self.cleanup.register(self.stop_mousehook)
+        # Register shutdown so app exit always unwinds — but ONLY the
+        # first time. Otherwise toggling drag-to-edge N times in prefs
+        # would queue N duplicate stop_mousehook calls in cleanup.
+        if not self._mousehook_cleanup_registered:
+            self.cleanup.register(self.stop_mousehook)
+            self._mousehook_cleanup_registered = True
         return True
 
     def stop_mousehook(self) -> None:
