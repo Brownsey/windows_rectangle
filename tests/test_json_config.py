@@ -97,3 +97,42 @@ def test_default_config_path_falls_back_when_no_appdata(monkeypatch):
     p = default_config_path()
     assert p.name == "config.json"
     assert ".windows_rectangle" in str(p)
+
+
+def test_cleared_shortcut_survives_round_trip(store):
+    """A user who clears a shortcut via prefs must not see it come back
+    on the next launch — empty string is the persisted 'unbound' marker."""
+    s = Settings()
+    s.shortcuts.pop(Action.LEFT_HALF)  # simulate clear_shortcut
+    store.save(s)
+    loaded = store.load()
+    assert Action.LEFT_HALF not in loaded.shortcuts
+
+
+def test_unknown_shortcut_key_in_json_is_dropped(store):
+    """Forward-compat: an action we don't recognise (e.g. from a newer
+    version's file written by an older binary) must be silently ignored."""
+    payload = {
+        "shortcuts": {"left_half": "ctrl+alt+left", "phantom_action_xyz": "ctrl+f12"},
+        "schema_version": SCHEMA_VERSION,
+    }
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(json.dumps(payload))
+    loaded = store.load()
+    assert loaded.shortcuts[Action.LEFT_HALF] == "ctrl+alt+left"
+
+
+def test_future_action_falls_back_to_default(store):
+    """Forward-compat the other direction: if the saved JSON predates a
+    new Action being added (we simulate by omitting LEFT_HALF), that
+    action falls back to its default binding rather than ending up unbound."""
+    payload = {
+        "shortcuts": {
+            a.value: c for a, c in DEFAULT_SHORTCUTS.items() if a is not Action.LEFT_HALF
+        },
+        "schema_version": SCHEMA_VERSION,
+    }
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(json.dumps(payload))
+    loaded = store.load()
+    assert loaded.shortcuts[Action.LEFT_HALF] == DEFAULT_SHORTCUTS[Action.LEFT_HALF]

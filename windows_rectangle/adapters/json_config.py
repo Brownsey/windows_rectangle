@@ -82,24 +82,42 @@ class JsonConfigStore:
 
 def _to_dict(settings: Settings) -> dict:
     data = asdict(settings)
-    # Action enum keys are not JSON-serialisable by default.
-    data["shortcuts"] = {a.value: combo for a, combo in settings.shortcuts.items()}
+    # Serialise EVERY known Action — explicit empty string for actions
+    # the user deliberately unbound (via clear_shortcut), missing-from-
+    # dict for actions that just never got a default. This ensures a
+    # cleared shortcut survives a save+load round-trip; otherwise the
+    # loader would re-populate it from DEFAULT_SHORTCUTS on next start.
+    data["shortcuts"] = {
+        a.value: settings.shortcuts.get(a, "") for a in Action
+    }
     data["schema_version"] = SCHEMA_VERSION
     return data
 
 
 def _from_dict(raw: dict) -> Settings:
-    """Tolerant decode — unknown shortcut keys are dropped, missing fields default."""
+    """Tolerant decode.
+
+    - Unknown shortcut keys: silently dropped (forward-compat with older
+      versions that wrote actions we no longer recognise).
+    - Empty-string combo: explicit "unbound" marker — the action is
+      kept OUT of the resulting shortcuts dict (so rebind_hotkeys won't
+      register anything for it).
+    - Action missing entirely from the saved dict: fall back to the
+      DEFAULT_SHORTCUTS binding (forward-compat with future Actions
+      added after the user's last save).
+    - Other missing fields: dataclass defaults.
+    """
     defaults = Settings()
     shortcuts_raw = raw.get("shortcuts") or {}
-    shortcuts: dict[Action, str] = dict(DEFAULT_SHORTCUTS)
-    for key, combo in shortcuts_raw.items():
-        try:
-            action = Action(key)
-        except ValueError:
-            continue
-        if isinstance(combo, str) and combo:
-            shortcuts[action] = combo
+    shortcuts: dict[Action, str] = {}
+    for action in Action:
+        if action.value in shortcuts_raw:
+            combo = shortcuts_raw[action.value]
+            if isinstance(combo, str) and combo:
+                shortcuts[action] = combo
+            # else: empty string or non-str → leave unbound.
+        elif action in DEFAULT_SHORTCUTS:
+            shortcuts[action] = DEFAULT_SHORTCUTS[action]
 
     return Settings(
         shortcuts=shortcuts,
