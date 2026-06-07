@@ -205,6 +205,61 @@ def test_end_drag_dispatches_when_zone_held(windows, monkeypatch):
     assert windows.windows[101] == Rect(0, 0, 960, 1040)
 
 
+def test_end_drag_via_bus_submits_instead_of_dispatching(windows):
+    """end_drag_via_bus is the hook-thread-safe variant — it queues the
+    action onto the bus rather than calling the dispatcher synchronously.
+    The window must NOT have moved until drain_actions runs."""
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    ctx.drag_update(2, 540)
+    ctx.drag._throttle.reset()
+    ctx.drag_poll()
+    original = windows.windows[101]
+
+    action = ctx.end_drag_via_bus()
+    assert action is Action.LEFT_HALF
+    # Window UNCHANGED — dispatch was queued, not run.
+    assert windows.windows[101] == original
+    assert ctx.bus.pending() == 1
+
+    # Drain on the "Qt main thread" → now the window moves.
+    ctx.drain_actions()
+    assert windows.windows[101] == Rect(0, 0, 960, 1040)
+
+
+def test_end_drag_via_bus_returns_none_when_no_zone(windows):
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    # No mouse updates → no hit.
+    assert ctx.end_drag_via_bus() is None
+    assert ctx.bus.pending() == 0
+
+
+def test_make_drag_event_dispatcher_uses_bus_for_end(windows):
+    """Verify that mouse-up through the dispatcher closure goes via the
+    bus, not synchronously — required for hook-thread safety."""
+    from windows_rectangle.adapters.win32_mousehook import (
+        EVENT_LBUTTON_DOWN,
+        EVENT_LBUTTON_UP,
+        EVENT_MOVE,
+    )
+    from windows_rectangle.app import make_drag_event_dispatcher
+
+    ctx = build(Settings(), windows)
+    on_event, _detector = make_drag_event_dispatcher(ctx)
+
+    # Click + drag to left edge + release.
+    on_event(EVENT_LBUTTON_DOWN, 100, 100)
+    on_event(EVENT_MOVE, 2, 540)              # crosses threshold + hit
+    original = windows.windows[101]
+    ctx.drag._throttle.reset()
+    ctx.drag_poll()                            # cache the hit
+    on_event(EVENT_LBUTTON_UP, 2, 540)
+    # Window untouched yet; action is queued.
+    assert windows.windows[101] == original
+    assert ctx.bus.pending() == 1
+
+
 def test_end_drag_without_zone_returns_none(windows):
     ctx = build(Settings(), windows)
     ctx.begin_drag(Rect(100, 100, 800, 600))

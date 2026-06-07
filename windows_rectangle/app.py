@@ -190,12 +190,35 @@ class AppContext:
 
     def end_drag(self) -> Action | None:
         """Mouse-up: dispatch the snap action if a zone is held, else None.
+
+        Synchronous dispatch — use only when you're already on the main
+        thread (e.g. in tests). The mouse-hook thread should call
+        `end_drag_via_bus()` instead, otherwise the WH_MOUSE_LL hook
+        proc blocks on Win32 syscalls (brief §5 #7).
+
         Returns the dispatched Action so callers can show feedback.
         """
         hit = self.drag.finish()
         if hit is None or hit.action is None:
             return None
         self.dispatcher.dispatch(hit.action)
+        return hit.action
+
+    def end_drag_via_bus(self) -> Action | None:
+        """Mouse-up: finish the session and submit the action via the bus.
+
+        Designed for the WH_MOUSE_LL hook thread — `bus.submit()` is O(1)
+        and overflow-tolerant. The Qt main thread picks up the action on
+        its next `drain_actions()` tick (≤16 ms later, brief §5 #7).
+
+        Returns the submitted Action (or None if the cursor wasn't in a
+        zone). Note: the action has been *queued*, not dispatched, by
+        the time this returns.
+        """
+        hit = self.drag.finish()
+        if hit is None or hit.action is None:
+            return None
+        self.bus.submit(hit.action)
         return hit.action
 
     def cancel_drag(self) -> None:
@@ -459,7 +482,9 @@ def make_drag_event_dispatcher(
     detector = DragDetector(
         on_begin=lambda x, y: ctx.begin_drag_for_active_window(),
         on_update=ctx.drag_update,
-        on_end=lambda: ctx.end_drag(),
+        # Route end-of-drag dispatch through the ActionBus — the hook
+        # thread can't afford to block on Win32 work (brief §5 #7).
+        on_end=lambda: ctx.end_drag_via_bus(),
     )
 
     def on_event(kind: str, x: int, y: int) -> None:
