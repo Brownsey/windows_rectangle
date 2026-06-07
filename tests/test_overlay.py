@@ -26,6 +26,20 @@ def test_hide_with_no_widget_is_noop():
     hide(OverlayController())  # must not raise
 
 
+def test_overlay_does_not_eagerly_import_pyside6():
+    """Brief §5 #8 + §6: lazy Qt imports keep non-Windows CI clean.
+    Importing the module must not pull PySide6 in at module-load time."""
+    import sys
+
+    sys.modules.pop("windows_rectangle.ui.overlay", None)
+    pyside_was_loaded = "PySide6" in sys.modules
+    importlib.import_module("windows_rectangle.ui.overlay")
+    if not pyside_was_loaded:
+        assert "PySide6" not in sys.modules, (
+            "ui.overlay should defer PySide6 import to install()"
+        )
+
+
 def test_ensure_win32_exstyle_skips_after_first_apply(monkeypatch):
     """Second call must early-return — Win32 ex-style flags don't move
     once set, so paying GetWindowLongW per drag-zone transition is waste."""

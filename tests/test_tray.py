@@ -26,3 +26,17 @@ def test_tray_controller_defaults():
     assert tc.menu is None
     assert tc.actions is None
     assert tc.on_open_preferences is None
+
+
+def test_tray_does_not_eagerly_import_pyside6():
+    """Brief §5 #8 + §6: lazy Qt imports keep non-Windows CI clean.
+    Importing the module must not pull PySide6 in at module-load time."""
+    import sys
+
+    sys.modules.pop("windows_rectangle.ui.tray", None)
+    pyside_was_loaded = "PySide6" in sys.modules
+    importlib.import_module("windows_rectangle.ui.tray")
+    if not pyside_was_loaded:
+        assert "PySide6" not in sys.modules, (
+            "ui.tray should defer PySide6 import to install()"
+        )
