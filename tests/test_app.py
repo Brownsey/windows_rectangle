@@ -752,3 +752,32 @@ def test_drain_actions_dispatches_pending(windows):
     count = ctx.drain_actions()
     assert count == 1
     assert windows.windows[101] == Rect(0, 0, 960, 1040)
+
+
+def test_app_module_does_not_eagerly_import_win32_adapters():
+    """Brief §4 / module docstring: adapters must be lazy-imported inside
+    bind_win32/bind_mousehook. We can't reset sys.modules mid-session, so
+    run the import in a fresh subprocess and inspect what got pulled in.
+    This is the only way to make the assertion order-independent (other
+    tests in this file call make_drag_event_dispatcher which lazy-imports
+    win32_mousehook for EVENT_* constants, populating sys.modules)."""
+    import subprocess
+    import sys
+
+    script = (
+        "import sys\n"
+        "import windows_rectangle.app\n"
+        "bad = [n for n in sys.modules\n"
+        "       if n.startswith('windows_rectangle.adapters.win32_')\n"
+        "       or n == 'windows_rectangle.adapters.win_dpi'\n"
+        "       or n == 'windows_rectangle.adapters.winreg_autostart']\n"
+        "print(','.join(bad))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    bad = result.stdout.strip()
+    assert bad == "", f"unexpectedly-loaded adapter modules: {bad}"
