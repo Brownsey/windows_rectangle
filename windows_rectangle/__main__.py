@@ -38,6 +38,26 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
+    # ----- quick informational subcommands ---------------------------
+    # These short-circuit before any adapter wiring / single-instance
+    # acquisition so users can `WindowsRectangle.exe --print-config-path`
+    # safely while another copy is running in the tray.
+    p.add_argument(
+        "--print-config-path",
+        action="store_true",
+        help=(
+            "print the on-disk config path and exit "
+            "(does not start the app or take the single-instance mutex)"
+        ),
+    )
+    p.add_argument(
+        "--list-shortcuts",
+        action="store_true",
+        help=(
+            "print the currently-configured shortcuts and exit "
+            "(reads %%APPDATA%%\\windows_rectangle\\config.json)"
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -147,9 +167,39 @@ def _run_qt(ctx) -> int:
     return rc
 
 
+def _run_informational(args: argparse.Namespace) -> int:
+    """Handle the no-side-effect informational subcommands.
+
+    `--print-config-path` and `--list-shortcuts` are intentionally
+    importable on any platform (no Win32 adapter needed) so a user
+    can shell-script them or run from CI. Returns the exit code, or
+    -1 if no informational flag was passed.
+    """
+    if args.print_config_path:
+        from .adapters.json_config import default_config_path
+
+        print(default_config_path())
+        return 0
+
+    if args.list_shortcuts:
+        from .adapters.json_config import JsonConfigStore
+        from .ui.cheat_sheet import cheat_sheet_text
+
+        store = JsonConfigStore()
+        settings = store.load()
+        print(cheat_sheet_text(settings.shortcuts))
+        return 0
+
+    return -1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     _setup_logging(args.log_level)
+
+    info_rc = _run_informational(args)
+    if info_rc != -1:
+        return info_rc
 
     try:
         ctx = bind_win32(command_line=args.command_line)

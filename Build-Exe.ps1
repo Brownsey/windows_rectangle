@@ -87,6 +87,21 @@ if (-not $NoInstall) {
     Write-Host "    Skipping (-NoInstall)."
 }
 
+Step "Checking for a running WindowsRectangle.exe"
+# PyInstaller can't overwrite a locked exe — fail fast with a friendly
+# error instead of a mid-build PermissionError. We match on the process
+# name because the .exe path can differ between -onefile and -onedir.
+$running = @(Get-Process -ErrorAction SilentlyContinue -Name WindowsRectangle)
+if ($running.Count -gt 0) {
+    Write-Error @"
+A WindowsRectangle.exe process is already running (PID(s): $($running.Id -join ', ')).
+PyInstaller cannot overwrite the locked file. Quit the app via its tray
+icon (right-click → Quit) and re-run this script.
+"@
+    exit 1
+}
+Write-Host "    none"
+
 Step "Running PyInstaller"
 $pyinstallerArgs = @("-m", "PyInstaller", "windows_rectangle.spec", "--noconfirm")
 if ($Clean) { $pyinstallerArgs += "--clean" }

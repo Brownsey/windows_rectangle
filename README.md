@@ -133,9 +133,22 @@ Settings are stored as JSON at:
 %APPDATA%\WindowsRectangle\config.json
 ```
 
-Editing the file by hand works — the app reloads on next launch. The
-Preferences dialog is the supported path; hand-editing is for power users
-and headless setups.
+Editing the file by hand works — the Preferences dialog is the supported
+path, but you can also use tray → **Reload config from disk** after a
+hand-edit to pick up changes without restarting the app.
+
+### Quick CLI helpers
+
+These short-circuit before any Win32 wiring, so they're safe to run while
+a tray copy is open:
+
+```powershell
+# Print the on-disk config path
+.\dist\WindowsRectangle.exe --print-config-path
+
+# Print every action and its currently-configured shortcut
+.\dist\WindowsRectangle.exe --list-shortcuts
+```
 
 ---
 
@@ -153,6 +166,10 @@ The `Build-Exe.ps1` / `Build-Exe.bat` scripts call it. To customise:
   Qml, etc. — see `EXCLUDES` at the top.
 
 ---
+
+## What's new
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the user-visible release log.
 
 ## Architecture, brief, and contributing
 

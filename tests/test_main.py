@@ -42,6 +42,54 @@ def test_version_flag_exits_cleanly():
     assert exc.value.code == 0
 
 
+def test_parse_args_print_config_path_flag():
+    args = _parse_args(["--print-config-path"])
+    assert args.print_config_path is True
+    assert args.list_shortcuts is False
+
+
+def test_parse_args_list_shortcuts_flag():
+    args = _parse_args(["--list-shortcuts"])
+    assert args.list_shortcuts is True
+
+
+def test_main_print_config_path_short_circuits_before_bind_win32(monkeypatch, capsys):
+    """--print-config-path must NOT call bind_win32 — otherwise running it
+    while a tray copy is open would either error on the single-instance
+    mutex or step on Win32 state."""
+    import windows_rectangle.__main__ as m
+
+    def fail_bind(**_):
+        raise AssertionError("bind_win32 was called for --print-config-path")
+
+    monkeypatch.setattr(m, "bind_win32", fail_bind)
+    rc = m.main(["--print-config-path"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Must print something path-shaped.
+    assert "config.json" in out
+
+
+def test_main_list_shortcuts_short_circuits_before_bind_win32(monkeypatch, capsys, tmp_path):
+    """--list-shortcuts reads the JSON config, formats via cheat_sheet_text,
+    and exits — no Win32 wiring along the way."""
+    import windows_rectangle.__main__ as m
+
+    # Point the default JsonConfigStore at a tmp directory so this is
+    # isolated from any %APPDATA% the dev machine has.
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+
+    def fail_bind(**_):
+        raise AssertionError("bind_win32 was called for --list-shortcuts")
+
+    monkeypatch.setattr(m, "bind_win32", fail_bind)
+    rc = m.main(["--list-shortcuts"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Left half" in out  # cheat_sheet uses labels from ACTION_LABELS
+    assert "ctrl+alt+left" in out  # DEFAULT_SHORTCUTS combo for LEFT_HALF
+
+
 def test_setup_logging_sets_root_level():
     """_setup_logging maps --log-level to logging.basicConfig's level."""
     import logging
