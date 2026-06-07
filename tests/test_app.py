@@ -119,6 +119,45 @@ def test_bind_hotkeys_dispatches_through_callback(windows):
     assert windows.windows[101] == Rect(0, 0, 960, 1040)
 
 
+def test_apply_settings_rebinds_when_shortcuts_changed(windows):
+    hot = FakeHotkeys()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bind_hotkeys_via_bus(ctx, hot.register)
+    n_before = len(hot.registered)
+    # Change one shortcut and apply.
+    new_shortcuts = dict(ctx.settings.shortcuts)
+    new_shortcuts[Action.LEFT_HALF] = "ctrl+shift+left"
+    ctx.apply_settings(Settings(shortcuts=new_shortcuts))
+    # One unregister_all (clear), then a fresh full re-bind.
+    assert hot.unregister_all_calls >= 1
+    # All combos re-registered after the unregister.
+    assert len(hot.registered) == n_before
+    # The new combo for LEFT_HALF is now in the registered set.
+    combos_now = {c for c, _cb in hot.registered.values()}
+    assert "ctrl+shift+left" in combos_now
+
+
+def test_apply_settings_does_not_rebind_when_shortcuts_unchanged(windows):
+    hot = FakeHotkeys()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bind_hotkeys_via_bus(ctx, hot.register)
+    # Change something *other* than shortcuts.
+    ctx.apply_settings(Settings(shortcuts=dict(ctx.settings.shortcuts), gap=42))
+    assert hot.unregister_all_calls == 0  # no rebind triggered
+
+
+def test_rebind_hotkeys_no_hotkeys_adapter_is_noop(windows):
+    ctx = build(Settings(), windows)  # no hotkeys wired
+    assert ctx.rebind_hotkeys() == 0
+
+
+def test_rebind_hotkeys_returns_count_of_bindings(windows):
+    hot = FakeHotkeys()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bound = ctx.rebind_hotkeys()
+    assert bound == len(ctx.settings.shortcuts)
+
+
 def test_bind_hotkeys_tolerates_individual_failures(windows):
     hot = FakeHotkeys()
     ctx = build(Settings(), windows, hotkeys=hot)

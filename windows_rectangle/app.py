@@ -66,15 +66,34 @@ class AppContext:
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
 
-        Used by the prefs UI after `ConfigStore.save(...)`.
+        Used by the prefs UI after `ConfigStore.save(...)`. If the user
+        rebound any shortcuts, we re-register them with the hotkeys
+        adapter so the new combos take effect without a restart (brief
+        note: "all shortcuts can be configured... those shortcuts work").
         """
+        shortcuts_changed = settings.shortcuts != self.settings.shortcuts
         self.settings = settings
         self.dispatcher.gap = settings.gap
         # Cycle idle timeout is on the CycleState, not the Dispatcher.
         # The dispatcher uses whichever CycleState we gave it.
         self.dispatcher._cycle.idle_timeout = settings.cycle_idle_timeout
         self.drag.gap = settings.gap
+        if shortcuts_changed and self.hotkeys is not None:
+            self.rebind_hotkeys()
         self.sync_autostart()
+
+    def rebind_hotkeys(self) -> int:
+        """Unregister every hotkey and re-register from `self.settings.shortcuts`.
+
+        Returns the count of successful (re-)registrations. No-op if no
+        hotkeys adapter is wired. Failures of individual combos are
+        tolerated — the prefs UI surfaces them as warnings before commit,
+        and an OS-clash here is logged but doesn't break the rebind.
+        """
+        if self.hotkeys is None:
+            return 0
+        self.hotkeys.unregister_all()
+        return bind_hotkeys_via_bus(self, self.hotkeys.register)
 
     def sync_autostart(self) -> None:
         """Reconcile the AutoStart adapter with `settings.launch_at_login`.
