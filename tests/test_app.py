@@ -89,6 +89,20 @@ def test_apply_settings_updates_almost_maximize_scale(windows):
     assert r.height == int(1040 * 0.5)
 
 
+def test_apply_settings_toggles_drag_to_edge_enabled(windows):
+    """drag_to_edge_enabled lives only on self.settings (begin_drag reads
+    it each call); a toggle via apply_settings must take effect on the
+    NEXT begin_drag, no restart required."""
+    ctx = build(Settings(drag_to_edge_enabled=True), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    assert ctx.drag.active
+
+    ctx.cancel_drag()
+    ctx.apply_settings(Settings(drag_to_edge_enabled=False))
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    assert not ctx.drag.active
+
+
 def test_apply_settings_updates_cycle_timeout(windows):
     ctx = build(Settings(cycle_idle_timeout=1.0), windows)
     ctx.apply_settings(Settings(cycle_idle_timeout=5.5))
