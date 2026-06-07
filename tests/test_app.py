@@ -199,10 +199,15 @@ def test_shutdown_tears_down_running_mousehook(windows, monkeypatch):
 
 
 def test_apply_settings_drag_re_enable_takes_effect_without_restart(windows):
-    """The opposite toggle direction: False → True must also let
-    begin_drag start a session. The bind_mousehook install/uninstall
-    is the separate restart concern documented on that function — but
-    the AppContext-level begin_drag check is live-updated either way."""
+    """The opposite toggle direction: False → True. begin_drag reads
+    ctx.settings.drag_to_edge_enabled on every call, so flipping it
+    via apply_settings must let begin_drag start a session.
+
+    Iter 66 also wires the WH_MOUSE_LL hook lifecycle through
+    apply_settings — see test_apply_settings_installs_hook_on_drag_re_enable
+    — so the end-to-end flow (prefs flip → mouse events arrive → drag
+    snaps) now works without restart.
+    """
     ctx = build(Settings(drag_to_edge_enabled=False), windows)
     ctx.begin_drag(Rect(100, 100, 800, 600))
     assert not ctx.drag.active
