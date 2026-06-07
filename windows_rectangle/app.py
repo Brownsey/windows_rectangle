@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable
 
+from .core.actionbus import ActionBus
 from .core.actions import Action
 from .core.cleanup import CleanupRegistry
 from .core.cycle import CycleState
@@ -59,6 +60,7 @@ class AppContext:
     autostart: "AutoStart | None" = None
     autostart_command_line: str | None = None
     single_instance: "SingleInstance | None" = None
+    bus: ActionBus = field(default_factory=ActionBus)
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -125,6 +127,15 @@ class AppContext:
         """Escape press / drag abort: drop the session without dispatching."""
         self.drag.cancel()
 
+    # ----- ActionBus draining (brief §5 #6) --------------------------
+
+    def drain_actions(self) -> int:
+        """Drain queued hotkey-triggered Actions into the dispatcher.
+
+        Called by the Qt main thread on a timer. Returns the count drained.
+        """
+        return self.bus.drain(self.dispatcher.dispatch)
+
     def shutdown(self) -> int:
         """Run every registered cleanup (brief §5 #11). Returns count."""
         return self.cleanup.run()
@@ -139,6 +150,7 @@ def build(
     autostart: "AutoStart | None" = None,
     autostart_command_line: str | None = None,
     single_instance: "SingleInstance | None" = None,
+    bus: ActionBus | None = None,
     cleanup: CleanupRegistry | None = None,
 ) -> AppContext:
     """Construct an AppContext with the supplied (typically faked) ports.
@@ -175,6 +187,7 @@ def build(
         autostart=autostart,
         autostart_command_line=autostart_command_line,
         single_instance=single_instance,
+        bus=bus if bus is not None else ActionBus(),
     )
     if hotkeys is not None:
         ctx.cleanup.register(hotkeys.unregister_all)
@@ -194,6 +207,10 @@ def bind_hotkeys(ctx: AppContext, register: Callable[[str, Callable[[], None]], 
     a live re-bind preview.
 
     Returns the count of successfully-bound shortcuts.
+
+    The callback dispatches directly. For production use (hotkeys fire on
+    a separate thread), prefer `bind_hotkeys_via_bus()` which submits onto
+    `ctx.bus` so the dispatcher only runs on the main thread (brief §5 #6).
     """
     bound = 0
     for action, combo in ctx.settings.shortcuts.items():
@@ -205,13 +222,73 @@ def bind_hotkeys(ctx: AppContext, register: Callable[[str, Callable[[], None]], 
     return bound
 
 
-def bind_win32(settings: Settings) -> AppContext:
-    """Production wiring — imports pywin32/PySide6 lazily.
+def bind_hotkeys_via_bus(ctx: AppContext,
+                         register: Callable[[str, Callable[[], None]], int]) -> int:
+    """Like `bind_hotkeys` but routes through `ctx.bus`.
 
-    Not called from tests. The actual win32 adapter modules don't exist
-    yet (forthcoming iterations); this function is documented here so
-    the wiring contract is clear.
+    The callback is non-blocking (ActionBus.submit is fast and
+    overflow-tolerant) — safe to run on the Win32 hotkey pump thread.
+    Drain with `ctx.drain_actions()` on the main thread.
     """
-    raise NotImplementedError(
-        "win32 adapters not yet implemented — use build(...) with a fake WindowManager"
+    bound = 0
+    for action, combo in ctx.settings.shortcuts.items():
+        try:
+            register(combo, lambda a=action: ctx.bus.submit(a))
+            bound += 1
+        except Exception:  # noqa: BLE001
+            _log.warning("failed to bind %s -> %s", action.value, combo, exc_info=True)
+    return bound
+
+
+def bind_win32(
+    *,
+    command_line: str | None = None,
+    config_path: "str | None" = None,
+) -> AppContext:
+    """Production wiring — all Win32 adapters in one call.
+
+    Order of operations:
+      1. enable DPI awareness (must be first, before any HWND).
+      2. acquire single-instance mutex (raises SecondInstanceError).
+      3. load Settings from JSON config (fallback to defaults).
+      4. construct Win32WindowManager + Win32Hotkeys + AutoStart.
+      5. build() the AppContext.
+      6. bind hotkeys via the ActionBus (so hotkey callbacks don't run
+         dispatcher on the pump thread — brief §5 #6).
+      7. register shutdown cleanup for the hotkeys thread.
+    """
+    # Lazy imports so the module is importable on non-Windows.
+    from .adapters.json_config import JsonConfigStore
+    from .adapters.single_instance import best_available as best_single
+    from .adapters.win32_hotkeys import Win32Hotkeys
+    from .adapters.win32_windows import Win32WindowManager
+    from .adapters.win_dpi import enable_dpi_awareness
+    from .adapters.winreg_autostart import best_available as best_autostart
+
+    dpi_level = enable_dpi_awareness()
+    _log.info("DPI awareness: %s", dpi_level.value)
+
+    si = best_single()
+    config = JsonConfigStore() if config_path is None else JsonConfigStore(config_path)
+    settings = config.load()
+
+    windows = Win32WindowManager()
+    hotkeys = Win32Hotkeys()
+    autostart = best_autostart()
+
+    ctx = build(
+        settings,
+        windows,
+        hotkeys=hotkeys,
+        config_store=config,
+        autostart=autostart,
+        autostart_command_line=command_line,
+        single_instance=si,
     )
+
+    # Hotkey callbacks must not block the pump thread → route via the bus.
+    bind_hotkeys_via_bus(ctx, hotkeys.register)
+
+    # Tear down the hotkey pump on shutdown.
+    ctx.cleanup.register(hotkeys.shutdown)
+    return ctx

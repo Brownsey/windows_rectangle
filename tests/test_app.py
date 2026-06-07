@@ -4,7 +4,13 @@ from typing import Callable
 
 import pytest
 
-from windows_rectangle.app import AppContext, SecondInstanceError, bind_hotkeys, build
+from windows_rectangle.app import (
+    AppContext,
+    SecondInstanceError,
+    bind_hotkeys,
+    bind_hotkeys_via_bus,
+    build,
+)
 from windows_rectangle.core.actions import Action, DEFAULT_SHORTCUTS
 from windows_rectangle.core.cleanup import CleanupRegistry
 from windows_rectangle.core.geometry import Rect
@@ -269,3 +275,38 @@ def test_shutdown_releases_single_instance(windows):
     assert "Local\\TestApp" in MemorySingleInstance._held
     ctx.shutdown()
     assert "Local\\TestApp" not in MemorySingleInstance._held
+
+
+# ----- ActionBus wiring (brief §5 #6) -------------------------------
+
+def test_default_bus_is_constructed(windows):
+    ctx = build(Settings(), windows)
+    assert ctx.bus is not None
+    assert ctx.bus.pending() == 0
+
+
+def test_bind_hotkeys_via_bus_submits_actions(windows):
+    hot = FakeHotkeys()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bound = bind_hotkeys_via_bus(ctx, hot.register)
+    assert bound == len(DEFAULT_SHORTCUTS)
+    # Fire a callback — it should land on the bus, not dispatch directly.
+    cb = next(iter(hot.registered.values()))[1]
+    cb()
+    assert ctx.bus.pending() == 1
+    # The active window should NOT have been moved yet.
+    assert windows.move_log == []
+
+
+def test_drain_actions_dispatches_pending(windows):
+    hot = FakeHotkeys()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bind_hotkeys_via_bus(ctx, hot.register)
+    # Find the LEFT_HALF callback and fire it.
+    combo = DEFAULT_SHORTCUTS[Action.LEFT_HALF]
+    cb = next(c for cmb, c in hot.registered.values() if cmb == combo)
+    cb()
+    # Drain — now the dispatcher runs.
+    count = ctx.drain_actions()
+    assert count == 1
+    assert windows.windows[101] == Rect(0, 0, 960, 1040)
