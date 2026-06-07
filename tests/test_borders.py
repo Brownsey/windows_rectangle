@@ -45,3 +45,8 @@ def test_roundtrip_visible_to_outer_to_visible():
     insets = BorderInsets(left=7, top=2, right=7, bottom=7)
     visible = Rect(100, 100, 800, 600)
     assert to_visible_rect(to_outer_rect(visible, insets), insets) == visible
+
+
+def test_to_visible_rect_zero_insets_returns_same_rect():
+    outer = Rect(50, 60, 200, 300)
+    assert to_visible_rect(outer, BorderInsets()) is outer

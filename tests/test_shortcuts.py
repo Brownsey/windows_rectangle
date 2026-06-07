@@ -130,3 +130,14 @@ def test_is_reserved_normal_combo_not_reserved():
 
 def test_is_reserved_unparseable_is_false():
     assert not is_reserved("")
+
+
+def test_combo_is_modifier_only_property():
+    """`is_modifier_only` is True when the bound key is itself one of
+    the modifier aliases — useful for the prefs UI to detect "the user
+    only pressed Ctrl and hasn't picked a key yet"."""
+    # Combo constructed directly with key="ctrl" — not what parse() produces
+    # normally, but valid as a sentinel for "still recording".
+    assert Combo(modifiers=(), key="ctrl").is_modifier_only
+    assert Combo(modifiers=(), key="alt").is_modifier_only
+    assert not Combo(modifiers=("ctrl", "alt"), key="left").is_modifier_only

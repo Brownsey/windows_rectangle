@@ -229,3 +229,44 @@ def test_move_only_window_clamped_to_work_area(fake_wm, dispatcher):
     # Must stay inside work area.
     assert r.left >= 0 and r.top >= 0
     assert r.right <= 1920 and r.bottom <= 1040
+
+
+class _NoMonitorWM(FakeWindowManager):
+    """FakeWindowManager that always reports 'no monitor' — simulates a
+    racy hot-unplug or a window dragged completely offscreen."""
+
+    def monitor_for_window(self, handle):
+        return None
+
+
+def test_apply_geometry_no_monitor_returns_no_monitor():
+    """If the WindowManager can't tell us which monitor the window is on
+    (e.g. window dragged offscreen mid-call), dispatch bails cleanly."""
+    wm = _NoMonitorWM(monitors=[M1, M2])
+    wm.windows[202] = Rect(0, 0, 500, 400)
+    wm.active = 202
+    d = Dispatcher(wm)
+    result = d.dispatch(Action.LEFT_HALF)
+    assert not result.moved
+    assert result.reason == "no_monitor"
+
+
+def test_next_display_no_monitor_returns_no_monitor():
+    """Same guard in the multi-display path."""
+    wm = _NoMonitorWM(monitors=[M1, M2])
+    wm.windows[202] = Rect(0, 0, 500, 400)
+    wm.active = 202
+    d = Dispatcher(wm)
+    result = d.dispatch(Action.NEXT_DISPLAY)
+    assert not result.moved
+    assert result.reason == "no_monitor"
+
+
+def test_no_change_when_target_equals_before(fake_wm):
+    """If the computed target rect is identical to current, we record
+    'no_change' rather than going through a redundant SetWindowPos."""
+    fake_wm.windows[101] = Rect(0, 0, 960, 1040)  # already at left-half geometry
+    d = Dispatcher(fake_wm, gap=0)
+    result = d.dispatch(Action.LEFT_HALF)
+    assert not result.moved
+    assert result.reason == "no_change"

@@ -73,7 +73,13 @@ class Dispatcher:
         if is_geometry_action(action):
             return self._apply_geometry(handle, action)
 
-        return DispatchResult(action, handle, None, None, False, "unsupported")
+        # Defensive: every defined Action is currently RESTORE,
+        # NEXT/PREV_DISPLAY, or geometry, so this branch is unreachable
+        # until someone adds a new Action without wiring it. The structured
+        # result is safer than a KeyError.
+        return DispatchResult(  # pragma: no cover
+            action, handle, None, None, False, "unsupported"
+        )
 
     # ----- internals -----
 

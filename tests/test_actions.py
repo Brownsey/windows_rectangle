@@ -88,6 +88,15 @@ def test_maximize_height_keeps_horizontal_position():
     assert r.height == WORK.height
 
 
+def test_maximize_height_applies_top_bottom_gap():
+    r = apply(Action.MAXIMIZE_HEIGHT, WIN, WORK, gap=10)
+    # With gap > 0, top + bottom should inset; x/width still untouched.
+    assert r.x == WIN.x
+    assert r.width == WIN.width
+    assert r.y == WORK.y + 10
+    assert r.height == WORK.height - 20
+
+
 def test_almost_maximize_centered_and_smaller():
     r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK)
     assert r.width < WORK.width
