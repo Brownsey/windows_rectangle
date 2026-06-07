@@ -244,7 +244,9 @@ def test_begin_drag_for_active_window_returns_false_when_no_active(windows):
     assert not ctx.drag.active
 
 
-def test_drain_drag_preview_inactive_session_hides_only(windows):
+def test_drain_drag_preview_inactive_session_is_noop_when_already_hidden(windows):
+    """Idle ticks (drag inactive, overlay already hidden) must NOT fire
+    callbacks — we tick 60×/s and Qt repaints add up."""
     ctx = build(Settings(), windows)
     shown: list = []
     hidden: list = []
@@ -254,13 +256,14 @@ def test_drain_drag_preview_inactive_session_hides_only(windows):
     )
     assert visible is False
     assert shown == []
-    assert hidden == [True]
+    assert hidden == []
 
 
-def test_drain_drag_preview_active_no_hit_hides(windows):
+def test_drain_drag_preview_active_no_hit_is_noop(windows):
+    """Active drag but cursor not in a zone → still no callbacks since
+    the overlay was never shown."""
     ctx = build(Settings(), windows)
     ctx.begin_drag(Rect(100, 100, 800, 600))
-    # No coords pushed yet → poll returns None.
     shown: list = []
     hidden: list = []
     visible = ctx.drain_drag_preview(
@@ -269,7 +272,7 @@ def test_drain_drag_preview_active_no_hit_hides(windows):
     )
     assert visible is False
     assert shown == []
-    assert hidden == [True]
+    assert hidden == []
 
 
 def test_drain_drag_preview_active_with_hit_shows(windows):
@@ -287,6 +290,90 @@ def test_drain_drag_preview_active_with_hit_shows(windows):
     assert hidden == []
     assert len(shown) == 1
     assert shown[0] == Rect(0, 0, 960, 1040)
+
+
+def test_drain_drag_preview_dedup_same_rect(windows):
+    """Two consecutive ticks at the same snap target → on_show fires once."""
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    ctx.drag_update(2, 540)
+    ctx.drag._throttle.reset()
+    shown: list = []
+    hidden: list = []
+
+    def go():
+        return ctx.drain_drag_preview(
+            on_show=lambda r: shown.append(r),
+            on_hide=lambda: hidden.append(True),
+        )
+
+    assert go() is True
+    # Throttle ticks won't change the cached hit. Push the same coord
+    # again to ensure the second poll has fresh data.
+    ctx.drag_update(2, 540)
+    ctx.drag._throttle.reset()
+    assert go() is True
+
+    assert len(shown) == 1   # de-dup'd
+    assert hidden == []
+
+
+def test_drain_drag_preview_hides_once_after_being_shown(windows):
+    """Show, then cursor leaves zone → exactly one on_hide fires; further
+    idle ticks emit nothing."""
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    ctx.drag_update(2, 540)              # left edge → hit
+    ctx.drag._throttle.reset()
+    shown: list = []
+    hidden: list = []
+    ctx.drain_drag_preview(
+        on_show=lambda r: shown.append(r),
+        on_hide=lambda: hidden.append(True),
+    )
+    assert len(shown) == 1
+
+    # Cancel the session → drag inactive again; the show-state must clear.
+    ctx.cancel_drag()
+    ctx.drain_drag_preview(
+        on_show=lambda r: shown.append(r),
+        on_hide=lambda: hidden.append(True),
+    )
+    assert hidden == [True]
+
+    # Idle tick: no new hide.
+    ctx.drain_drag_preview(
+        on_show=lambda r: shown.append(r),
+        on_hide=lambda: hidden.append(True),
+    )
+    assert hidden == [True]
+
+
+def test_drain_drag_preview_fires_show_again_on_different_rect(windows):
+    """Cursor moves to a different snap zone → new on_show with new rect."""
+    ctx = build(Settings(), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    shown: list = []
+    hidden: list = []
+
+    def tick():
+        return ctx.drain_drag_preview(
+            on_show=lambda r: shown.append(r),
+            on_hide=lambda: hidden.append(True),
+        )
+
+    # First hit: left edge.
+    ctx.drag_update(2, 540)
+    ctx.drag._throttle.reset()
+    tick()
+
+    # Second hit: right edge — different target rect.
+    ctx.drag_update(1918, 540)
+    ctx.drag._throttle.reset()
+    tick()
+
+    assert len(shown) == 2
+    assert shown[0] != shown[1]
 
 
 def test_begin_drag_for_active_window_handles_rect_lookup_failure():

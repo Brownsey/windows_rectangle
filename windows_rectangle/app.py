@@ -62,6 +62,10 @@ class AppContext:
     autostart_command_line: str | None = None
     single_instance: SingleInstance | None = None
     bus: ActionBus = field(default_factory=ActionBus)
+    # Last rect handed to the overlay's on_show, or None when hidden. Used
+    # by drain_drag_preview to dedup callbacks at 60 Hz (most ticks are
+    # idle — calling Qt's hide() on an already-hidden widget burns time).
+    _preview_state: Rect | None = field(default=None, init=False, repr=False)
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -188,21 +192,26 @@ class AppContext:
         Called by the Qt main thread on the same timer as drain_actions.
         Polls the session for a snap hit; if one is current shows the
         overlay at the target rect, otherwise hides it. Returns True iff
-        the overlay should be visible after this call — useful for tests
-        and for the caller to short-circuit redundant Qt redraws.
+        the overlay should be visible after this call.
 
-        Hot-path safety: when no drag session is active, this returns
-        immediately without allocating or polling — the timer ticks 60×/s
-        most of the time idle, so the no-op path matters.
+        Hot-path safety: the callbacks only fire when the visible state
+        actually changes (show with a new rect, or hide-after-show).
+        Idle ticks — by far the common case at 60 Hz — do nothing.
         """
         if not self.drag.active:
-            on_hide()
+            if self._preview_state is not None:
+                on_hide()
+                self._preview_state = None
             return False
         hit = self.drag.poll()
         if hit is not None and hit.target is not None:
-            on_show(hit.target)
+            if self._preview_state != hit.target:
+                on_show(hit.target)
+                self._preview_state = hit.target
             return True
-        on_hide()
+        if self._preview_state is not None:
+            on_hide()
+            self._preview_state = None
         return False
 
     def shutdown(self) -> int:
