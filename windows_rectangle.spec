@@ -45,6 +45,8 @@ HIDDEN = [
     "windows_rectangle.log_file",
     # --print-monitors lazy-imports this formatter.
     "windows_rectangle.monitors_view",
+    # --import-config --dry-run lazy-imports the diff formatter.
+    "windows_rectangle.settings_diff",
     # PySide6 plugins that QApplication needs at runtime.
     "PySide6.QtCore",
     "PySide6.QtGui",

@@ -52,6 +52,12 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
 - **`Doctor.ps1`** — one-shot support-package collector. Runs the
   bundled diagnostic flags + tails the log + records OS info into a
   text file users can attach to a bug report. `-Show` opens it.
+- **`--import-config --dry-run`** previews the per-field changes
+  (gap, drag-to-edge, every shortcut, etc.) without touching disk.
+  Backed by the pure `settings_diff` formatter (test-covered).
+- `--export-config` + `--import-config` are now mutually exclusive
+  (argparse error rather than silent double-action). `--dry-run`
+  requires `--import-config`.
 
 ### Changed
 - `--help` output is reorganised into **runtime**, **informational**,

@@ -14,6 +14,7 @@ import logging
 import signal
 import sys
 import time
+from pathlib import Path
 
 from . import __version__
 from .app import SecondInstanceError, bind_win32
@@ -119,7 +120,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="load settings from PATH, persist to the user config, and exit",
     )
-    return p.parse_args(argv)
+    migration.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "with --import-config: show what would change but don't write. "
+            "Lets a user preview a snapshot before committing."
+        ),
+    )
+    args = p.parse_args(argv)
+
+    # Mutual exclusion: --export-config and --import-config don't make
+    # sense in the same call; argparse can't model this cleanly because
+    # both take a value rather than store_true.
+    if args.export_config is not None and args.import_config is not None:
+        p.error("--export-config and --import-config are mutually exclusive")
+    if args.dry_run and args.import_config is None:
+        p.error("--dry-run requires --import-config")
+
+    return args
 
 
 def _setup_logging(level_name: str) -> None:
@@ -272,17 +291,39 @@ def _run_informational(args: argparse.Namespace) -> int:
         return 0
 
     if args.import_config is not None:
-        from .adapters.json_config import JsonConfigStore
+        from .adapters.json_config import JsonConfigStore, _from_dict
 
         store = JsonConfigStore()
         try:
-            store.import_from(args.import_config)
+            src = Path(args.import_config)
+            if not src.exists():
+                raise FileNotFoundError(f"import source does not exist: {src}")
+            raw = json.loads(src.read_text(encoding="utf-8"))
+            incoming = _from_dict(raw)
         except FileNotFoundError as e:
             print(f"import failed: {e}", file=sys.stderr)
             return 1
         except json.JSONDecodeError as e:
             print(f"import failed: {args.import_config} is not valid JSON ({e})", file=sys.stderr)
             return 1
+
+        if args.dry_run:
+            # Dry run: show the per-field changes without touching disk.
+            from .settings_diff import diff_settings
+
+            current = store.load()
+            lines = diff_settings(current, incoming)
+            print(f"dry-run: would import from {args.import_config}")
+            print(f"would write to: {store.path}")
+            if not lines:
+                print("(no changes — incoming settings match current)")
+            else:
+                print("changes:")
+                for line in lines:
+                    print(line)
+            return 0
+
+        store.save(incoming)
         print(f"imported settings from: {args.import_config}")
         print(f"saved to: {store.path}")
         return 0

@@ -165,6 +165,9 @@ a tray copy is open:
 # Restore settings from a snapshot on this machine — takes effect on next launch
 .\dist\WindowsRectangle.exe --import-config "C:\Backup\winrect.json"
 
+# Preview an import without writing anything
+.\dist\WindowsRectangle.exe --import-config "C:\Backup\winrect.json" --dry-run
+
 # Dump every monitor's bounds, work_area and primary flag — debug
 # multi-monitor / DPI surprises
 .\dist\WindowsRectangle.exe --print-monitors

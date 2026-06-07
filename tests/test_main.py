@@ -234,6 +234,82 @@ def test_print_monitors_json_outputs_parseable(monkeypatch, capsys):
     assert parsed[0]["bounds"]["width"] == 1024
 
 
+def test_export_and_import_mutually_exclusive_raises(monkeypatch, capsys, tmp_path):
+    """Both flags taking values means argparse can't model mutual
+    exclusion natively — assert the explicit check in _parse_args."""
+    import windows_rectangle.__main__ as m
+
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+
+    with pytest.raises(SystemExit):
+        m.main([
+            "--export-config", str(tmp_path / "a.json"),
+            "--import-config", str(tmp_path / "b.json"),
+        ])
+    err = capsys.readouterr().err
+    assert "mutually exclusive" in err
+
+
+def test_dry_run_without_import_raises(monkeypatch, capsys):
+    """--dry-run only makes sense with --import-config."""
+    import windows_rectangle.__main__ as m
+
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+    with pytest.raises(SystemExit):
+        m.main(["--dry-run"])
+    err = capsys.readouterr().err
+    assert "--dry-run requires --import-config" in err
+
+
+def test_dry_run_import_does_not_write(monkeypatch, capsys, tmp_path):
+    """--dry-run prints the diff but the on-disk config must be
+    untouched — the whole point is "preview before commit"."""
+    import windows_rectangle.__main__ as m
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+    from windows_rectangle.ports.config_store import Settings
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+
+    # Establish a baseline on disk so we can verify it doesn't change.
+    JsonConfigStore().save(Settings(gap=4))
+
+    # Build an incoming snapshot with a different gap.
+    src = tmp_path / "incoming.json"
+    JsonConfigStore(src).save(Settings(gap=42))
+
+    rc = m.main(["--import-config", str(src), "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "dry-run" in out
+    assert "gap" in out
+    assert "42" in out
+
+    # Most important: the live config still has gap=4.
+    loaded = JsonConfigStore().load()
+    assert loaded.gap == 4
+
+
+def test_dry_run_no_changes_says_so(monkeypatch, capsys, tmp_path):
+    """If the incoming snapshot matches current, the diff is empty —
+    the message must reassure the user rather than print nothing."""
+    import windows_rectangle.__main__ as m
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+    from windows_rectangle.ports.config_store import Settings
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+
+    JsonConfigStore().save(Settings(gap=7))
+    src = tmp_path / "same.json"
+    JsonConfigStore(src).save(Settings(gap=7))
+
+    rc = m.main(["--import-config", str(src), "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "no changes" in out
+
+
 def test_import_bad_json_returns_1(monkeypatch, capsys, tmp_path):
     import windows_rectangle.__main__ as m
 
