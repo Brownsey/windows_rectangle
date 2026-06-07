@@ -69,6 +69,7 @@ def _run_headless(ctx) -> int:
     _log.info("running headless — Ctrl+C to exit")
     while not stop:
         ctx.drain_actions()
+        ctx.maintenance()
         time.sleep(1.0 / 60)
     return 0
 
@@ -121,6 +122,7 @@ def _run_qt(ctx) -> int:
                 on_show=lambda rect: overlay_show_for(overlay, rect),
                 on_hide=lambda: overlay_hide(overlay),
             )
+        ctx.maintenance()  # rate-limited cycle/history prune (brief §5 #9)
 
     timer = QtCore.QTimer()
     timer.setInterval(16)  # ~60 Hz; brief §5 #7 mouse-snap throttle target

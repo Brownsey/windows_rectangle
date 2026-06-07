@@ -349,6 +349,37 @@ def test_drain_drag_preview_hides_once_after_being_shown(windows):
     assert hidden == [True]
 
 
+def test_maintenance_rate_limits_pruning(windows):
+    """Two calls within prune_interval → second one is a noop and never
+    walks the dicts."""
+    ctx = build(Settings(), windows)
+    # Stuff cycle + history with state.
+    ctx.dispatcher.dispatch(Action.LEFT_HALF)
+    calls: list = []
+    ctx.dispatcher.prune_stale_state = lambda **_: (calls.append(True), 0)[1]  # type: ignore[method-assign]
+    # First call at t=0 — runs.
+    ctx.maintenance(now=0.0)
+    # Second call at t=10s (< 60s interval default) — must be a noop.
+    ctx.maintenance(now=10.0)
+    assert len(calls) == 1
+    # Third call after the interval — runs.
+    ctx.maintenance(now=120.0)
+    assert len(calls) == 2
+
+
+def test_maintenance_tolerates_prune_exception(windows):
+    """A racey IsWindow can raise — maintenance must swallow it so the
+    Qt tick keeps running."""
+    ctx = build(Settings(), windows)
+
+    def boom(**_):
+        raise OSError("racy IsWindow")
+
+    ctx.dispatcher.prune_stale_state = boom  # type: ignore[method-assign]
+    # No exception bubbles out.
+    assert ctx.maintenance(now=1000.0) == 0
+
+
 def test_drain_drag_preview_fires_show_again_on_different_rect(windows):
     """Cursor moves to a different snap zone → new on_show with new rect."""
     ctx = build(Settings(), windows)

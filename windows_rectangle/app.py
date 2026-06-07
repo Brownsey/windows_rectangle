@@ -66,6 +66,13 @@ class AppContext:
     # by drain_drag_preview to dedup callbacks at 60 Hz (most ticks are
     # idle — calling Qt's hide() on an already-hidden widget burns time).
     _preview_state: Rect | None = field(default=None, init=False, repr=False)
+    # Monotonic wall-clock of the last cycle/history prune. Initialised
+    # to -inf so the very first maintenance() call always runs. The
+    # QTimer invokes maintenance() on every tick but prune work only
+    # runs at most once per `prune_interval` seconds — sweeping every
+    # 16ms would call IsWindow() across the whole history dict each tick.
+    _last_prune: float = field(default=float("-inf"), init=False, repr=False)
+    prune_interval: float = 60.0
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -213,6 +220,32 @@ class AppContext:
             on_hide()
             self._preview_state = None
         return False
+
+    # ----- background maintenance (called from the Qt timer) --------
+
+    def maintenance(self, now: float | None = None) -> int:
+        """Periodic upkeep: prune cycle/history entries for closed windows.
+
+        Called from the same 16ms tick as drain_actions/drain_drag_preview.
+        Internally rate-limited to once every `prune_interval` seconds —
+        IsWindow() across every recorded HWND would be wasteful at 60 Hz,
+        but a stale-entry sweep once a minute keeps memory bounded for a
+        tray app that stays open all day (brief §5 #9, "validate with
+        IsWindow(hwnd) and evict stale entries").
+
+        Returns the count of entries pruned (0 on rate-limited calls).
+        """
+        import time
+
+        t = now if now is not None else time.monotonic()
+        if t - self._last_prune < self.prune_interval:
+            return 0
+        self._last_prune = t
+        try:
+            return self.dispatcher.prune_stale_state()
+        except Exception:  # noqa: BLE001 — IsWindow can race; never crash the tick
+            _log.debug("maintenance prune raised", exc_info=True)
+            return 0
 
     def shutdown(self) -> int:
         """Run every registered cleanup (brief §5 #11). Returns count."""
