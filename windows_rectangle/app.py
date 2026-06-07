@@ -367,15 +367,19 @@ def build(
 def bind_hotkeys(ctx: AppContext, register: Callable[[str, Callable[[], None]], int]) -> int:
     """Register every action's shortcut via the supplied callback.
 
-    `register(combo, callback)` typically wraps `ctx.hotkeys.register(...)`
-    but kept as a callable so the prefs UI can use the same wiring for
-    a live re-bind preview.
+    Dispatches **directly** — the registered callback calls
+    `ctx.dispatcher.dispatch(action)` inline. This is fine for tests
+    (the test thread IS the dispatch thread) and for any caller that
+    can guarantee `register`'s callback fires on a thread where blocking
+    on Win32 syscalls is OK. The production path uses
+    `bind_hotkeys_via_bus()` instead — see brief §5 #6.
 
-    Returns the count of successfully-bound shortcuts.
+    `register(combo, callback)` is a closure-typed parameter (not just
+    `ctx.hotkeys.register`) so a test can drop in a fake that records
+    bindings without needing a Hotkeys adapter at all.
 
-    The callback dispatches directly. For production use (hotkeys fire on
-    a separate thread), prefer `bind_hotkeys_via_bus()` which submits onto
-    `ctx.bus` so the dispatcher only runs on the main thread (brief §5 #6).
+    Returns the count of successfully-bound shortcuts. Per-combo
+    failures are logged and the loop continues.
     """
     bound = 0
     for action, combo in ctx.settings.shortcuts.items():
