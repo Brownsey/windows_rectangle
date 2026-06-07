@@ -347,6 +347,25 @@ def test_rebind_hotkeys_returns_count_of_bindings(windows):
     assert bound == len(ctx.settings.shortcuts)
 
 
+def test_clearing_a_shortcut_via_apply_settings_unregisters_it(windows):
+    """End-to-end: a Settings whose shortcuts dict is missing an action
+    (i.e. the user used prefs to clear it) → apply_settings rebinds
+    the smaller set → that action's combo is NO LONGER registered."""
+    hot = FakeHotkeys()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bind_hotkeys_via_bus(ctx, hot.register)
+    n_before = len(hot.registered)
+    # Build the post-clear Settings: every action EXCEPT LEFT_HALF.
+    smaller_shortcuts = {a: c for a, c in ctx.settings.shortcuts.items()
+                         if a is not Action.LEFT_HALF}
+    ctx.apply_settings(Settings(shortcuts=smaller_shortcuts))
+    # After the rebind, exactly one fewer combo is registered.
+    assert len(hot.registered) == n_before - 1
+    cleared_combo = DEFAULT_SHORTCUTS[Action.LEFT_HALF]
+    combos_now = {c for c, _cb in hot.registered.values()}
+    assert cleared_combo not in combos_now
+
+
 def test_bind_hotkeys_tolerates_individual_failures(windows):
     hot = FakeHotkeys()
     ctx = build(Settings(), windows, hotkeys=hot)
