@@ -122,6 +122,30 @@ def test_unknown_shortcut_key_in_json_is_dropped(store):
     assert loaded.shortcuts[Action.LEFT_HALF] == "ctrl+alt+left"
 
 
+def test_all_shortcuts_cleared_round_trips_to_empty_dict(store):
+    """A user who clears every shortcut (extreme case) gets back an empty
+    shortcuts dict, not the defaults — same persistence contract as a
+    single cleared shortcut."""
+    s = Settings(shortcuts={})
+    store.save(s)
+    loaded = store.load()
+    assert loaded.shortcuts == {}
+
+
+def test_loading_legacy_payload_without_shortcuts_key_uses_defaults(store):
+    """A pre-iter-57 config file may not have a shortcuts key at all
+    (or have it explicitly null). Both cases should fall back to
+    DEFAULT_SHORTCUTS, not crash and not silently produce an empty dict."""
+    for payload in (
+        {"schema_version": SCHEMA_VERSION},                       # missing key
+        {"shortcuts": None, "schema_version": SCHEMA_VERSION},    # explicit null
+    ):
+        store.path.parent.mkdir(parents=True, exist_ok=True)
+        store.path.write_text(json.dumps(payload))
+        loaded = store.load()
+        assert loaded.shortcuts == DEFAULT_SHORTCUTS
+
+
 def test_future_action_falls_back_to_default(store):
     """Forward-compat the other direction: if the saved JSON predates a
     new Action being added (we simulate by omitting LEFT_HALF), that
