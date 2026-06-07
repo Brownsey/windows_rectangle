@@ -498,9 +498,20 @@ def make_drag_event_dispatcher(
     return on_event, detector
 
 
-def bind_mousehook(ctx: AppContext) -> None:
+def bind_mousehook(ctx: AppContext) -> bool:
     """Install Win32MouseHook and route its events through a DragDetector
     into `ctx`'s drag-snap facade. Registers shutdown in `ctx.cleanup`.
+
+    Skips installation entirely if `ctx.settings.drag_to_edge_enabled` is
+    False — WH_MOUSE_LL fires hundreds of times per second when the mouse
+    moves; even a fast-return hook proc costs an OS-wide context switch
+    per event, so don't run one for a disabled feature. Returns True iff
+    the hook was installed.
+
+    Toggling drag-to-edge from False → True in prefs currently requires
+    an app restart to take effect (the runtime-toggle path is intentionally
+    deferred — it adds install/uninstall lifecycle complexity that's not
+    worth it for what we expect to be a config-once setting).
 
     The detector's `on_begin` calls back into the WindowManager on the
     hook thread to look up the active window. That's a fast read of
@@ -508,13 +519,17 @@ def bind_mousehook(ctx: AppContext) -> None:
     latency budget (brief §5 #7).
 
     Update + end run on the hook thread too. `drag.update()` only sets
-    a LatestValue (O(1), brief §5 #7). `end_drag()` calls the dispatcher,
-    which could be expensive — in production __main__ wraps end with an
-    ActionBus.submit so the dispatch lands on the Qt thread.
+    a LatestValue (O(1), brief §5 #7). `end_drag_via_bus()` enqueues the
+    final dispatch onto the bus so the Qt thread actually runs it.
     """
+    if not ctx.settings.drag_to_edge_enabled:
+        _log.info("drag-to-edge disabled in settings — skipping mouse hook install")
+        return False
+
     from .adapters.win32_mousehook import Win32MouseHook
 
     on_event, detector = make_drag_event_dispatcher(ctx)
     hook = Win32MouseHook(on_event=on_event)
     ctx.cleanup.register(hook.shutdown)
     ctx.cleanup.register(detector.reset)
+    return True

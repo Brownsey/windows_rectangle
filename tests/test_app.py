@@ -445,6 +445,22 @@ def test_drain_drag_preview_hides_once_after_being_shown(windows):
     assert hidden == [True]
 
 
+def test_bind_mousehook_skips_install_when_drag_disabled(windows):
+    """When drag_to_edge_enabled is False, bind_mousehook must short-
+    circuit before importing Win32MouseHook — otherwise on a non-Windows
+    host the import path would still succeed but instantiation later
+    would raise, and OS-wide hook overhead is wasted when the feature
+    is off."""
+    from windows_rectangle.app import bind_mousehook
+
+    ctx = build(Settings(drag_to_edge_enabled=False), windows)
+    cleanup_before = len(list(ctx.cleanup))
+    installed = bind_mousehook(ctx)
+    assert installed is False
+    # No cleanup handlers registered.
+    assert len(list(ctx.cleanup)) == cleanup_before
+
+
 def test_drag_event_dispatcher_routes_kinds(windows):
     """The on_event closure built by make_drag_event_dispatcher must
     route MOVE/LBUTTON_DOWN/LBUTTON_UP into the detector's state machine."""
