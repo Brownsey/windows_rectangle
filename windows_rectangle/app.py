@@ -124,10 +124,18 @@ class AppContext:
         hotkeys adapter is wired. Failures of individual combos are
         tolerated — the prefs UI surfaces them as warnings before commit,
         and an OS-clash here is logged but doesn't break the rebind.
+
+        A failure inside `unregister_all` (rare; would normally only
+        happen if the Win32 pump thread is in a bad state) is caught so
+        we still attempt to register the new bindings — better to leave
+        the OS with a half-rebound set than to skip rebinding entirely.
         """
         if self.hotkeys is None:
             return 0
-        self.hotkeys.unregister_all()
+        try:
+            self.hotkeys.unregister_all()
+        except Exception:  # noqa: BLE001
+            _log.exception("hotkey unregister_all raised — continuing with rebind")
         return bind_hotkeys_via_bus(self, self.hotkeys.register)
 
     def sync_autostart(self) -> None:

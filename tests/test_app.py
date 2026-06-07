@@ -146,6 +146,21 @@ def test_apply_settings_does_not_rebind_when_shortcuts_unchanged(windows):
     assert hot.unregister_all_calls == 0  # no rebind triggered
 
 
+def test_rebind_hotkeys_tolerates_unregister_all_failure(windows):
+    """If unregister_all raises (Win32 pump thread in a bad state),
+    rebind still attempts to register the new bindings."""
+
+    class _FlakyUnregister(FakeHotkeys):
+        def unregister_all(self):
+            raise RuntimeError("pump thread is sulking")
+
+    hot = _FlakyUnregister()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bound = ctx.rebind_hotkeys()
+    # All shortcuts re-registered despite the unregister failure.
+    assert bound == len(ctx.settings.shortcuts)
+
+
 def test_rebind_hotkeys_no_hotkeys_adapter_is_noop(windows):
     ctx = build(Settings(), windows)  # no hotkeys wired
     assert ctx.rebind_hotkeys() == 0
