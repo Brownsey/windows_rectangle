@@ -12,7 +12,20 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
 - One-shot **`Build-Exe.ps1`** / `Build-Exe.bat` build the single-file
   `dist\WindowsRectangle.exe` and auto-install the runtime deps
   (PyInstaller, PySide6, pywin32). `-InstallStartMenuShortcut` drops a
-  per-user `.lnk` into the Start Menu.
+  per-user `.lnk` into the Start Menu; `-Launch` starts the freshly-
+  built .exe so a contributor can install + run in one step. The
+  script refuses < Python 3.11 and won't try to overwrite a running
+  WindowsRectangle.exe.
+- **`Uninstall-WindowsRectangle.ps1`** — stops a live tray copy,
+  removes the per-user Start-Menu shortcut, removes the
+  `HKCU\…\Run\WindowsRectangle` autostart entry. Pass `-PurgeConfig`
+  to also delete `%APPDATA%\windows_rectangle\`.
+- **`--print-config-path`** and **`--list-shortcuts`** CLI subcommands
+  short-circuit before any Win32 wiring, so they're safe to run while
+  a tray copy is open.
+- **Troubleshooting** section in `README.md` covering tray-icon
+  visibility, hotkey conflicts, elevated windows, PyInstaller lock
+  errors, SmartScreen, and missing PySide6.
 - **`Run-Dev.ps1`** / `Run-Dev.bat` for contributors: launches
   `python -m windows_rectangle` after probing the runtime deps. Forwards
   `-Headless` and `-LogLevel`.

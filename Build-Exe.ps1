@@ -31,6 +31,10 @@
     via the Start menu / search. Idempotent — re-running just refreshes
     the target.
 
+.PARAMETER Launch
+    Auto-start the freshly-built dist\WindowsRectangle.exe at the end of
+    the script. Handy for a one-shot install + run experience.
+
 .EXAMPLE
     .\Build-Exe.ps1
     Builds with the default Python.
@@ -40,8 +44,8 @@
     Builds inside a venv with a fresh build/ cache.
 
 .EXAMPLE
-    .\Build-Exe.ps1 -InstallStartMenuShortcut
-    Build and add a Start-Menu shortcut for the current user.
+    .\Build-Exe.ps1 -InstallStartMenuShortcut -Launch
+    Build, add a Start-Menu shortcut, and launch the .exe in one step.
 #>
 
 [CmdletBinding()]
@@ -49,7 +53,8 @@ param(
     [string] $Python = "python",
     [switch] $Clean,
     [switch] $NoInstall,
-    [switch] $InstallStartMenuShortcut
+    [switch] $InstallStartMenuShortcut,
+    [switch] $Launch
 )
 
 $ErrorActionPreference = "Stop"
@@ -69,6 +74,25 @@ try {
     exit 1
 }
 Write-Host "    $version"
+
+# Reject < 3.11 up front — pyproject.toml asks for 3.11+ and the win32
+# adapters use TypedDict-with-syntax features added in 3.11.
+# `python --version` prints "Python 3.X.Y" to either stdout or stderr
+# depending on shell; capture covers both.
+$verMatch = [regex]::Match([string]$version, "Python\s+(\d+)\.(\d+)")
+if ($verMatch.Success) {
+    $major = [int]$verMatch.Groups[1].Value
+    $minor = [int]$verMatch.Groups[2].Value
+    if (($major -lt 3) -or ($major -eq 3 -and $minor -lt 11)) {
+        Write-Error @"
+This project requires Python 3.11 or newer (found $major.$minor).
+Install a newer Python from https://www.python.org/downloads/ and re-run,
+or point -Python at a different interpreter:
+    .\Build-Exe.ps1 -Python "C:\Path\to\python311\python.exe"
+"@
+        exit 1
+    }
+}
 
 if (-not $NoInstall) {
     Step "Ensuring runtime + build dependencies are installed"
@@ -138,5 +162,18 @@ if ($InstallStartMenuShortcut) {
         Write-Host "    $shortcutPath" -ForegroundColor Green
     } catch {
         Write-Warning ("Shortcut creation failed: {0}" -f $_.Exception.Message)
+    }
+}
+
+if ($Launch) {
+    Step "Launching"
+    # Start-Process so the script returns immediately instead of blocking
+    # on the tray app. The .exe is windowed (no console), so launching it
+    # is fire-and-forget.
+    try {
+        Start-Process -FilePath $exePath
+        Write-Host "    Started — look for the tray icon." -ForegroundColor Green
+    } catch {
+        Write-Warning ("Launch failed: {0}" -f $_.Exception.Message)
     }
 }

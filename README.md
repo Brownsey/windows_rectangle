@@ -48,14 +48,15 @@ You have two ways to run Windows Rectangle:
 Windows SmartScreen may warn the first time you run an unsigned `.exe` —
 click **More info → Run anyway**. Code-signing is a future to-do.
 
-Want it findable via the Start Menu / search? Pass `-InstallStartMenuShortcut`:
+Want it findable via the Start Menu / search? Pass `-InstallStartMenuShortcut`.
+Want to build *and* run in one step? Pass `-Launch`:
 
 ```powershell
-.\Build-Exe.ps1 -InstallStartMenuShortcut
+.\Build-Exe.ps1 -InstallStartMenuShortcut -Launch
 ```
 
-This drops a per-user `Windows Rectangle.lnk` into your Start Menu
-Programs folder — no admin rights needed.
+The script verifies Python ≥ 3.11 up front and refuses to build over a
+running `WindowsRectangle.exe` (it tells you to quit the tray first).
 
 ### Option B — Run from source
 
@@ -166,6 +167,45 @@ The `Build-Exe.ps1` / `Build-Exe.bat` scripts call it. To customise:
   Qml, etc. — see `EXCLUDES` at the top.
 
 ---
+
+## Uninstalling
+
+Symmetric counterpart to `Build-Exe.ps1`:
+
+```powershell
+.\Uninstall-WindowsRectangle.ps1
+```
+
+This stops a running tray copy (asking it to shut down cleanly first),
+removes the per-user Start-Menu shortcut, and removes the `HKCU\…\Run`
+"Launch at login" registry entry. Your config is kept; pass
+`-PurgeConfig` to also delete `%APPDATA%\windows_rectangle\`.
+
+The `.exe` and source tree are left in place — delete them by hand if
+you want them gone too.
+
+## Troubleshooting
+
+- **Tray icon doesn't appear.** Make sure your tray "Notification area"
+  isn't hiding it. Open the up-arrow in the taskbar and drag the icon
+  to a permanent slot. If the .exe seems to have exited, run it from a
+  PowerShell window so you can see the startup log.
+- **A shortcut does nothing.** Right-click the tray → **Binding status…**
+  — if the action is listed under "Failed", another app already owns
+  that combo. Rebind in **Preferences…** or close the conflicting app.
+- **Shortcut works on most windows but not on one specific app.** That
+  app is probably running elevated (Task Manager → Details → "Elevated"
+  column). Windows blocks non-admin processes from moving elevated
+  windows (UIPI). Run Windows Rectangle as administrator if you need it.
+- **PyInstaller build fails with PermissionError.** The script now
+  blocks this — but if you bypass the check, the cause is a live
+  WindowsRectangle.exe locking the file. Quit it via the tray menu and
+  re-run the build.
+- **SmartScreen blocks the .exe.** Click **More info → Run anyway**.
+  The build isn't code-signed yet (see roadmap in `BRIEF.md` §6).
+- **App says PySide6 missing** when running from source. Re-run
+  `.\Run-Dev.ps1` without `-NoInstall`, or install manually with
+  `pip install PySide6 pywin32`.
 
 ## What's new
 
