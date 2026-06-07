@@ -52,6 +52,18 @@ def test_build_creates_dispatcher_with_settings_gap(windows):
     assert ctx.dispatcher.gap == 15
 
 
+def test_build_first_run_defaults_to_false(windows):
+    """No on-disk detection in `build` — the default keeps repeat launches
+    quiet. Only bind_win32 flips this based on config-file presence."""
+    ctx = build(Settings(), windows)
+    assert ctx.first_run is False
+
+
+def test_build_propagates_explicit_first_run_flag(windows):
+    ctx = build(Settings(), windows, first_run=True)
+    assert ctx.first_run is True
+
+
 def test_build_sets_cycle_idle_timeout(windows):
     ctx = build(Settings(cycle_idle_timeout=3.0), windows)
     # The Dispatcher uses the CycleState we passed.

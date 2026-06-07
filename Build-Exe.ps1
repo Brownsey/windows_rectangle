@@ -25,6 +25,12 @@
     Skip the dependency-install step. Useful if you've already installed
     PyInstaller + the win extras and don't want pip to re-resolve.
 
+.PARAMETER InstallStartMenuShortcut
+    After a successful build, drop a "Windows Rectangle.lnk" shortcut into
+    the current user's Start Menu Programs folder so the app is findable
+    via the Start menu / search. Idempotent — re-running just refreshes
+    the target.
+
 .EXAMPLE
     .\Build-Exe.ps1
     Builds with the default Python.
@@ -32,13 +38,18 @@
 .EXAMPLE
     .\Build-Exe.ps1 -Python "C:\Users\Me\.venvs\winrect\Scripts\python.exe" -Clean
     Builds inside a venv with a fresh build/ cache.
+
+.EXAMPLE
+    .\Build-Exe.ps1 -InstallStartMenuShortcut
+    Build and add a Start-Menu shortcut for the current user.
 #>
 
 [CmdletBinding()]
 param(
     [string] $Python = "python",
     [switch] $Clean,
-    [switch] $NoInstall
+    [switch] $NoInstall,
+    [switch] $InstallStartMenuShortcut
 )
 
 $ErrorActionPreference = "Stop"
@@ -95,3 +106,22 @@ $size = (Get-Item $exePath).Length / 1MB
 Step "Done"
 Write-Host ("    {0}  ({1:N1} MB)" -f $exePath, $size) -ForegroundColor Green
 Write-Host "    Double-click to launch, or copy somewhere on PATH."
+
+if ($InstallStartMenuShortcut) {
+    Step "Installing Start Menu shortcut"
+    # Per-user Programs folder — no elevation needed; survives reboots and
+    # is what `Win` key search indexes.
+    $startMenu = [Environment]::GetFolderPath("Programs")
+    $shortcutPath = Join-Path $startMenu "Windows Rectangle.lnk"
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $lnk = $shell.CreateShortcut($shortcutPath)
+        $lnk.TargetPath = $exePath
+        $lnk.WorkingDirectory = Split-Path -Parent $exePath
+        $lnk.Description = "Windows Rectangle — Rectangle-for-Windows window manager"
+        $lnk.Save()
+        Write-Host "    $shortcutPath" -ForegroundColor Green
+    } catch {
+        Write-Warning ("Shortcut creation failed: {0}" -f $_.Exception.Message)
+    }
+}

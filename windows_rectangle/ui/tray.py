@@ -111,6 +111,24 @@ def install(
             _log.debug("tray refresh failed", exc_info=True)
 
     ctx.subscribe_settings(_on_settings)
+
+    # First-run welcome balloon — fires only if AppContext was marked
+    # first_run by bind_win32 (no config file on disk). Keeps repeat
+    # launches noiseless. Best-effort: missing tray-notification
+    # support / muted notifications must not break startup.
+    if getattr(ctx, "first_run", False):
+        try:
+            from PySide6 import QtWidgets
+
+            tray.showMessage(
+                "Windows Rectangle is running",
+                "Right-click the tray icon for Preferences, Cheat sheet, or Quit.",
+                QtWidgets.QSystemTrayIcon.Information,
+                6000,  # 6s — long enough to read, not annoying
+            )
+        except Exception:  # noqa: BLE001
+            _log.debug("first-run balloon failed", exc_info=True)
+
     return tc
 
 

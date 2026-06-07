@@ -34,26 +34,38 @@ You have two ways to run Windows Rectangle:
 Windows SmartScreen may warn the first time you run an unsigned `.exe` —
 click **More info → Run anyway**. Code-signing is a future to-do.
 
+Want it findable via the Start Menu / search? Pass `-InstallStartMenuShortcut`:
+
+```powershell
+.\Build-Exe.ps1 -InstallStartMenuShortcut
+```
+
+This drops a per-user `Windows Rectangle.lnk` into your Start Menu
+Programs folder — no admin rights needed.
+
 ### Option B — Run from source
 
-1. Install Python 3.11+ and the runtime extras:
+For contributors who want the tray running without producing an .exe.
+One shot:
 
-   ```powershell
-   pip install -e ".[win]"
-   ```
+```powershell
+.\Run-Dev.ps1
+```
 
-2. Launch:
+The script installs PySide6 + pywin32 if needed, then launches
+`python -m windows_rectangle`. Pass `-Headless` to skip Qt and run the
+stdlib-only fallback (hotkeys + dispatcher only, no tray):
 
-   ```powershell
-   python -m windows_rectangle
-   ```
+```powershell
+.\Run-Dev.ps1 -Headless
+```
 
-   Or, if you don't have PySide6 installed, run the stdlib-only fallback
-   that exposes hotkeys without a tray:
+You can also do it by hand:
 
-   ```powershell
-   python -m windows_rectangle --headless
-   ```
+```powershell
+pip install -e ".[win]"
+python -m windows_rectangle
+```
 
 ---
 

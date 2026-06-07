@@ -62,6 +62,11 @@ class AppContext:
     autostart_command_line: str | None = None
     single_instance: SingleInstance | None = None
     bus: ActionBus = field(default_factory=ActionBus)
+    # True iff the on-disk config file didn't exist at startup — the tray
+    # uses this to surface a one-shot welcome balloon explaining where
+    # to find Preferences. Set by bind_win32; tests/build() can flip it
+    # explicitly when they want to assert the same UX path.
+    first_run: bool = False
     # Last rect handed to the overlay's on_show, or None when hidden. Used
     # by drain_drag_preview to dedup callbacks at 60 Hz (most ticks are
     # idle — calling Qt's hide() on an already-hidden widget burns time).
@@ -408,6 +413,7 @@ def build(
     single_instance: SingleInstance | None = None,
     bus: ActionBus | None = None,
     cleanup: CleanupRegistry | None = None,
+    first_run: bool = False,
 ) -> AppContext:
     """Construct an AppContext with the supplied (typically faked) ports.
 
@@ -444,6 +450,7 @@ def build(
         autostart_command_line=autostart_command_line,
         single_instance=single_instance,
         bus=bus if bus is not None else ActionBus(),
+        first_run=first_run,
     )
     if hotkeys is not None:
         ctx.cleanup.register(hotkeys.unregister_all)
@@ -536,7 +543,18 @@ def bind_win32(
 
     si = best_single()
     config = JsonConfigStore() if config_path is None else JsonConfigStore(config_path)
+    # Detect first-run BEFORE load() — load() tolerates a missing file by
+    # returning Settings(), so once it's run we can't tell "fresh install"
+    # from "user has an empty config" anymore.
+    first_run = not config.path.exists()
     settings = config.load()
+    # Persist defaults immediately on first launch so the user can find +
+    # hand-edit the file; also flips first_run for the next start.
+    if first_run:
+        try:
+            config.save(settings)
+        except Exception:  # noqa: BLE001
+            _log.warning("first-run config save failed", exc_info=True)
 
     windows = Win32WindowManager()
     hotkeys = Win32Hotkeys()
@@ -550,6 +568,7 @@ def bind_win32(
         autostart=autostart,
         autostart_command_line=command_line,
         single_instance=si,
+        first_run=first_run,
     )
 
     # Hotkey callbacks must not block the pump thread → route via the bus.
