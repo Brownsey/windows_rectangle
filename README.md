@@ -30,6 +30,9 @@ You have two ways to run Windows Rectangle:
    change the gap, enable launch-at-login, etc.
 5. Other tray menu items:
    - **Cheat sheet…** — at-a-glance list of every action and its current combo.
+   - **Binding status…** — shows "X of Y shortcuts bound" plus the specific
+     combos and error messages for any failures (e.g. another app already
+     owns `Ctrl+Alt+←`). Hover the tray icon for the same count in the tooltip.
    - **Reload config from disk** — re-reads the JSON after you hand-edit it.
    - **Open config folder…** — jumps to `%APPDATA%\windows_rectangle\` in
      Explorer (created if missing).

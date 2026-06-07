@@ -37,6 +37,8 @@ HIDDEN = [
     # menu action handler; PyInstaller's static analysis won't see it
     # unless we list it here.
     "windows_rectangle.ui.cheat_sheet",
+    # Tray's "Binding status…" popup likewise lazy-imports the formatter.
+    "windows_rectangle.ui.binding_status_view",
     # PySide6 plugins that QApplication needs at runtime.
     "PySide6.QtCore",
     "PySide6.QtGui",

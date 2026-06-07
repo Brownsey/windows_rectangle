@@ -43,6 +43,41 @@ class SecondInstanceError(RuntimeError):
 _log = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class BindingReport:
+    """Outcome of the last hotkey registration pass.
+
+    Lets the tray surface "X of Y bound" without having to introspect
+    the OS-level Hotkeys adapter. The error message stored in `failed`
+    is the `str(exc)` of whatever the register call raised — it's a
+    human-readable hint, not anything semantically structured.
+    """
+
+    bound: tuple[tuple["Action", str], ...] = ()
+    failed: tuple[tuple["Action", str, str], ...] = ()
+
+    @property
+    def total(self) -> int:
+        return len(self.bound) + len(self.failed)
+
+    @property
+    def bound_count(self) -> int:
+        return len(self.bound)
+
+    @property
+    def failed_count(self) -> int:
+        return len(self.failed)
+
+    @property
+    def all_bound(self) -> bool:
+        return not self.failed and bool(self.bound)
+
+
+# Sentinel "no binding has happened yet" — clearer than None at the call
+# sites that want to display a status line on a fresh AppContext.
+EMPTY_BINDING_REPORT = BindingReport()
+
+
 @dataclass(slots=True)
 class AppContext:
     """One-stop handle on every wired component.
@@ -67,6 +102,15 @@ class AppContext:
     # to find Preferences. Set by bind_win32; tests/build() can flip it
     # explicitly when they want to assert the same UX path.
     first_run: bool = False
+    # Outcome of the last hotkey binding pass. `_bind_shortcuts` writes
+    # here as a side effect so the tray can render a "X of Y bound"
+    # tooltip and a "Binding status…" dialog listing failures without
+    # peeking at the win32 hotkeys adapter directly. Starts as the
+    # empty report so a fresh AppContext (no binding has fired yet)
+    # still has something to format.
+    last_binding_report: BindingReport = field(
+        default_factory=lambda: EMPTY_BINDING_REPORT
+    )
     # Last rect handed to the overlay's on_show, or None when hidden. Used
     # by drain_drag_preview to dedup callbacks at 60 Hz (most ticks are
     # idle — calling Qt's hide() on an already-hidden widget burns time).
@@ -509,16 +553,23 @@ def _bind_shortcuts(
     """Shared loop body for `bind_hotkeys` and `bind_hotkeys_via_bus`.
 
     Per-combo registration failures are caught + logged so one OS clash
-    can't strand the rest of the keymap.
+    can't strand the rest of the keymap. Also writes a `BindingReport`
+    to `ctx.last_binding_report` so the tray can render the result
+    without having to peek at the win32 adapter.
     """
-    bound = 0
+    bound_pairs: list[tuple[Action, str]] = []
+    failed_pairs: list[tuple[Action, str, str]] = []
     for action, combo in ctx.settings.shortcuts.items():
         try:
             register(combo, lambda a=action: dispatch(a))
-            bound += 1
-        except Exception:  # noqa: BLE001 — surface in UI, not as a crash
+            bound_pairs.append((action, combo))
+        except Exception as e:  # noqa: BLE001 — surface in UI, not as a crash
             _log.warning("failed to bind %s -> %s", action.value, combo, exc_info=True)
-    return bound
+            failed_pairs.append((action, combo, str(e)))
+    ctx.last_binding_report = BindingReport(
+        bound=tuple(bound_pairs), failed=tuple(failed_pairs)
+    )
+    return len(bound_pairs)
 
 
 def bind_hotkeys(ctx: AppContext, register: Callable[[str, Callable[[], None]], int]) -> int:
