@@ -98,6 +98,8 @@ def test_lazy_adapter_imports_are_hidden():
         "windows_rectangle.adapters.win_dpi",
         "windows_rectangle.adapters.json_config",
         "windows_rectangle.ui.prefs_dialog",
+        # Tray menu's cheat-sheet popup lazy-imports this.
+        "windows_rectangle.ui.cheat_sheet",
     ):
         assert must in hidden, f"{must} missing from hiddenimports"
 

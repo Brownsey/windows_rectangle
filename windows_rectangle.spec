@@ -33,6 +33,10 @@ HIDDEN = [
     "windows_rectangle.adapters.winreg_autostart",
     # Prefs dialog — lazy import inside open_prefs_window's factory.
     "windows_rectangle.ui.prefs_dialog",
+    # Tray's cheat-sheet popup imports this lazily from inside the
+    # menu action handler; PyInstaller's static analysis won't see it
+    # unless we list it here.
+    "windows_rectangle.ui.cheat_sheet",
     # PySide6 plugins that QApplication needs at runtime.
     "PySide6.QtCore",
     "PySide6.QtGui",
