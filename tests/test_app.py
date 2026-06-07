@@ -103,6 +103,20 @@ def test_apply_settings_toggles_drag_to_edge_enabled(windows):
     assert not ctx.drag.active
 
 
+def test_apply_settings_drag_re_enable_takes_effect_without_restart(windows):
+    """The opposite toggle direction: False → True must also let
+    begin_drag start a session. The bind_mousehook install/uninstall
+    is the separate restart concern documented on that function — but
+    the AppContext-level begin_drag check is live-updated either way."""
+    ctx = build(Settings(drag_to_edge_enabled=False), windows)
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    assert not ctx.drag.active
+
+    ctx.apply_settings(Settings(drag_to_edge_enabled=True))
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    assert ctx.drag.active
+
+
 def test_apply_settings_updates_cycle_timeout(windows):
     ctx = build(Settings(cycle_idle_timeout=1.0), windows)
     ctx.apply_settings(Settings(cycle_idle_timeout=5.5))
