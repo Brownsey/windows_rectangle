@@ -1,19 +1,21 @@
-"""Preferences staging + validation (brief §2 #15).
+"""Preferences staging + launcher (brief §2 #15).
 
-The PySide6 widget hasn't been written yet; this module is the
-pure-Python service it will sit on top of. Splitting it out means we
-can unit-test every interaction the prefs UI cares about — staging a
-gap change, rebinding a shortcut, seeing a duplicate-binding warning —
-without spinning up Qt.
+Two layers in this module:
 
-Lifecycle the UI is expected to use:
-    pc = PrefsController(baseline=current_settings)
-    pc.set_gap(12)
-    pc.set_shortcut(Action.LEFT_HALF, "ctrl+alt+left")
-    if pc.is_dirty:
-        report = pc.validate()
-        if not report.errors:
-            pc.commit(on_save=cs.save, on_apply=ctx.apply_settings)
+1. `PrefsController` — pure-Python staging service. Owns the working
+   copy of Settings, applies validation, exposes `set_*`/`commit`/
+   `revert`. Fully unit-testable without PySide6.
+
+2. `open_prefs_window(ctx, dialog_factory)` — the integration point
+   between the tray menu and a Qt QDialog. Builds a PrefsController
+   from the AppContext, hands it to the supplied `dialog_factory` (a
+   callable returning an object with `.exec() -> bool`), and on
+   acceptance commits via `ctx.config_store.save` + `ctx.apply_settings`.
+
+Splitting these means we can unit-test every interaction the prefs UI
+cares about — staging a gap change, rebinding a shortcut, seeing a
+duplicate-binding warning — without spinning up Qt; and we can pass a
+fake dialog factory in tests to verify the commit-vs-cancel paths.
 
 `commit` does NOT touch the OS itself — the caller wires the save/apply
 callbacks. This keeps the controller importable without any adapters.
@@ -234,3 +236,48 @@ class PrefsController:
         """Deep-copy Settings so mutable fields (`shortcuts` dict) are
         independent between staged and baseline."""
         return copy.deepcopy(settings)
+
+
+# ----- launcher ----------------------------------------------------------
+
+
+# A `DialogFactory` takes the PrefsController and returns an object whose
+# `.exec()` returns True on accept, False on cancel. Real Qt dialogs
+# match this contract; tests can pass a fake.
+class _DialogProtocol:
+    def exec(self) -> bool: ...   # pragma: no cover — typing only
+
+
+DialogFactory = Callable[["PrefsController"], _DialogProtocol]
+
+
+def open_prefs_window(
+    ctx: AppContextLike,
+    *,
+    dialog_factory: DialogFactory,
+) -> ValidationReport | None:
+    """Open the preferences dialog and, on accept, commit through `ctx`.
+
+    Builds a fresh `PrefsController` from `ctx.settings` (so the user
+    edits a snapshot, not the live `ctx`), hands it to `dialog_factory`,
+    and runs the dialog modally. If the user clicks OK, commits via the
+    ctx's `config_store.save` (if present) and `apply_settings`.
+
+    Returns the ValidationReport if a commit happened, or None if the
+    user cancelled. Callers can inspect the report for warnings.
+    """
+    pc = PrefsController(baseline=ctx.settings)
+    dlg = dialog_factory(pc)
+    if not dlg.exec():
+        return None
+    on_save = ctx.config_store.save if ctx.config_store is not None else None
+    return pc.commit(on_save=on_save, on_apply=ctx.apply_settings)
+
+
+# Structural alias for AppContext — we only touch four attributes, so
+# we can stay decoupled from the heavyweight app module.
+class AppContextLike:  # pragma: no cover — typing only
+    settings: Settings
+    config_store: object | None
+
+    def apply_settings(self, settings: Settings) -> None: ...

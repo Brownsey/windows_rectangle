@@ -86,12 +86,21 @@ def _run_qt(ctx) -> int:
     from .ui.overlay import hide as overlay_hide
     from .ui.overlay import install as install_overlay
     from .ui.overlay import show_for as overlay_show_for
+    from .ui.preferences import open_prefs_window
+    from .ui.prefs_dialog import build_dialog as build_prefs_dialog
     from .ui.tray import install as install_tray
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     # The tray is the visible-anywhere control surface; on quit it calls
     # QApplication.quit() which unwinds the event loop.
-    tray = install_tray(ctx)
+
+    def _open_prefs() -> None:
+        try:
+            open_prefs_window(ctx, dialog_factory=build_prefs_dialog)
+        except Exception:  # noqa: BLE001
+            _log.exception("preferences dialog failed")
+
+    tray = install_tray(ctx, on_open_preferences=_open_prefs)
     _log.info("tray installed")
     # Snap-preview overlay (frameless translucent click-through, brief §3).
     overlay: OverlayController | None = None

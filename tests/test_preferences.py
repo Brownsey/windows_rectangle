@@ -171,3 +171,88 @@ def test_validation_report_ok_property():
     assert ValidationReport().ok
     assert not ValidationReport(errors=("x",)).ok
     assert ValidationReport(warnings=("y",)).ok
+
+
+# ----- open_prefs_window launcher --------------------------------------
+
+from windows_rectangle.ui.preferences import open_prefs_window  # noqa: E402
+
+
+class _FakeCtx:
+    """Tiny stand-in matching what open_prefs_window touches on AppContext."""
+
+    def __init__(self, settings):
+        self.settings = settings
+        self.applied: list = []
+        self.config_store = None
+
+    def apply_settings(self, settings):
+        self.applied.append(settings)
+
+
+class _FakeStore:
+    def __init__(self):
+        self.saved: list = []
+
+    def save(self, settings):
+        self.saved.append(settings)
+
+
+def _factory_that(edits, *, accept):
+    """Build a dialog factory that mutates the controller via `edits(pc)`
+    then returns True/False from exec()."""
+
+    class _Dlg:
+        def __init__(self, pc):
+            self._pc = pc
+
+        def exec(self):
+            edits(self._pc)
+            return accept
+
+    return _Dlg
+
+
+def test_open_prefs_window_commit_on_accept():
+    ctx = _FakeCtx(Settings(gap=0))
+    ctx.config_store = _FakeStore()
+    factory = _factory_that(lambda pc: pc.set_gap(15), accept=True)
+    report = open_prefs_window(ctx, dialog_factory=factory)
+    assert report is not None and report.ok
+    assert ctx.applied[0].gap == 15
+    assert ctx.config_store.saved[0].gap == 15
+
+
+def test_open_prefs_window_cancel_does_not_commit():
+    ctx = _FakeCtx(Settings(gap=0))
+    ctx.config_store = _FakeStore()
+    factory = _factory_that(lambda pc: pc.set_gap(15), accept=False)
+    report = open_prefs_window(ctx, dialog_factory=factory)
+    assert report is None
+    assert ctx.applied == []
+    assert ctx.config_store.saved == []
+
+
+def test_open_prefs_window_no_config_store_skips_save_but_still_applies():
+    ctx = _FakeCtx(Settings(gap=0))  # config_store remains None
+    factory = _factory_that(lambda pc: pc.set_gap(15), accept=True)
+    report = open_prefs_window(ctx, dialog_factory=factory)
+    assert report is not None and report.ok
+    assert ctx.applied[0].gap == 15  # apply_settings still fires
+
+
+def test_open_prefs_window_invalid_edits_blocks_commit():
+    """User pushed gap out of range via direct attr access — commit
+    must refuse, and apply/save must not fire."""
+    ctx = _FakeCtx(Settings(gap=10))
+    ctx.config_store = _FakeStore()
+
+    def bad_edits(pc):
+        pc.staged.gap = -50  # bypass set_gap's clamp
+
+    factory = _factory_that(bad_edits, accept=True)
+    report = open_prefs_window(ctx, dialog_factory=factory)
+    assert report is not None
+    assert not report.ok
+    assert ctx.applied == []
+    assert ctx.config_store.saved == []
