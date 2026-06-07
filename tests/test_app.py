@@ -198,6 +198,20 @@ def test_shutdown_tears_down_running_mousehook(windows, monkeypatch):
     assert hook.shutdown_called
 
 
+def test_stop_mousehook_cancels_active_drag_session(windows, monkeypatch):
+    """If the user disables drag-to-edge while a drag is in progress,
+    stopping the hook must also cancel the session — otherwise
+    self.drag.active stays True with no LBUTTON_UP coming to clear it."""
+    _install_fake_mousehook(monkeypatch)
+    ctx = build(Settings(drag_to_edge_enabled=True), windows)
+    ctx.start_mousehook()
+    ctx.begin_drag(Rect(100, 100, 800, 600))
+    assert ctx.drag.active
+
+    ctx.stop_mousehook()
+    assert not ctx.drag.active
+
+
 def test_mousehook_toggles_do_not_grow_cleanup(windows, monkeypatch):
     """Toggling drag-to-edge N times must only ever push one
     stop_mousehook handler into ctx.cleanup. Otherwise a chatty user

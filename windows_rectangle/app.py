@@ -368,7 +368,13 @@ class AppContext:
         return True
 
     def stop_mousehook(self) -> None:
-        """Tear down the WH_MOUSE_LL hook if it's running. Idempotent."""
+        """Tear down the WH_MOUSE_LL hook if it's running. Idempotent.
+
+        Also cancels any active drag session — otherwise disabling
+        drag-to-edge mid-drag would leave `self.drag.active = True`
+        with no hook left to deliver the LBUTTON_UP that would end it,
+        stranding the overlay until the next drag-then-release cycle.
+        """
         if self._mousehook is None:
             return
         hook, detector = self._mousehook
@@ -381,6 +387,10 @@ class AppContext:
             detector.reset()
         except Exception:  # noqa: BLE001
             _log.debug("detector reset raised", exc_info=True)
+        # Strand-proof: drop any in-flight session so drain_drag_preview
+        # hides the overlay and ctx.drag.active goes back to False.
+        if self.drag.active:
+            self.drag.cancel()
 
     def shutdown(self) -> int:
         """Run every registered cleanup (brief §5 #11). Returns count."""
