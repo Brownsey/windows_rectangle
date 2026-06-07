@@ -225,9 +225,13 @@ def apply(
     Raises KeyError for actions that aren't pure geometry transforms
     (RESTORE, NEXT_DISPLAY, PREV_DISPLAY) — those are dispatcher-level.
 
-    `almost_maximize_scale` is honoured only for `Action.ALMOST_MAXIMIZE`;
-    other actions ignore it. Passed as a kwarg so we can keep the public
-    surface stable for callers that don't care.
+    `almost_maximize_scale`:
+      - Honoured only for `Action.ALMOST_MAXIMIZE`; other actions ignore it.
+      - `None` (default) → use the module-level `ALMOST_MAXIMIZE_SCALE`
+        constant, matching the pre-prefs-wiring behaviour.
+      - Any float → overrides for this dispatch (settings-driven path).
+      Kept as a kwarg so callers that don't care about the scale don't
+      need to import the constant just to repeat it.
     """
     try:
         handler = _HANDLERS[action]
