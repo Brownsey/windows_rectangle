@@ -84,7 +84,12 @@ class AppContext:
     # start_mousehook / stop_mousehook so the drag-to-edge toggle in
     # prefs can flip without restarting the app (lifts the documented
     # restriction noted on bind_mousehook).
-    _mousehook: object | None = field(default=None, init=False, repr=False)
+    # Concrete element types are intentionally vague (`object`) because
+    # the hook class is a lazy Win32 import — annotating the precise
+    # type here would force the adapter import at module load.
+    _mousehook: tuple[object, object] | None = field(
+        default=None, init=False, repr=False
+    )
     # One-shot guard for stop_mousehook cleanup registration. start_mousehook
     # is called once at startup and again on every False→True drag-to-edge
     # toggle; without this guard each install would push a duplicate
@@ -366,7 +371,7 @@ class AppContext:
         """Tear down the WH_MOUSE_LL hook if it's running. Idempotent."""
         if self._mousehook is None:
             return
-        hook, detector = self._mousehook  # type: ignore[misc]
+        hook, detector = self._mousehook
         self._mousehook = None
         try:
             hook.shutdown()
