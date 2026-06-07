@@ -187,6 +187,43 @@ def test_cancel_drag_clears_without_dispatching(windows):
     assert windows.windows[101] == original  # unchanged
 
 
+def test_begin_drag_for_active_window_starts_session(windows):
+    ctx = build(Settings(), windows)
+    started = ctx.begin_drag_for_active_window()
+    assert started
+    assert ctx.drag.active
+
+
+def test_begin_drag_for_active_window_returns_false_when_disabled(windows):
+    ctx = build(Settings(drag_to_edge_enabled=False), windows)
+    assert ctx.begin_drag_for_active_window() is False
+    assert not ctx.drag.active
+
+
+def test_begin_drag_for_active_window_returns_false_when_no_active(windows):
+    windows.active = None
+    ctx = build(Settings(), windows)
+    assert ctx.begin_drag_for_active_window() is False
+    assert not ctx.drag.active
+
+
+def test_begin_drag_for_active_window_handles_rect_lookup_failure():
+    """If the adapter raises looking up the window rect (e.g. window
+    closed between get_active_window and get_window_rect), we treat it
+    as 'no eligible window' and return False rather than crashing."""
+
+    class RaisingWM(FakeWindowManager):
+        def get_window_rect(self, handle):
+            raise OSError("window vanished")
+
+    wm = RaisingWM(monitors=[M1])
+    wm.windows[101] = Rect(100, 100, 800, 600)
+    wm.active = 101
+    ctx = build(Settings(), wm)
+    assert ctx.begin_drag_for_active_window() is False
+    assert not ctx.drag.active
+
+
 def test_apply_settings_propagates_gap_to_drag(windows):
     ctx = build(Settings(gap=0), windows)
     ctx.apply_settings(Settings(gap=12))

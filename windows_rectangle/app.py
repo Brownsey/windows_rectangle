@@ -105,6 +105,26 @@ class AppContext:
         self.drag.gap = self.settings.gap
         self.drag.start(window)
 
+    def begin_drag_for_active_window(self) -> bool:
+        """Look up the foreground window and begin a drag session for it.
+
+        Returns True iff a session was started — i.e. drag-to-edge is
+        enabled, the foreground window exists, and it's eligible for
+        movement. Designed for `DragDetector.on_begin`.
+        """
+        if not self.settings.drag_to_edge_enabled:
+            return False
+        handle = self.windows.get_active_window()
+        if handle is None:
+            return False
+        try:
+            rect = self.windows.get_window_rect(handle)
+        except Exception:  # noqa: BLE001 — adapter raised, treat as no eligible window
+            _log.debug("get_window_rect failed during drag begin", exc_info=True)
+            return False
+        self.begin_drag(rect)
+        return self.drag.active
+
     def drag_update(self, x: int, y: int) -> None:
         """Mouse-hook hot-path callback. O(1)."""
         self.drag.update(x, y)
@@ -291,4 +311,54 @@ def bind_win32(
 
     # Tear down the hotkey pump on shutdown.
     ctx.cleanup.register(hotkeys.shutdown)
+
+    # Drag-to-edge: install the low-level mouse hook and wire it through
+    # the detector to the drag-snap facade. Best-effort — a hook failure
+    # must not block startup (the keyboard shortcuts still work).
+    try:
+        bind_mousehook(ctx)
+    except Exception:  # noqa: BLE001
+        _log.warning("mouse hook install failed — drag-to-edge disabled", exc_info=True)
+
     return ctx
+
+
+def bind_mousehook(ctx: AppContext) -> None:
+    """Install Win32MouseHook and route its events through a DragDetector
+    into `ctx`'s drag-snap facade. Registers shutdown in `ctx.cleanup`.
+
+    The detector's `on_begin` calls back into the WindowManager on the
+    hook thread to look up the active window. That's a fast read of
+    GetForegroundWindow / GetWindowRect — well within the WH_MOUSE_LL
+    latency budget (brief §5 #7).
+
+    Update + end run on the hook thread too. `drag.update()` only sets
+    a LatestValue (O(1), brief §5 #7). `end_drag()` calls the dispatcher,
+    which could be expensive — in production __main__ wraps end with an
+    ActionBus.submit so the dispatch lands on the Qt thread.
+    """
+    from .adapters.win32_mousehook import (
+        EVENT_LBUTTON_DOWN,
+        EVENT_LBUTTON_UP,
+        EVENT_MOVE,
+        Win32MouseHook,
+    )
+    from .core.dragdetector import DragDetector
+
+    detector = DragDetector(
+        on_begin=lambda x, y: ctx.begin_drag_for_active_window(),
+        on_update=ctx.drag_update,
+        on_end=lambda: ctx.end_drag(),
+    )
+
+    def on_event(kind: str, x: int, y: int) -> None:
+        if kind == EVENT_MOVE:
+            detector.on_move(x, y)
+        elif kind == EVENT_LBUTTON_DOWN:
+            detector.on_button_down(x, y)
+        elif kind == EVENT_LBUTTON_UP:
+            detector.on_button_up(x, y)
+
+    hook = Win32MouseHook(on_event=on_event)
+    ctx.cleanup.register(hook.shutdown)
+    ctx.cleanup.register(detector.reset)
