@@ -298,3 +298,39 @@ def test_open_prefs_window_invalid_edits_blocks_commit():
     assert not report.ok
     assert ctx.applied == []
     assert ctx.config_store.saved == []
+
+
+def test_open_prefs_window_end_to_end_almost_maximize_scale(tmp_path):
+    """Real AppContext + real PrefsController, fake dialog. User changes
+    almost_maximize_scale; assert the next ALMOST_MAXIMIZE dispatch
+    honours the new value. Covers the iter 60 wiring all the way through
+    open_prefs_window."""
+    from tests.conftest import FakeWindowManager, make_monitor
+    from windows_rectangle.app import build
+    from windows_rectangle.core.actions import Action
+    from windows_rectangle.core.geometry import Rect
+
+    m1 = make_monitor(1, 0, 0, 1920, 1080, primary=True)
+    wm = FakeWindowManager(monitors=[m1])
+    wm.windows[101] = Rect(100, 100, 800, 600)
+    wm.active = 101
+    ctx = build(Settings(almost_maximize_scale=0.85), wm)
+
+    # Fake dialog that pulls scale from 0.85 to 0.50 and accepts.
+    class _Dlg:
+        def __init__(self, pc):
+            self._pc = pc
+
+        def exec(self):
+            self._pc.set_almost_maximize_scale(0.50)
+            return True
+
+    report = open_prefs_window(ctx, dialog_factory=_Dlg)
+    assert report is not None and report.ok
+    # Dispatcher heard the change.
+    assert ctx.dispatcher.almost_maximize_scale == 0.50
+    # Real ALMOST_MAXIMIZE dispatch produces a 50%-sized rect.
+    ctx.dispatcher.dispatch(Action.ALMOST_MAXIMIZE)
+    r = wm.windows[101]
+    assert r.width == int(1920 * 0.50)
+    assert r.height == int(1040 * 0.50)
