@@ -670,7 +670,8 @@ def test_sync_autostart_noop_without_command_line(windows):
     from windows_rectangle.adapters.winreg_autostart import MemoryAutoStart
     a = MemoryAutoStart()
     # No command_line supplied → sync should do nothing.
-    ctx = build(Settings(launch_at_login=True), windows, autostart=a)
+    # build()'s sync_autostart fires as a side-effect; we assert via `a`.
+    build(Settings(launch_at_login=True), windows, autostart=a)
     assert not a.is_enabled()
 
 
