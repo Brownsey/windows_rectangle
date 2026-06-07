@@ -9,6 +9,7 @@ clone without the heavyweight Qt dependency.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import signal
 import sys
@@ -71,6 +72,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--check-install-json",
         action="store_true",
         help="like --check-install but emit machine-readable JSON.",
+    )
+    p.add_argument(
+        "--export-config",
+        metavar="PATH",
+        default=None,
+        help=(
+            "snapshot the current %%APPDATA%%\\windows_rectangle\\config.json "
+            "to PATH and exit. Use for backups or moving settings to "
+            "another machine."
+        ),
+    )
+    p.add_argument(
+        "--import-config",
+        metavar="PATH",
+        default=None,
+        help=(
+            "load settings from PATH and overwrite the current config, "
+            "then exit. Take effect on the next launch."
+        ),
     )
     return p.parse_args(argv)
 
@@ -215,6 +235,30 @@ def _run_informational(args: argparse.Namespace) -> int:
         from .diagnostics import run_check_install
 
         return run_check_install(json_output=args.check_install_json)
+
+    if args.export_config is not None:
+        from .adapters.json_config import JsonConfigStore
+
+        store = JsonConfigStore()
+        dest = store.export_to(args.export_config)
+        print(f"exported settings to: {dest}")
+        return 0
+
+    if args.import_config is not None:
+        from .adapters.json_config import JsonConfigStore
+
+        store = JsonConfigStore()
+        try:
+            store.import_from(args.import_config)
+        except FileNotFoundError as e:
+            print(f"import failed: {e}", file=sys.stderr)
+            return 1
+        except json.JSONDecodeError as e:
+            print(f"import failed: {args.import_config} is not valid JSON ({e})", file=sys.stderr)
+            return 1
+        print(f"imported settings from: {args.import_config}")
+        print(f"saved to: {store.path}")
+        return 0
 
     return -1
 

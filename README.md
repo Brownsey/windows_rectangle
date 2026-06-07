@@ -158,6 +158,12 @@ a tray copy is open:
 
 # Print every action and its currently-configured shortcut
 .\dist\WindowsRectangle.exe --list-shortcuts
+
+# Snapshot your settings to a portable file (backup / new machine)
+.\dist\WindowsRectangle.exe --export-config "C:\Backup\winrect.json"
+
+# Restore settings from a snapshot on this machine — takes effect on next launch
+.\dist\WindowsRectangle.exe --import-config "C:\Backup\winrect.json"
 ```
 
 ---

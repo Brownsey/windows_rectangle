@@ -37,10 +37,25 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
   opens the log in the user's default text app (or its parent folder
   if nothing has been logged yet).
 
+- **`--export-config <PATH>`** snapshots the current settings to a
+  portable JSON file (uses the same atomic write path as `save`).
+- **`--import-config <PATH>`** loads settings from a snapshot and
+  persists them as the new config. Both flags short-circuit before
+  `bind_win32`, so they're safe to use while a tray copy is open.
+  Designed for backups + moving config between machines.
+
 ### Changed
 - Tray tooltip now appends ` • paused` when the user has clicked
   **Pause shortcuts**, so an `0/22 bound` count looks intentional
   instead of broken.
+
+### Fixed
+- `JsonConfigStore._atomic_write` now closes the temp-file handle
+  before unlinking on the error path; the previous code relied on
+  `os.unlink` succeeding while the handle was still open, which fails
+  with `PermissionError` on Windows and silently leaked the `.tmp`
+  file into the config folder. Locked in by the new
+  `test_export_is_atomic`.
 - **Troubleshooting** section in `README.md` covering tray-icon
   visibility, hotkey conflicts, elevated windows, PyInstaller lock
   errors, SmartScreen, and missing PySide6.

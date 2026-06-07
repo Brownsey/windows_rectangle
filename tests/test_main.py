@@ -116,6 +116,68 @@ def test_main_list_shortcuts_short_circuits_before_bind_win32(monkeypatch, capsy
     assert "ctrl+alt+left" in out  # DEFAULT_SHORTCUTS combo for LEFT_HALF
 
 
+def test_export_and_import_via_cli_round_trips(monkeypatch, capsys, tmp_path):
+    """End-to-end: --export-config writes a file the new machine can
+    --import-config into. Both subcommands must short-circuit before
+    bind_win32 since they're file-only operations."""
+    import windows_rectangle.__main__ as m
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+
+    def fail_bind(**_):
+        raise AssertionError("bind_win32 was called for export/import")
+
+    monkeypatch.setattr(m, "bind_win32", fail_bind)
+
+    # Seed an on-disk config by calling load + save through the store
+    # the same way --export-config will.
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+    from windows_rectangle.ports.config_store import Settings
+
+    store = JsonConfigStore()
+    store.save(Settings(gap=33))
+
+    snapshot = tmp_path / "snap.json"
+    rc = m.main(["--export-config", str(snapshot)])
+    assert rc == 0
+    assert snapshot.exists()
+    assert "exported settings to" in capsys.readouterr().out
+
+    # Move "appdata" out of the way to simulate a fresh machine.
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata2"))
+    rc = m.main(["--import-config", str(snapshot)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "imported settings from" in out
+    # Verify the new config was actually persisted.
+    new_store = JsonConfigStore()
+    assert new_store.load().gap == 33
+
+
+def test_import_missing_file_returns_1(monkeypatch, capsys, tmp_path):
+    import windows_rectangle.__main__ as m
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+    rc = m.main(["--import-config", str(tmp_path / "nope.json")])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "import failed" in err
+
+
+def test_import_bad_json_returns_1(monkeypatch, capsys, tmp_path):
+    import windows_rectangle.__main__ as m
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("not { json", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+    rc = m.main(["--import-config", str(bad)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "not valid JSON" in err
+
+
 def test_setup_logging_sets_root_level():
     """_setup_logging maps --log-level to logging.basicConfig's level."""
     import logging

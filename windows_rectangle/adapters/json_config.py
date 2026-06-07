@@ -51,17 +51,64 @@ class JsonConfigStore:
         return _from_dict(raw)
 
     def save(self, settings: Settings) -> None:
+        self._atomic_write(self.path, _to_dict(settings))
+
+    # ----- backup / migration helpers --------------------------------
+
+    def export_to(self, destination: str | Path, settings: Settings | None = None) -> Path:
+        """Write `settings` (or the currently-loaded settings) to `destination`.
+
+        Used by `--export-config` for backup + cross-machine migration.
+        Writes via the same atomic temp-file path as `save`, so a half-
+        written export from a power cut can't corrupt the destination.
+        Returns the resolved destination path.
+        """
+        dest = Path(destination).expanduser().resolve()
+        if settings is None:
+            settings = self.load()
+        self._atomic_write(dest, _to_dict(settings))
+        return dest
+
+    def import_from(self, source: str | Path) -> Settings:
+        """Read settings from `source` and persist them to `self.path`.
+
+        Raises FileNotFoundError if the source is missing, JSONDecodeError
+        if it's not valid JSON. Unknown fields / keys are tolerated by
+        `_from_dict`'s lenient decode — a file produced by a newer
+        version mostly works, and an older file picks up any new fields
+        as their dataclass defaults.
+
+        Used by `--import-config` for cross-machine migration; the caller
+        can then `apply_settings(...)` to take effect without restart.
+        """
+        src = Path(source).expanduser().resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"import source does not exist: {src}")
+        raw = json.loads(src.read_text(encoding="utf-8"))
+        settings = _from_dict(raw)
+        self.save(settings)
+        return settings
+
+    # ----- internals --------------------------------------------------
+
+    @staticmethod
+    def _atomic_write(target: Path, payload: dict) -> None:
+        """Write JSON to `target` atomically via temp file + rename.
+
+        Cleanup on error must close the handle BEFORE unlinking — on
+        Windows `os.unlink` fails (PermissionError, an OSError) while
+        any process holds an open handle to the file, and our
+        `contextlib.suppress(OSError)` would then silently leak the
+        .tmp into the target directory.
+        """
         import contextlib
 
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = _to_dict(settings)
-        # Atomic write: temp file in the same directory, then rename.
-        # Same-directory rename is atomic on Windows + POSIX.
+        target.parent.mkdir(parents=True, exist_ok=True)
         tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 -- delete=False is correct here
             mode="w",
             encoding="utf-8",
-            dir=str(self.path.parent),
-            prefix=self.path.name + ".",
+            dir=str(target.parent),
+            prefix=target.name + ".",
             suffix=".tmp",
             delete=False,
         )
@@ -70,8 +117,10 @@ class JsonConfigStore:
             tmp.flush()
             os.fsync(tmp.fileno())
             tmp.close()
-            os.replace(tmp.name, self.path)
+            os.replace(tmp.name, target)
         except Exception:
+            with contextlib.suppress(Exception):
+                tmp.close()  # idempotent; safe on already-closed file
             with contextlib.suppress(OSError):
                 os.unlink(tmp.name)
             raise

@@ -160,3 +160,109 @@ def test_future_action_falls_back_to_default(store):
     store.path.write_text(json.dumps(payload))
     loaded = store.load()
     assert loaded.shortcuts[Action.LEFT_HALF] == DEFAULT_SHORTCUTS[Action.LEFT_HALF]
+
+
+# ----- export / import (cross-machine migration) ----------------------
+
+
+def test_export_to_writes_json_file(store, tmp_path):
+    """`export_to` snapshots the on-disk settings to a chosen destination
+    — used for backups + moving config between machines."""
+    s = Settings(gap=22)
+    s.shortcuts[Action.MAXIMIZE] = "ctrl+shift+space"
+    store.save(s)
+
+    dest = tmp_path / "export" / "snapshot.json"
+    out = store.export_to(dest)
+    assert out == dest.resolve()
+    assert dest.exists()
+    data = json.loads(dest.read_text(encoding="utf-8"))
+    assert data["gap"] == 22
+    assert data["shortcuts"]["maximize"] == "ctrl+shift+space"
+
+
+def test_export_to_accepts_explicit_settings(store, tmp_path):
+    """Caller can pass settings directly (e.g. the prefs dialog's
+    staged copy) so the export reflects what's about to be saved
+    rather than re-loading from disk."""
+    dest = tmp_path / "export.json"
+    explicit = Settings(gap=99)
+    store.export_to(dest, settings=explicit)
+    data = json.loads(dest.read_text(encoding="utf-8"))
+    assert data["gap"] == 99
+
+
+def test_export_is_atomic(store, tmp_path, monkeypatch):
+    """If the JSON dump raises, the destination must not be touched —
+    otherwise a power-cut during export would corrupt a previously-good
+    snapshot. We monkeypatch json.dump on the adapter module's lookup
+    and confirm no .json or .tmp survives the failure."""
+    import windows_rectangle.adapters.json_config as adapter
+
+    dest = tmp_path / "export.json"
+    real_dump = adapter.json.dump
+
+    def boom(*args, **kwargs):
+        real_dump(*args, **kwargs)  # write to the tmp file first
+        raise RuntimeError("simulated failure mid-export")
+
+    monkeypatch.setattr(adapter.json, "dump", boom)
+    with pytest.raises(RuntimeError):
+        store.export_to(dest)
+    assert not dest.exists()
+    # No leaked .tmp either.
+    leftovers = list(dest.parent.glob("export.json.*.tmp"))
+    assert leftovers == []
+
+
+def test_import_from_loads_and_persists(store, tmp_path):
+    """import_from reads JSON, parses through _from_dict's lenient
+    decode, then atomically persists to self.path so the next launch
+    picks up the imported settings."""
+    src = tmp_path / "src.json"
+    src.write_text(json.dumps({
+        "gap": 17,
+        "launch_at_login": False,
+        "drag_to_edge_enabled": True,
+        "cycle_idle_timeout": 1.0,
+        "almost_maximize_scale": 0.85,
+        "shortcuts": {a.value: c for a, c in DEFAULT_SHORTCUTS.items()},
+        "schema_version": SCHEMA_VERSION,
+    }), encoding="utf-8")
+    returned = store.import_from(src)
+    assert returned.gap == 17
+    # Now the store's on-disk file reflects the import.
+    loaded = store.load()
+    assert loaded.gap == 17
+
+
+def test_import_from_missing_file_raises(store, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        store.import_from(tmp_path / "nope.json")
+
+
+def test_import_from_bad_json_raises(store, tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json {", encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        store.import_from(bad)
+
+
+def test_export_then_import_round_trips(store, tmp_path):
+    """Lock in the migration contract: export from A, import to B,
+    settings come back equal field-for-field."""
+    original = Settings(gap=8, drag_to_edge_enabled=False, almost_maximize_scale=0.5)
+    original.shortcuts[Action.LEFT_HALF] = "ctrl+alt+shift+left"
+    store.save(original)
+
+    snapshot = tmp_path / "snap.json"
+    store.export_to(snapshot)
+
+    # Simulate a fresh machine with a different on-disk config.
+    fresh = JsonConfigStore(tmp_path / "new_machine" / "config.json")
+    fresh.import_from(snapshot)
+    migrated = fresh.load()
+    assert migrated.gap == 8
+    assert migrated.drag_to_edge_enabled is False
+    assert migrated.almost_maximize_scale == 0.5
+    assert migrated.shortcuts[Action.LEFT_HALF] == "ctrl+alt+shift+left"
