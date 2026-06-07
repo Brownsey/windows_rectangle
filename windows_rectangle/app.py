@@ -437,25 +437,22 @@ def bind_win32(
     return ctx
 
 
-def bind_mousehook(ctx: AppContext) -> None:
-    """Install Win32MouseHook and route its events through a DragDetector
-    into `ctx`'s drag-snap facade. Registers shutdown in `ctx.cleanup`.
+def make_drag_event_dispatcher(
+    ctx: AppContext,
+) -> tuple[Callable[[str, int, int], None], object]:
+    """Build the on_event closure and the DragDetector it drives.
 
-    The detector's `on_begin` calls back into the WindowManager on the
-    hook thread to look up the active window. That's a fast read of
-    GetForegroundWindow / GetWindowRect — well within the WH_MOUSE_LL
-    latency budget (brief §5 #7).
-
-    Update + end run on the hook thread too. `drag.update()` only sets
-    a LatestValue (O(1), brief §5 #7). `end_drag()` calls the dispatcher,
-    which could be expensive — in production __main__ wraps end with an
-    ActionBus.submit so the dispatch lands on the Qt thread.
+    Pure-Python (no win32 imports), so tests can drive synthetic event
+    streams through it without installing a real WH_MOUSE_LL hook.
+    Returns (on_event, detector) — the detector is returned so callers
+    can also register `detector.reset` for shutdown.
     """
+    # Lazy: the kind constants are simple strings, but importing the
+    # adapter module here keeps the symbol source-of-truth in one place.
     from .adapters.win32_mousehook import (
         EVENT_LBUTTON_DOWN,
         EVENT_LBUTTON_UP,
         EVENT_MOVE,
-        Win32MouseHook,
     )
     from .core.dragdetector import DragDetector
 
@@ -473,6 +470,26 @@ def bind_mousehook(ctx: AppContext) -> None:
         elif kind == EVENT_LBUTTON_UP:
             detector.on_button_up(x, y)
 
+    return on_event, detector
+
+
+def bind_mousehook(ctx: AppContext) -> None:
+    """Install Win32MouseHook and route its events through a DragDetector
+    into `ctx`'s drag-snap facade. Registers shutdown in `ctx.cleanup`.
+
+    The detector's `on_begin` calls back into the WindowManager on the
+    hook thread to look up the active window. That's a fast read of
+    GetForegroundWindow / GetWindowRect — well within the WH_MOUSE_LL
+    latency budget (brief §5 #7).
+
+    Update + end run on the hook thread too. `drag.update()` only sets
+    a LatestValue (O(1), brief §5 #7). `end_drag()` calls the dispatcher,
+    which could be expensive — in production __main__ wraps end with an
+    ActionBus.submit so the dispatch lands on the Qt thread.
+    """
+    from .adapters.win32_mousehook import Win32MouseHook
+
+    on_event, detector = make_drag_event_dispatcher(ctx)
     hook = Win32MouseHook(on_event=on_event)
     ctx.cleanup.register(hook.shutdown)
     ctx.cleanup.register(detector.reset)

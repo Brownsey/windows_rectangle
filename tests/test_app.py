@@ -349,6 +349,40 @@ def test_drain_drag_preview_hides_once_after_being_shown(windows):
     assert hidden == [True]
 
 
+def test_drag_event_dispatcher_routes_kinds(windows):
+    """The on_event closure built by make_drag_event_dispatcher must
+    route MOVE/LBUTTON_DOWN/LBUTTON_UP into the detector's state machine."""
+    from windows_rectangle.adapters.win32_mousehook import (
+        EVENT_LBUTTON_DOWN,
+        EVENT_LBUTTON_UP,
+        EVENT_MOVE,
+    )
+    from windows_rectangle.app import make_drag_event_dispatcher
+
+    ctx = build(Settings(), windows)
+    on_event, detector = make_drag_event_dispatcher(ctx)
+
+    assert detector.state == "idle"
+    on_event(EVENT_LBUTTON_DOWN, 100, 100)
+    assert detector.state == "armed"
+    on_event(EVENT_MOVE, 120, 120)         # past 5-px threshold
+    assert detector.state == "dragging"
+    on_event(EVENT_LBUTTON_UP, 120, 120)
+    assert detector.state == "idle"
+
+
+def test_drag_event_dispatcher_ignores_unknown_kinds(windows):
+    """Right-button / middle-button / wheel events the snap pipeline
+    doesn't care about must be silent no-ops, not raise."""
+    from windows_rectangle.app import make_drag_event_dispatcher
+
+    ctx = build(Settings(), windows)
+    on_event, detector = make_drag_event_dispatcher(ctx)
+    on_event("rbutton_down", 1, 1)
+    on_event("scroll_up", 1, 1)
+    assert detector.state == "idle"  # untouched
+
+
 def test_subscribe_settings_fires_on_apply(windows):
     ctx = build(Settings(), windows)
     seen: list = []
