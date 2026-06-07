@@ -78,7 +78,16 @@ def _run_qt(ctx) -> int:
     """Qt loop with a 16ms QTimer that drains the ActionBus on the GUI thread."""
     from PySide6 import QtCore, QtWidgets
 
+    from .ui.tray import install as install_tray
+
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    # The tray is the visible-anywhere control surface; on quit it calls
+    # QApplication.quit() which unwinds the event loop.
+    tray = install_tray(ctx)
+    _log.info("tray installed")
+    # Keep a strong reference on the QApplication so it lives as long as the loop.
+    app._tray = tray  # type: ignore[attr-defined]
+
     timer = QtCore.QTimer()
     timer.setInterval(16)  # ~60 Hz; brief §5 #7 mouse-snap throttle target
     timer.timeout.connect(ctx.drain_actions)
