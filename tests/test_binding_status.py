@@ -187,3 +187,54 @@ def test_html_clean_when_everything_bound():
     assert ">1</b>" in out
     # No failed-count, no "Failed" header.
     assert "failed" not in out.lower()
+
+
+# ----- paused state rendering -----------------------------------------
+
+
+def test_paused_report_html_uses_resume_header():
+    """A paused report shouldn't render entries as 'Bound' — they're not
+    currently live. The 'Would re-register on resume' header makes the
+    state clear, and the summary line marks "(paused)"."""
+    report = BindingReport(
+        bound=((Action.LEFT_HALF, "ctrl+alt+left"),),
+        failed=(),
+        paused=True,
+    )
+    out = binding_status_html(report)
+    assert "(paused)" in out
+    assert "Would re-register on resume" in out
+    assert "Bound</h4>" not in out
+
+
+def test_paused_text_renders_distinctly():
+    report = BindingReport(
+        bound=((Action.LEFT_HALF, "ctrl+alt+left"),),
+        failed=(),
+        paused=True,
+    )
+    out = binding_status_text(report)
+    assert "(paused)" in out
+    assert "Would re-register on resume:" in out
+
+
+def test_paused_empty_report_html_message():
+    """No prior binding ever ran but the user paused (corner case) —
+    still get a paused-aware message rather than 'no binding has run'."""
+    report = BindingReport(bound=(), failed=(), paused=True)
+    out = binding_status_html(report)
+    assert "paused" in out.lower()
+
+
+def test_bound_count_collapses_when_paused():
+    """The currently-live count must be 0 while paused (nothing is
+    registered with Windows), but would_bind_count keeps the staged
+    number visible for the tooltip / dialog."""
+    report = BindingReport(
+        bound=((Action.LEFT_HALF, "ctrl+alt+left"),),
+        failed=(),
+        paused=True,
+    )
+    assert report.bound_count == 0
+    assert report.would_bind_count == 1
+    assert report.all_bound is False

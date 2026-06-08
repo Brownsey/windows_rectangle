@@ -84,22 +84,33 @@ class JsonConfigStore:
     def import_from(self, source: str | Path) -> Settings:
         """Read settings from `source` and persist them to `self.path`.
 
-        Raises FileNotFoundError if the source is missing, JSONDecodeError
-        if it's not valid JSON. Unknown fields / keys are tolerated by
-        `_from_dict`'s lenient decode — a file produced by a newer
-        version mostly works, and an older file picks up any new fields
-        as their dataclass defaults.
-
         Used by `--import-config` for cross-machine migration; the caller
         can then `apply_settings(...)` to take effect without restart.
+        Equivalent to `parse_path(source)` + `save(...)`.
+        """
+        settings = self.parse_path(source)
+        self.save(settings)
+        return settings
+
+    @staticmethod
+    def parse_path(source: str | Path) -> Settings:
+        """Parse `source` into a Settings without persisting.
+
+        Public counterpart to the private `_from_dict` — used by
+        `--import-config --dry-run` to preview without writing, and
+        by `import_from` itself.
+
+        Raises FileNotFoundError if the source is missing, JSONDecodeError
+        if it's not valid JSON. Unknown fields / keys are tolerated by
+        the lenient `_from_dict` decode — a file produced by a newer
+        version mostly works, and an older file picks up any new fields
+        as their dataclass defaults.
         """
         src = Path(source).expanduser().resolve()
         if not src.exists():
             raise FileNotFoundError(f"import source does not exist: {src}")
         raw = json.loads(src.read_text(encoding="utf-8"))
-        settings = _from_dict(raw)
-        self.save(settings)
-        return settings
+        return _from_dict(raw)
 
     # ----- internals --------------------------------------------------
 

@@ -70,6 +70,17 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
   when the config JSON is unreadable, instead of silently falling back
   to defaults. The user gets a searchable log line pointing at the
   file to fix.
+- `BindingReport` gains an explicit `paused: bool` flag plus a
+  `would_bind_count` property. `pause_hotkeys` no longer squashes
+  the previously-bound entries into `failed` with a "paused"
+  string; it sets the flag and the Binding Status dialog renders a
+  greyed-out "Would re-register on resume" section instead of the
+  misleading red "Failed" list. The tooltip stays "X/Y bound" with
+  the denominator stable across pause/resume.
+- `JsonConfigStore.parse_path(source)` is now the public way to read a
+  Settings without persisting; `import_from` reuses it and
+  `--import-config --dry-run` calls it directly instead of poking
+  into the private `_from_dict`.
 
 ### Changed
 - Tray tooltip now appends ` • paused` when the user has clicked

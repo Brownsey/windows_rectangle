@@ -221,6 +221,10 @@ def _tooltip_for(ctx: AppContext) -> str:
     Shows gap (always), binding count when a binding has fired, and
     a paused indicator so a user can't be fooled into thinking
     "0/22 bound" means broken when it actually means paused.
+
+    When paused: the live numerator is 0 (nothing registered with
+    Windows) but the denominator stays at would_bind_count so the
+    user can still see how many bindings would come back on resume.
     """
     gap = getattr(ctx.settings, "gap", 0)
     paused = bool(getattr(ctx, "paused", False))
@@ -228,9 +232,10 @@ def _tooltip_for(ctx: AppContext) -> str:
     suffix = " • paused" if paused else ""
     if report is None or report.total == 0:
         return f"Windows Rectangle • {gap}px gap{suffix}"
+    denom = getattr(report, "would_bind_count", report.bound_count) + report.failed_count
     return (
         f"Windows Rectangle • {gap}px gap • "
-        f"{report.bound_count}/{report.total} shortcuts bound{suffix}"
+        f"{report.bound_count}/{denom} shortcuts bound{suffix}"
     )
 
 

@@ -14,7 +14,6 @@ import logging
 import signal
 import sys
 import time
-from pathlib import Path
 
 from . import __version__
 from .app import SecondInstanceError, bind_win32
@@ -291,15 +290,11 @@ def _run_informational(args: argparse.Namespace) -> int:
         return 0
 
     if args.import_config is not None:
-        from .adapters.json_config import JsonConfigStore, _from_dict
+        from .adapters.json_config import JsonConfigStore
 
         store = JsonConfigStore()
         try:
-            src = Path(args.import_config)
-            if not src.exists():
-                raise FileNotFoundError(f"import source does not exist: {src}")
-            raw = json.loads(src.read_text(encoding="utf-8"))
-            incoming = _from_dict(raw)
+            incoming = JsonConfigStore.parse_path(args.import_config)
         except FileNotFoundError as e:
             print(f"import failed: {e}", file=sys.stderr)
             return 1

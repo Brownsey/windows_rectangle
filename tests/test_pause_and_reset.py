@@ -111,16 +111,20 @@ def test_pause_resume_notifies_subscribers(windows):
 
 def test_pause_marks_report_entries_as_paused(windows):
     """The user-facing 'Binding status' dialog should still know what
-    *would* re-register on resume — pause carries the entries into
-    `failed` with a 'paused' reason rather than wiping the report."""
+    *would* re-register on resume — pause sets `report.paused = True`
+    and preserves the original `bound` tuple. The currently-live count
+    (bound_count) collapses to 0 because the OS-level combos are gone,
+    but `would_bind_count` still reflects the staged set."""
     hot = _Hot()
     ctx = build(Settings(), windows, hotkeys=hot)
     bind_hotkeys_via_bus(ctx, hot.register)
-    n_bound_before = ctx.last_binding_report.bound_count
+    n_would_before = ctx.last_binding_report.would_bind_count
     ctx.pause_hotkeys()
-    assert ctx.last_binding_report.bound_count == 0
-    assert ctx.last_binding_report.failed_count == n_bound_before
-    assert all(reason == "paused" for _, _, reason in ctx.last_binding_report.failed)
+    rep = ctx.last_binding_report
+    assert rep.paused is True
+    assert rep.bound_count == 0
+    assert rep.would_bind_count == n_would_before
+    assert rep.failed_count == 0  # no real failures, just paused
 
 
 # ----- prefs reset ----------------------------------------------------

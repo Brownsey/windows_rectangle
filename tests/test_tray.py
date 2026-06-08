@@ -28,21 +28,31 @@ def test_tray_controller_defaults():
     assert tc.on_open_preferences is None
 
 
+def _make_fake_report(*, bound_count=0, would_bind_count=0, failed_count=0, total=0):
+    """Mini stand-in for BindingReport for tooltip unit tests."""
+    class FakeReport:
+        pass
+    r = FakeReport()
+    r.bound_count = bound_count
+    r.would_bind_count = would_bind_count
+    r.failed_count = failed_count
+    r.total = total
+    return r
+
+
 def test_tooltip_for_paused_state():
     """When ctx.paused is True the tooltip must say so — otherwise
     "0/22 bound" looks broken instead of intentional."""
     from windows_rectangle.ui.tray import _tooltip_for
-
-    class FakeReport:
-        bound_count = 0
-        total = 22
 
     class FakeSettings:
         gap = 8
 
     class FakeCtx:
         settings = FakeSettings()
-        last_binding_report = FakeReport()
+        last_binding_report = _make_fake_report(
+            bound_count=0, would_bind_count=22, failed_count=0, total=22,
+        )
         paused = True
 
     s = _tooltip_for(FakeCtx())
@@ -53,16 +63,14 @@ def test_tooltip_for_paused_state():
 def test_tooltip_for_active_state_does_not_say_paused():
     from windows_rectangle.ui.tray import _tooltip_for
 
-    class FakeReport:
-        bound_count = 22
-        total = 22
-
     class FakeSettings:
         gap = 4
 
     class FakeCtx:
         settings = FakeSettings()
-        last_binding_report = FakeReport()
+        last_binding_report = _make_fake_report(
+            bound_count=22, would_bind_count=22, failed_count=0, total=22,
+        )
         paused = False
 
     s = _tooltip_for(FakeCtx())
@@ -74,16 +82,14 @@ def test_tooltip_for_initial_no_report():
     """Before any bind has fired the tooltip just shows the gap."""
     from windows_rectangle.ui.tray import _tooltip_for
 
-    class FakeReport:
-        bound_count = 0
-        total = 0
-
     class FakeSettings:
         gap = 0
 
     class FakeCtx:
         settings = FakeSettings()
-        last_binding_report = FakeReport()
+        last_binding_report = _make_fake_report(
+            bound_count=0, would_bind_count=0, failed_count=0, total=0,
+        )
         paused = False
 
     s = _tooltip_for(FakeCtx())

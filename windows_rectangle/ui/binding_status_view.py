@@ -26,22 +26,32 @@ def binding_status_text(report: "BindingReport | None") -> str:
 
     None / empty report renders the same way ("no binding has run yet"),
     so the function is total over the possible inputs.
+
+    When `report.paused` is True the section labelled "Bound" instead
+    renders as "Would re-register on resume" since the entries are not
+    currently live.
     """
     if report is None or report.total == 0:
+        if report is not None and report.paused:
+            return "Hotkeys are paused — no combos are currently registered."
         return "No hotkey binding has run yet."
-    lines = [
-        f"{report.bound_count} of {report.total} shortcuts bound.",
-        "",
-    ]
+    paused = report.paused
+    summary = (
+        f"{report.bound_count} of {report.total} shortcuts bound"
+        + (" (paused)." if paused else ".")
+    )
+    lines = [summary, ""]
     if report.bound:
-        lines.append("Bound:")
+        lines.append(
+            "Would re-register on resume:" if paused else "Bound:"
+        )
         lines.extend(f"  {action.value:<28} {combo}" for action, combo in report.bound)
         lines.append("")
     if report.failed:
         lines.append("Failed:")
         for action, combo, err in report.failed:
             err_brief = err.strip().splitlines()[0] if err else ""
-            lines.append(f"  {action.value:<28} {combo}   ← {err_brief}")
+            lines.append(f"  {action.value:<28} {combo}   <- {err_brief}")
     return "\n".join(lines).rstrip()
 
 
@@ -52,13 +62,19 @@ def binding_status_html(report: "BindingReport | None") -> str:
     sections render as separate small tables for readability.
     """
     if report is None or report.total == 0:
+        if report is not None and report.paused:
+            return "<p>Hotkeys are <b>paused</b> &mdash; no combos are currently registered.</p>"
         return "<p>No hotkey binding has run yet.</p>"
 
+    paused = report.paused
     parts: list[str] = []
     summary = (
         f"<p><b>{report.bound_count}</b> of <b>{report.total}</b> "
-        "shortcuts bound."
+        "shortcuts bound"
     )
+    if paused:
+        summary += " <span style='color:#a60;'>(paused)</span>"
+    summary += "."
     if report.failed:
         summary += f" <span style='color:#b22;'>{report.failed_count} failed.</span>"
     summary += "</p>"
@@ -70,8 +86,10 @@ def binding_status_html(report: "BindingReport | None") -> str:
             f"<td><kbd>{html.escape(c)}</kbd></td></tr>"
             for a, c in report.bound
         )
+        header_label = "Would re-register on resume" if paused else "Bound"
+        header_colour = "color:#888;" if paused else ""
         parts.append(
-            f"<h4 style='{_HEADER_STYLE}'>Bound</h4>"
+            f"<h4 style='{_HEADER_STYLE}{header_colour}'>{header_label}</h4>"
             "<table cellspacing='4' cellpadding='2'>"
             f"<tbody>{rows}</tbody></table>"
         )

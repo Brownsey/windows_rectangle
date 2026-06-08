@@ -55,6 +55,11 @@ class BindingReport:
 
     bound: tuple[tuple["Action", str], ...] = ()
     failed: tuple[tuple["Action", str, str], ...] = ()
+    # User paused the global hotkey set (via the tray "Pause shortcuts"
+    # toggle). When True, `bound` still describes what *would* be
+    # registered on resume — we don't squash it into `failed` because
+    # paused != failed semantically.
+    paused: bool = False
 
     @property
     def total(self) -> int:
@@ -62,6 +67,20 @@ class BindingReport:
 
     @property
     def bound_count(self) -> int:
+        # When paused the hotkeys aren't actually live, so the count of
+        # *currently registered* combos is zero. `len(self.bound)` is
+        # still available via `would_bind_count`.
+        if self.paused:
+            return 0
+        return len(self.bound)
+
+    @property
+    def would_bind_count(self) -> int:
+        """How many combos `bound` lists, ignoring paused-ness.
+
+        Lets the tray say "0/22 bound (paused)" rather than collapsing
+        the count to zero with no context.
+        """
         return len(self.bound)
 
     @property
@@ -70,7 +89,7 @@ class BindingReport:
 
     @property
     def all_bound(self) -> bool:
-        return not self.failed and bool(self.bound)
+        return not self.failed and bool(self.bound) and not self.paused
 
 
 # Sentinel "no binding has happened yet" — clearer than None at the call
@@ -210,18 +229,15 @@ class AppContext:
             _log.exception("pause_hotkeys: unregister_all raised")
             return False
         self.paused = True
-        # Report becomes a synthetic "0 of N bound" so the tray tooltip
-        # reflects the paused state. We carry the previously-bound
-        # entries into `failed` with the pause reason so the
-        # "Binding status…" dialog can still hint at what would
-        # re-register on resume.
+        # Carry the previously-bound entries forward but set the
+        # `paused` flag, so the Binding Status dialog can render them
+        # distinctly (greyed-out "would re-register" rather than red
+        # "failed"). Real failures stay in `failed` so the user can
+        # still see them while paused.
         prev = self.last_binding_report
-        if prev.total > 0:
-            self.last_binding_report = BindingReport(
-                bound=(),
-                failed=tuple((a, c, "paused") for a, c in prev.bound) +
-                       tuple((a, c, e) for a, c, e in prev.failed),
-            )
+        self.last_binding_report = BindingReport(
+            bound=prev.bound, failed=prev.failed, paused=True,
+        )
         self._notify_settings_subscribers()
         return True
 
