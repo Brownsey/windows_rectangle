@@ -94,6 +94,9 @@ class Dispatcher:
         if action in (Action.NEXT_DISPLAY, Action.PREV_DISPLAY):
             return self._move_to_neighbor_display(handle, action)
 
+        if action == Action.TOGGLE_ALWAYS_ON_TOP:
+            return self._toggle_always_on_top(handle)
+
         if is_geometry_action(action):
             return self._apply_geometry(handle, action)
 
@@ -147,6 +150,19 @@ class Dispatcher:
         before = self._windows.get_window_rect(handle)
         target = monitors_mod.move_to_monitor(before, current, destination)
         return self._move(handle, action, before, target)
+
+    def _toggle_always_on_top(self, handle: object) -> DispatchResult:
+        before = self._windows.get_window_rect(handle)
+        enabled = not self._windows.is_always_on_top(handle)
+        ok = self._windows.set_always_on_top(handle, enabled)
+        return DispatchResult(
+            Action.TOGGLE_ALWAYS_ON_TOP,
+            handle,
+            before,
+            before if ok else None,
+            ok,
+            "ok" if ok else "blocked",
+        )
 
     def _restore(self, handle: object) -> DispatchResult:
         previous = self._history.pop(handle)

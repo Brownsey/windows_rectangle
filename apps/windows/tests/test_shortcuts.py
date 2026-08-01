@@ -6,6 +6,7 @@ from windows_rectangle.core.shortcuts import (
     ShortcutParseError,
     conflicts,
     is_reserved,
+    is_unregisterable,
     normalise,
     parse,
 )
@@ -157,3 +158,8 @@ def test_is_reserved_normal_combo_not_reserved():
 
 def test_is_reserved_unparseable_is_false():
     assert not is_reserved("")
+
+
+def test_is_unregisterable_blocks_ctrl_alt_delete():
+    assert is_unregisterable("Ctrl+Alt+Delete")
+    assert not is_unregisterable("Ctrl+Alt+Insert")

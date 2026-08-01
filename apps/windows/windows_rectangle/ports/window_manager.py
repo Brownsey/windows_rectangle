@@ -67,6 +67,12 @@ class WindowManager(Protocol):
     def restore_window(self, handle: WindowHandle) -> None:
         """`ShowWindow(SW_RESTORE)` — used before moving a maximized window."""
 
+    def is_always_on_top(self, handle: WindowHandle) -> bool:
+        """True if the window currently has the topmost extended style."""
+
+    def set_always_on_top(self, handle: WindowHandle, enabled: bool) -> bool:
+        """Toggle the OS topmost state. Returns False on failure."""
+
     def list_monitors(self) -> list[MonitorInfo]:
         """All monitors, in a stable order — used for next/prev display."""
 

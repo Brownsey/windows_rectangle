@@ -21,6 +21,8 @@ class FakeWindowManager:
     active: WindowHandle | None = None
     blocked: set[WindowHandle] = field(default_factory=set)
     maximized: set[WindowHandle] = field(default_factory=set)
+    always_on_top: set[WindowHandle] = field(default_factory=set)
+    blocked_topmost: set[WindowHandle] = field(default_factory=set)
     flags: dict[WindowHandle, WindowFlags] = field(default_factory=dict)
     default_flags: WindowFlags = field(
         default_factory=lambda: WindowFlags(has_caption=True, has_thick_frame=True)
@@ -55,6 +57,18 @@ class FakeWindowManager:
     def restore_window(self, handle: WindowHandle) -> None:
         self.maximized.discard(handle)
         self.restore_log.append(handle)
+
+    def is_always_on_top(self, handle: WindowHandle) -> bool:
+        return handle in self.always_on_top
+
+    def set_always_on_top(self, handle: WindowHandle, enabled: bool) -> bool:
+        if handle in self.blocked_topmost:
+            return False
+        if enabled:
+            self.always_on_top.add(handle)
+        else:
+            self.always_on_top.discard(handle)
+        return True
 
     def list_monitors(self) -> list[MonitorInfo]:
         return list(self.monitors)

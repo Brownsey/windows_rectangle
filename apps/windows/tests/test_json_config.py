@@ -209,6 +209,79 @@ def test_load_v4_custom_win_shortcut_is_preserved(store):
     assert loaded.shortcuts[Action.LEFT_HALF] == "ctrl+win+left"
 
 
+def test_load_v4_previous_sixth_defaults_migrate_to_insert_key_defaults(store):
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(
+        json.dumps(
+            {
+                "schema_version": 4,
+                "shortcuts": {
+                    "top_left_sixth": "ctrl+alt+shift+u",
+                    "top_right_sixth": "ctrl+alt+shift+i",
+                    "bottom_left_sixth": "ctrl+alt+shift+j",
+                    "bottom_right_sixth": "ctrl+alt+shift+k",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = store.load()
+
+    assert loaded.shortcuts[Action.TOP_LEFT_SIXTH] == DEFAULT_SHORTCUTS[Action.TOP_LEFT_SIXTH]
+    assert loaded.shortcuts[Action.TOP_RIGHT_SIXTH] == DEFAULT_SHORTCUTS[Action.TOP_RIGHT_SIXTH]
+    assert loaded.shortcuts[Action.BOTTOM_LEFT_SIXTH] == DEFAULT_SHORTCUTS[Action.BOTTOM_LEFT_SIXTH]
+    assert (
+        loaded.shortcuts[Action.BOTTOM_RIGHT_SIXTH] == DEFAULT_SHORTCUTS[Action.BOTTOM_RIGHT_SIXTH]
+    )
+
+
+def test_load_v5_custom_sixth_shortcut_is_preserved(store):
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "shortcuts": {
+                    "top_left_sixth": "ctrl+alt+shift+u",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = store.load()
+
+    assert loaded.shortcuts[Action.TOP_LEFT_SIXTH] == "ctrl+alt+shift+u"
+
+
+def test_load_v5_shift_insert_sixth_defaults_migrate_to_plain_ctrl_alt(store):
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "shortcuts": {
+                    "top_left_sixth": "ctrl+alt+shift+insert",
+                    "top_right_sixth": "ctrl+alt+shift+pageup",
+                    "bottom_left_sixth": "ctrl+alt+shift+delete",
+                    "bottom_right_sixth": "ctrl+alt+shift+pagedown",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = store.load()
+
+    assert loaded.shortcuts[Action.TOP_LEFT_SIXTH] == DEFAULT_SHORTCUTS[Action.TOP_LEFT_SIXTH]
+    assert loaded.shortcuts[Action.TOP_RIGHT_SIXTH] == DEFAULT_SHORTCUTS[Action.TOP_RIGHT_SIXTH]
+    assert loaded.shortcuts[Action.BOTTOM_LEFT_SIXTH] == DEFAULT_SHORTCUTS[Action.BOTTOM_LEFT_SIXTH]
+    assert (
+        loaded.shortcuts[Action.BOTTOM_RIGHT_SIXTH] == DEFAULT_SHORTCUTS[Action.BOTTOM_RIGHT_SIXTH]
+    )
+
+
 def test_load_v1_custom_shortcuts_are_not_migrated(store):
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text(

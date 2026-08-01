@@ -164,6 +164,12 @@ RESERVED_COMBOS: frozenset[str] = frozenset(
     }
 )
 
+UNREGISTERABLE_COMBOS: frozenset[str] = frozenset(
+    {
+        "ctrl+alt+delete",
+    }
+)
+
 
 def is_reserved(combo: str) -> bool:
     """True if `combo` clashes with a known OS-reserved shortcut."""
@@ -172,3 +178,12 @@ def is_reserved(combo: str) -> bool:
     except ShortcutParseError:
         return False
     return canon in RESERVED_COMBOS
+
+
+def is_unregisterable(combo: str) -> bool:
+    """True if Windows will not let a normal application register `combo`."""
+    try:
+        canon = normalise(combo)
+    except ShortcutParseError:
+        return False
+    return canon in UNREGISTERABLE_COMBOS

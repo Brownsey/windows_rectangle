@@ -38,6 +38,7 @@ _GWL_EXSTYLE = -20
 _WS_CAPTION = 0x00C00000
 _WS_THICKFRAME = 0x00040000
 _WS_DISABLED = 0x08000000
+_WS_EX_TOPMOST = 0x00000008
 _WS_EX_TOOLWINDOW = 0x00000080
 
 _SW_RESTORE = 9
@@ -50,6 +51,10 @@ _MONITORINFOF_PRIMARY = 0x00000001
 _MONITOR_DEFAULTTONEAREST = 0x00000002
 
 # SetWindowPos flags
+_HWND_TOPMOST = -1
+_HWND_NOTOPMOST = -2
+_SWP_NOSIZE = 0x0001
+_SWP_NOMOVE = 0x0002
 _SWP_NOZORDER = 0x0004
 _SWP_NOACTIVATE = 0x0010
 _SWP_ASYNCWINDOWPOS = 0x4000
@@ -198,6 +203,27 @@ class Win32WindowManager:
 
     def restore_window(self, handle: WindowHandle) -> None:
         self._user32.ShowWindow(self._hwnd(handle), _SW_RESTORE)
+
+    def is_always_on_top(self, handle: WindowHandle) -> bool:
+        ex_style = self._user32.GetWindowLongW(self._hwnd(handle), _GWL_EXSTYLE)
+        return bool(ex_style & _WS_EX_TOPMOST)
+
+    def set_always_on_top(self, handle: WindowHandle, enabled: bool) -> bool:
+        insert_after = self._wt.HWND(_HWND_TOPMOST if enabled else _HWND_NOTOPMOST)
+        flags = _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE
+        ok = self._user32.SetWindowPos(
+            self._hwnd(handle),
+            insert_after,
+            0,
+            0,
+            0,
+            0,
+            flags,
+        )
+        if not ok:
+            err = self._ct.get_last_error()
+            _log.info("SetWindowPos topmost failed hwnd=%s err=%s", handle, err)
+        return bool(ok)
 
     def list_monitors(self) -> list[MonitorInfo]:
         ct = self._ct

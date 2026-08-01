@@ -42,21 +42,22 @@ source snapshot under `apps/mac/Rectangle`.
 |---|--------|------------------------------------------|
 | 1 | Left / Right / Top / Bottom half | `Ctrl+Alt+←/→/↑/↓` |
 | 2 | Top-Left/-Right, Bottom-Left/-Right quarter | `Ctrl+Alt+U/I/J/K` |
-| 3 | Top-left/-right, Bottom-left/-right sixth | `Ctrl+Alt+Shift+U/I/J/K` |
+| 3 | Top-left/-right, Bottom-left/-right sixth | `Ctrl+Alt+Insert/PgUp`, `Ctrl+Alt+Shift+Delete`, `Ctrl+Alt+PgDown` |
 | 4 | First / Center / Last third | `Ctrl+Alt+D/F/G` |
 | 5 | First / Last two-thirds | `Ctrl+Alt+E/T` |
 | 6 | Maximize | `Ctrl+Alt+Enter` |
-| 7 | Maximize height | `Ctrl+Alt+Shift+↑` |
+| 7 | Maximize height / width | `Ctrl+Alt+Shift+↑/→` |
 | 8 | Almost maximize (~85%) | `Ctrl+Alt+Shift+Enter` |
 | 9 | Center (no resize) | `Ctrl+Alt+C` |
 | 10 | Make larger / smaller | `Ctrl+Alt+=` / `Ctrl+Alt+-` |
 | 11 | Restore (undo) | `Ctrl+Alt+Backspace` |
 | 12 | Move to next / prev display | `Ctrl+Alt+.` / `Ctrl+Alt+,` |
-| 13 | Next-third cycle (repeat key cycles) | repeated half/third presses |
-| 14 | **Drag-to-edge snapping** (footprint preview) | mouse to screen edge/corner |
-| 15 | Configurable **gap** between windows | n/a (setting) |
-| 16 | System-tray menu + preferences window | n/a |
-| 17 | Launch at login | n/a |
+| 13 | Toggle always on top | `Ctrl+Alt+Shift+Space` |
+| 14 | Next-third cycle (repeat key cycles) | repeated half/third presses |
+| 15 | **Drag-to-edge snapping** (footprint preview) | mouse to screen edge/corner |
+| 16 | Configurable **gap** between windows | n/a (setting) |
+| 17 | System-tray menu + preferences window | n/a |
+| 18 | Launch at login | n/a |
 
 Pro-only / out of scope v1: Stage-manager features, "Todo mode", custom
 named layouts, cascade. Park as backlog.

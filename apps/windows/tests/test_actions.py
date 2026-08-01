@@ -112,6 +112,18 @@ def test_maximize_height_keeps_horizontal_position():
     assert r.height == WORK.height
 
 
+def test_maximize_width_keeps_vertical_position():
+    r = apply(Action.MAXIMIZE_WIDTH, WIN, WORK)
+    assert r.x == WORK.x
+    assert r.width == WORK.width
+    assert r.y == WIN.y
+    assert r.height == WIN.height
+
+
+def test_maximize_width_applies_horizontal_gap_only():
+    assert apply(Action.MAXIMIZE_WIDTH, WIN, WORK, gap=10) == Rect(10, WIN.y, 1900, WIN.height)
+
+
 def test_almost_maximize_centered_and_smaller():
     r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK)
     assert r.width == int(WORK.width * ALMOST_MAXIMIZE_SCALE)
@@ -190,7 +202,15 @@ def test_maximize_with_gap_insets_all_sides():
 # ----- Non-pure actions -----------------------------------------------
 
 
-@pytest.mark.parametrize("action", [Action.RESTORE, Action.NEXT_DISPLAY, Action.PREV_DISPLAY])
+@pytest.mark.parametrize(
+    "action",
+    [
+        Action.RESTORE,
+        Action.NEXT_DISPLAY,
+        Action.PREV_DISPLAY,
+        Action.TOGGLE_ALWAYS_ON_TOP,
+    ],
+)
 def test_apply_rejects_non_geometry_actions(action):
     assert not is_geometry_action(action)
     with pytest.raises(KeyError):
@@ -242,18 +262,20 @@ def test_active_default_shortcuts_match_recommended_profile():
         Action.TOP_RIGHT_QUARTER: "ctrl+alt+i",
         Action.BOTTOM_LEFT_QUARTER: "ctrl+alt+j",
         Action.BOTTOM_RIGHT_QUARTER: "ctrl+alt+k",
-        Action.TOP_LEFT_SIXTH: "ctrl+alt+shift+u",
-        Action.TOP_RIGHT_SIXTH: "ctrl+alt+shift+i",
-        Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+j",
-        Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+shift+k",
+        Action.TOP_LEFT_SIXTH: "ctrl+alt+insert",
+        Action.TOP_RIGHT_SIXTH: "ctrl+alt+pageup",
+        Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+delete",
+        Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+pagedown",
         Action.MAXIMIZE: "ctrl+alt+enter",
         Action.MAXIMIZE_HEIGHT: "ctrl+alt+shift+up",
+        Action.MAXIMIZE_WIDTH: "ctrl+alt+shift+right",
         Action.CENTER: "ctrl+alt+c",
         Action.LARGER: "ctrl+alt+=",
         Action.SMALLER: "ctrl+alt+-",
         Action.RESTORE: "ctrl+alt+backspace",
         Action.NEXT_DISPLAY: "ctrl+alt+.",
         Action.PREV_DISPLAY: "ctrl+alt+,",
+        Action.TOGGLE_ALWAYS_ON_TOP: "ctrl+alt+shift+space",
     }
 
 

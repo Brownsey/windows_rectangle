@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from ..core.actions import DEFAULT_SHORTCUTS, Action
 from ..core.keymap import UnsupportedKeyError, translate
-from ..core.shortcuts import ShortcutParseError, is_reserved, parse
+from ..core.shortcuts import ShortcutParseError, is_reserved, is_unregisterable, parse
 from ..ports.config_store import Settings
 from .logo import build_qicon
 
@@ -67,11 +67,13 @@ ACTION_GROUPS: tuple[tuple[str, tuple[Action, ...]], ...] = (
         (
             Action.MAXIMIZE,
             Action.MAXIMIZE_HEIGHT,
+            Action.MAXIMIZE_WIDTH,
             Action.ALMOST_MAXIMIZE,
             Action.CENTER,
             Action.LARGER,
             Action.SMALLER,
             Action.RESTORE,
+            Action.TOGGLE_ALWAYS_ON_TOP,
         ),
     ),
     (
@@ -103,11 +105,13 @@ _ACTION_LABELS: dict[Action, str] = {
     Action.LAST_TWO_THIRDS: "Last Two Thirds",
     Action.MAXIMIZE: "Maximize",
     Action.MAXIMIZE_HEIGHT: "Maximize Height",
+    Action.MAXIMIZE_WIDTH: "Maximize Width",
     Action.ALMOST_MAXIMIZE: "Middle Majority",
     Action.CENTER: "Center",
     Action.LARGER: "Larger",
     Action.SMALLER: "Smaller",
     Action.RESTORE: "Restore",
+    Action.TOGGLE_ALWAYS_ON_TOP: "Always on Top",
     Action.NEXT_DISPLAY: "Next Display",
     Action.PREV_DISPLAY: "Previous Display",
 }
@@ -317,6 +321,13 @@ def validate_shortcuts(shortcuts: dict[Action, str]) -> ValidationResult:
             continue
 
         canonical = str(parsed)
+        if is_unregisterable(canonical):
+            errors.append(
+                f"{action_label(action)} uses Windows-only shortcut {canonical}; "
+                "choose a different binding"
+            )
+            continue
+
         previous = seen.get(canonical)
         if previous is not None:
             errors.append(

@@ -19,7 +19,7 @@ from ..core.actions import DEFAULT_SHORTCUTS, Action
 from ..core.shortcuts import ShortcutParseError, normalise
 from ..ports.config_store import Settings
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 _FORMERLY_DISABLED_DEFAULT_ACTIONS: frozenset[Action] = frozenset(
     {
@@ -55,6 +55,7 @@ _LEGACY_DEFAULT_SHORTCUTS_V1: dict[Action, str] = {
     Action.LAST_TWO_THIRDS: "ctrl+alt+t",
     Action.MAXIMIZE: "ctrl+alt+enter",
     Action.MAXIMIZE_HEIGHT: "ctrl+alt+shift+up",
+    Action.MAXIMIZE_WIDTH: "ctrl+alt+shift+right",
     Action.ALMOST_MAXIMIZE: "ctrl+alt+shift+enter",
     Action.CENTER: "ctrl+alt+c",
     Action.LARGER: "ctrl+alt+=",
@@ -62,6 +63,7 @@ _LEGACY_DEFAULT_SHORTCUTS_V1: dict[Action, str] = {
     Action.RESTORE: "ctrl+alt+backspace",
     Action.NEXT_DISPLAY: "ctrl+alt+.",
     Action.PREV_DISPLAY: "ctrl+alt+,",
+    Action.TOGGLE_ALWAYS_ON_TOP: "ctrl+alt+shift+space",
 }
 
 _RESERVED_DEFAULT_SHORTCUTS_V3: dict[Action, str] = {
@@ -84,6 +86,7 @@ _RESERVED_DEFAULT_SHORTCUTS_V3: dict[Action, str] = {
     Action.LAST_TWO_THIRDS: "ctrl+shift+end",
     Action.MAXIMIZE: "ctrl+alt+enter",
     Action.MAXIMIZE_HEIGHT: "ctrl+alt+shift+up",
+    Action.MAXIMIZE_WIDTH: "ctrl+alt+shift+right",
     Action.ALMOST_MAXIMIZE: "ctrl+win+enter",
     Action.CENTER: "ctrl+alt+c",
     Action.LARGER: "ctrl+alt+=",
@@ -91,6 +94,21 @@ _RESERVED_DEFAULT_SHORTCUTS_V3: dict[Action, str] = {
     Action.RESTORE: "ctrl+alt+backspace",
     Action.NEXT_DISPLAY: "ctrl+alt+.",
     Action.PREV_DISPLAY: "ctrl+alt+,",
+    Action.TOGGLE_ALWAYS_ON_TOP: "ctrl+alt+shift+space",
+}
+
+_PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V4: dict[Action, str] = {
+    Action.TOP_LEFT_SIXTH: "ctrl+alt+shift+u",
+    Action.TOP_RIGHT_SIXTH: "ctrl+alt+shift+i",
+    Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+j",
+    Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+shift+k",
+}
+
+_PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V5: dict[Action, str] = {
+    Action.TOP_LEFT_SIXTH: "ctrl+alt+shift+insert",
+    Action.TOP_RIGHT_SIXTH: "ctrl+alt+shift+pageup",
+    Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+delete",
+    Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+shift+pagedown",
 }
 
 
@@ -187,6 +205,10 @@ def _from_dict(raw: dict[str, Any]) -> Settings:
                 continue
             if schema_version < 4 and _matches_reserved_default(action, combo):
                 continue
+            if schema_version < 5 and _matches_previous_sixth_default(action, combo):
+                continue
+            if schema_version < 6 and _matches_previous_insert_sixth_default(action, combo):
+                continue
             shortcuts[action] = combo
 
     return Settings(
@@ -230,3 +252,23 @@ def _matches_reserved_default(action: Action, combo: str) -> bool:
         return normalise(combo) == normalise(reserved_default)
     except ShortcutParseError:
         return combo.strip().lower() == reserved_default
+
+
+def _matches_previous_sixth_default(action: Action, combo: str) -> bool:
+    previous_default = _PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V4.get(action)
+    if not previous_default:
+        return False
+    try:
+        return normalise(combo) == normalise(previous_default)
+    except ShortcutParseError:
+        return combo.strip().lower() == previous_default
+
+
+def _matches_previous_insert_sixth_default(action: Action, combo: str) -> bool:
+    previous_default = _PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V5.get(action)
+    if not previous_default:
+        return False
+    try:
+        return normalise(combo) == normalise(previous_default)
+    except ShortcutParseError:
+        return combo.strip().lower() == previous_default

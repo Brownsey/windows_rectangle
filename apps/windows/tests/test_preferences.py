@@ -69,6 +69,12 @@ def test_validate_shortcuts_warns_on_reserved_combo():
     assert "reserved" in result.warnings[0]
 
 
+def test_validate_shortcuts_rejects_windows_only_shortcut():
+    result = preferences.validate_shortcuts({Action.LEFT_HALF: "ctrl+alt+delete"})
+    assert not result.ok
+    assert "Windows-only shortcut" in result.errors[0]
+
+
 def test_validate_shortcuts_allows_blank_to_disable_command():
     result = preferences.validate_shortcuts(
         {
