@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .logo import build_qicon
+from .logo import build_tray_qicon
 
 if TYPE_CHECKING:
     from ..app import AppContext
@@ -70,13 +70,7 @@ def install(
 
 
 def _build_icon(QtGui):
-    """Generated placeholder icon; replace with a packaged icon before shipping."""
-    custom_icon = build_qicon(QtGui)
-    if not custom_icon.isNull():
-        return custom_icon
-    pixmap = QtGui.QPixmap(16, 16)
-    pixmap.fill(QtGui.QColor(240, 240, 240))
-    return QtGui.QIcon(pixmap)
+    return build_tray_qicon(QtGui)
 
 
 def _toggle_launch(ctx: AppContext, checked: bool) -> None:

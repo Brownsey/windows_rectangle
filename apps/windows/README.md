@@ -125,7 +125,7 @@ registrations when you click `Apply` or `Save`.
 Place custom logo files in the repository root `logo` folder before running the
 app or building a release.
 
-Supported Windows files, in priority order:
+App logo files for the Preferences UI, in priority order:
 
 ```text
 logo/windows.ico
@@ -139,10 +139,20 @@ logo/logo.webp
 logo/app.webp
 ```
 
-The tray icon and Preferences window load the first matching file
-automatically. PNG and WebP files are used by the tray and Preferences UI. Use
-an `.ico` file if you also want the generated executable to use the custom icon.
-The build script bundles `logo` into
+Tray icon files, in priority order:
+
+```text
+logo/tray_logo.ico
+logo/tray_logo.png
+logo/tray_logo.webp
+```
+
+The Preferences window loads the first matching app logo automatically and shows
+it in the visible header. The system tray icon only uses `tray_logo.ico`,
+`tray_logo.png`, or `tray_logo.webp`. If no tray-specific logo exists, the tray
+uses a transparent blank icon. Use an `.ico` file if you also want the generated
+executable to use the custom icon. The build script bundles the full `logo`
+folder into
 `apps/windows/exe/_internal/logo`.
 
 After a build, you can override the logo for that packaged copy by placing a
@@ -152,9 +162,18 @@ file in:
 apps/windows/exe/logo/logo.png
 apps/windows/exe/logo/logo.webp
 apps/windows/exe/logo/windows.ico
+apps/windows/exe/logo/tray_logo.png
+apps/windows/exe/logo/tray_logo.webp
+apps/windows/exe/logo/tray_logo.ico
 ```
 
 Keep that `logo` folder beside `WindowsRectangle.exe`.
+
+After changing anything in the root `logo` folder, rebuild with:
+
+```powershell
+.\build-windows-exe.bat
+```
 
 Default shortcuts:
 

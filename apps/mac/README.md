@@ -36,7 +36,32 @@ Enable the built Rectangle app there, then restart the app if macOS asks you to.
 
 ## Build A Shareable Zip
 
-From the repository root:
+The macOS release build must be run on a Mac with Xcode installed. From a fresh
+checkout on the Mac:
+
+```bash
+git pull
+xcode-select --install
+```
+
+If Xcode is already installed, `xcode-select --install` may report that the
+tools are already present; that is fine.
+
+Place the optional logo assets before building:
+
+```text
+logo/mac/logo.png          # Preferences UI, Dock/app icon source
+logo/mac/tray_logo.png     # macOS menu bar icon
+```
+
+Root-level fallbacks also work:
+
+```text
+logo/logo.png
+logo/tray_logo.png
+```
+
+Build from the repository root:
 
 ```bash
 bash build-mac-release.sh
@@ -48,11 +73,29 @@ Or from this folder:
 bash build-release.sh
 ```
 
-The script builds the `Rectangle` scheme and creates:
+The script builds the `Rectangle` Xcode scheme in Release mode and creates:
 
 ```text
 apps/mac/exe/Rectangle-macOS.zip
 apps/mac/exe/Rectangle-macOS.zip.sha256
+```
+
+The built app also remains available locally at:
+
+```text
+apps/mac/build/Build/Products/Release/Rectangle.app
+```
+
+To test it locally:
+
+```bash
+open apps/mac/build/Build/Products/Release/Rectangle.app
+```
+
+For the first launch, grant Accessibility access when macOS asks:
+
+```text
+System Settings > Privacy & Security > Accessibility
 ```
 
 By default the script disables code signing so local CI or a developer machine
@@ -70,6 +113,10 @@ bash build-mac-release.sh
 
 Notarization and stapling should be handled by your release process after the
 zip is produced.
+
+This repository currently builds a shareable `.zip`, not a `.pkg` or `.dmg`
+installer. The zip contains `Rectangle.app`; users can extract it and move the
+app into `/Applications`.
 
 ## Custom Logo
 
@@ -90,11 +137,23 @@ logo/logo.png
 logo/logo.webp
 ```
 
-Use a 1024x1024 PNG or WebP for the simple option. PNG is preferred for the
-widest macOS tooling compatibility. During `build-release.sh`, the script uses
-macOS `sips` to generate the required icon sizes, applies them to the vendored
-Rectangle Xcode project for the build, then restores the original vendored icon
-assets before exiting.
+Menu bar icon option:
+
+```text
+logo/mac/tray_logo.png
+logo/mac/tray_logo.webp
+logo/tray_logo.png
+logo/tray_logo.webp
+```
+
+Use a 1024x1024 PNG or WebP for the app icon/logo simple option. PNG is
+preferred for the widest macOS tooling compatibility. During
+`build-release.sh`, the script uses macOS `sips` to generate the required app
+icon sizes, applies a visible Preferences logo asset, and applies a dedicated
+menu bar icon asset. The build prefers `logo/mac/*` files and falls back to the
+root `logo/*` files. If no tray logo exists, the macOS menu bar icon uses a
+transparent blank image. The script restores the original vendored icon assets
+before exiting.
 
 ## ISO Build Note
 

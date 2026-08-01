@@ -36,7 +36,7 @@ class RectangleStatusItem {
         added = true
         nsStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         nsStatusItem?.menu = self.statusMenu
-        nsStatusItem?.button?.image = NSImage(named: "StatusTemplate")
+        nsStatusItem?.button?.image = statusBarImage()
         nsStatusItem?.behavior = .removalAllowed
         isVisibleObserver = nsStatusItem?.observe(\.isVisible, options: [.old, .new]) { nsStatusItem, change in
             if change.oldValue == true && change.newValue == false {
@@ -51,6 +51,15 @@ class RectangleStatusItem {
         added = false
         guard let nsStatusItem = nsStatusItem else { return }
         NSStatusBar.system.removeStatusItem(nsStatusItem)
+    }
+
+    private func statusBarImage() -> NSImage {
+        guard let customTrayLogo = NSImage(named: "CustomTrayLogo") else {
+            return NSImage(size: NSSize(width: 18, height: 18))
+        }
+        let image = customTrayLogo.centeredSquareScaled(to: 18)
+        image.isTemplate = false
+        return image
     }
     
 }

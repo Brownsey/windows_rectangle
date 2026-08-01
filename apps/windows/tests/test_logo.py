@@ -52,6 +52,27 @@ def test_find_logo_file_keeps_png_priority_over_webp(tmp_path, monkeypatch):
     assert logo.find_logo_file() == logo_dir / "logo.png"
 
 
+def test_find_tray_logo_file_uses_tray_specific_asset(tmp_path, monkeypatch):
+    logo_dir = tmp_path / "logo"
+    logo_dir.mkdir()
+    (logo_dir / "logo.png").write_bytes(b"app logo")
+    (logo_dir / "tray_logo.png").write_bytes(b"tray logo")
+    monkeypatch.setenv("WINDOWS_RECTANGLE_LOGO_DIR", str(logo_dir))
+    monkeypatch.setattr(logo, "_repo_root", lambda: tmp_path / "repo")
+
+    assert logo.find_tray_logo_file() == logo_dir / "tray_logo.png"
+
+
+def test_find_tray_logo_file_ignores_regular_logo(tmp_path, monkeypatch):
+    logo_dir = tmp_path / "logo"
+    logo_dir.mkdir()
+    (logo_dir / "logo.png").write_bytes(b"app logo")
+    monkeypatch.setenv("WINDOWS_RECTANGLE_LOGO_DIR", str(logo_dir))
+    monkeypatch.setattr(logo, "_repo_root", lambda: tmp_path / "repo")
+
+    assert logo.find_tray_logo_file() is None
+
+
 def test_find_logo_file_checks_pyinstaller_resource_directory(tmp_path, monkeypatch):
     bundled_logo = tmp_path / "bundle" / "logo"
     bundled_logo.mkdir(parents=True)

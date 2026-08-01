@@ -49,6 +49,11 @@ class SettingsViewController: NSViewController {
     private var combinedDisplayModeCheckbox: NSButton?
     private var greenButtonOverrideCheckbox: NSButton?
     private var autoMaximizeCheckbox: NSButton?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        CustomLogoViewFactory.installBrandPanel(in: view)
+    }
     
     @IBAction func toggleLaunchOnLogin(_ sender: NSButton) {
         let newSetting: Bool = sender.state == .on

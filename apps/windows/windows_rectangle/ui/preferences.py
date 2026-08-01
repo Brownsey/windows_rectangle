@@ -15,7 +15,7 @@ from ..core.actions import DEFAULT_SHORTCUTS, Action
 from ..core.keymap import UnsupportedKeyError, translate
 from ..core.shortcuts import ShortcutParseError, is_reserved, is_unregisterable, parse
 from ..ports.config_store import Settings
-from .logo import build_qicon
+from .logo import build_logo_pixmap, build_qicon
 
 if TYPE_CHECKING:
     from ..app import AppContext
@@ -414,6 +414,10 @@ def _build_window(ctx: AppContext, QtCore, QtWidgets) -> PreferencesController:
     root.setSpacing(14)
 
     header = QtWidgets.QHBoxLayout()
+    header.setSpacing(14)
+    logo = _build_brand_logo(QtCore, QtGui, QtWidgets)
+    if logo is not None:
+        header.addWidget(logo, 0, QtCore.Qt.AlignVCenter)
     title_stack = QtWidgets.QVBoxLayout()
     title_stack.setSpacing(2)
     title = QtWidgets.QLabel("Windows Rectangle")
@@ -459,6 +463,30 @@ def _build_window(ctx: AppContext, QtCore, QtWidgets) -> PreferencesController:
 
     controller.refresh_from_context()
     return controller
+
+
+def _build_brand_logo(QtCore, QtGui, QtWidgets):
+    pixmap = build_logo_pixmap(QtGui, max_width=176, max_height=44)
+    if pixmap.isNull():
+        return None
+
+    panel = QtWidgets.QFrame()
+    panel.setObjectName("brandLogoPanel")
+    panel.setAccessibleName("Application logo")
+    panel.setFixedSize(196, 56)
+
+    layout = QtWidgets.QHBoxLayout(panel)
+    layout.setContentsMargins(10, 6, 10, 6)
+    layout.setSpacing(0)
+
+    label = QtWidgets.QLabel()
+    label.setObjectName("brandLogo")
+    label.setAccessibleName("Application logo image")
+    label.setPixmap(pixmap)
+    label.setFixedSize(pixmap.size())
+    label.setScaledContents(False)
+    layout.addWidget(label, 0, QtCore.Qt.AlignCenter)
+    return panel
 
 
 def _build_shortcuts_tab(controller: PreferencesController, QtCore, QtGui, QtWidgets):
@@ -690,6 +718,11 @@ def _apply_window_style(window) -> None:
         }
         QLabel#windowSubtitle {
             color: #667085;
+        }
+        QFrame#brandLogoPanel {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 6px;
         }
         QTabWidget#preferencesTabs::pane {
             background: #ffffff;

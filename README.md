@@ -21,14 +21,23 @@ Recommended cross-platform setup:
 logo/logo.png
 logo/logo.webp
 logo/windows.ico
+logo/tray_logo.png
+logo/tray_logo.webp
+logo/tray_logo.ico
 logo/mac/logo.png
 logo/mac/logo.webp
+logo/mac/tray_logo.png
+logo/mac/tray_logo.webp
 ```
 
 Use a 1024x1024 PNG or WebP for `logo/logo.*` or `logo/mac/logo.*`. PNG remains
-the preferred format for the widest tooling compatibility. Use
-`logo/windows.ico` when you want the Windows executable file itself to display
-a custom icon. More detail is in `logo/README.md`.
+the preferred format for the widest tooling compatibility. On Windows,
+`logo/logo.png` is shown in the Preferences UI. On Windows, `logo/tray_logo.png`
+is used for the system tray icon and `logo/windows.ico` is used for the
+executable icon. On macOS, `logo/mac/logo.*` and `logo/mac/tray_logo.*` take
+priority, with root `logo/logo.*` and `logo/tray_logo.*` as fallbacks. If
+`tray_logo.*` is missing, the tray/menu bar uses a transparent blank icon. More
+detail is in `logo/README.md`.
 
 ## macOS App
 
@@ -63,19 +72,38 @@ The output is written to `apps/mac/exe/Rectangle-macOS.zip`, with a SHA-256
 checksum beside it. For distribution outside local testing, use an Apple
 Developer signing identity and notarize the resulting app.
 
+Mac build checklist from a Mac:
+
+```bash
+git pull
+bash build-mac-release.sh
+open apps/mac/build/Build/Products/Release/Rectangle.app
+```
+
+The build creates a zip containing `Rectangle.app`; it does not currently create
+a `.pkg` or `.dmg` installer. Users can extract the zip and move the app into
+`/Applications`.
+
 To customize the macOS logo, place one of these before building:
 
 ```text
 logo/mac/AppIcon.appiconset
 logo/mac/logo.png
 logo/mac/logo.webp
+logo/mac/tray_logo.png
+logo/mac/tray_logo.webp
 logo/logo.png
 logo/logo.webp
+logo/tray_logo.png
+logo/tray_logo.webp
 ```
 
-If a PNG or WebP is provided, `apps/mac/build-release.sh` uses macOS `sips` to
-generate the required app icon sizes automatically for the build. The script
-restores the vendored Rectangle icon assets after the build completes.
+If a PNG or WebP app logo is provided, `apps/mac/build-release.sh` uses macOS
+`sips` to generate the required app icon sizes automatically for the build. The
+same script also creates temporary `CustomAppLogo` and `CustomTrayLogo` asset
+catalog entries so the Preferences UI and menu bar icon use the custom assets.
+The script restores the vendored Rectangle icon and generated logo assets after
+the build completes.
 
 ## Windows App
 
@@ -161,6 +189,8 @@ portable layout avoids the PyInstaller one-file extraction path that can produce
 To customize the Windows logo, place one of these before running
 `.\build-windows-exe.bat`:
 
+App logo for the Preferences UI, in priority order:
+
 ```text
 logo/windows.ico
 logo/logo.ico
@@ -173,11 +203,20 @@ logo/logo.webp
 logo/app.webp
 ```
 
-The Windows tray and Preferences UI load the logo automatically. The build also
-bundles the `logo` folder into `apps/windows/exe/_internal/logo`. If you need to
-override the logo after building, create `apps/windows/exe/logo/logo.png`,
-`apps/windows/exe/logo/logo.webp`, or `apps/windows/exe/logo/windows.ico` next
-to the executable folder.
+Tray icon, in priority order:
+
+```text
+logo/tray_logo.ico
+logo/tray_logo.png
+logo/tray_logo.webp
+```
+
+The Windows Preferences UI loads the app logo automatically. The tray icon uses
+only `tray_logo.ico`, `tray_logo.png`, or `tray_logo.webp`; if none exists, it
+uses a transparent blank icon. The build also bundles the `logo` folder into
+`apps/windows/exe/_internal/logo`. If you need to override logos after building,
+create the relevant files in `apps/windows/exe/logo` next to the executable
+folder.
 
 The root `pyproject.toml` points packaging and tests at `apps/windows`, so the
 existing Python module name remains `windows_rectangle`.

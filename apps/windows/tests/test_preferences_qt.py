@@ -147,7 +147,7 @@ def test_qt_preferences_window_has_expected_structure(qt_app, qt_modules):
 
 
 def test_qt_preferences_window_uses_custom_logo(qt_app, qt_modules, tmp_path, monkeypatch):
-    _qt_core, qt_gui, _qt_widgets, _qt_test = qt_modules
+    _qt_core, qt_gui, qt_widgets, _qt_test = qt_modules
     logo_dir = tmp_path / "logo"
     logo_dir.mkdir()
     _write_test_png(qt_gui, logo_dir / "logo.png")
@@ -156,6 +156,17 @@ def test_qt_preferences_window_uses_custom_logo(qt_app, qt_modules, tmp_path, mo
     controller = _build_controller(qt_app, qt_modules)
 
     assert not controller.window.windowIcon().isNull()
+    logo_panel = controller.window.findChild(qt_widgets.QFrame, "brandLogoPanel")
+    assert logo_panel is not None
+    assert logo_panel.accessibleName() == "Application logo"
+    assert logo_panel.width() >= 196
+    assert logo_panel.height() >= 56
+
+    logo_label = controller.window.findChild(qt_widgets.QLabel, "brandLogo")
+    assert logo_label is not None
+    assert logo_label.accessibleName() == "Application logo image"
+    assert logo_label.pixmap() is not None
+    assert not logo_label.pixmap().isNull()
 
 
 def test_qt_preferences_window_renders_non_blank_screenshot(qt_app, qt_modules):

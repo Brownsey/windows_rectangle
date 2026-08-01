@@ -63,6 +63,11 @@ class PrefsViewController: NSViewController {
     
     @IBOutlet weak var showMoreButton: NSButton!
     @IBOutlet weak var additionalShortcutsStackView: NSStackView!
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        CustomLogoViewFactory.installBrandPanel(in: view)
+    }
     
     // Settings
     override func awakeFromNib() {
