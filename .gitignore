@@ -9,3 +9,9 @@ dist/
 .venv/
 venv/
 *.spec
+.DS_Store
+apps/windows/exe/
+apps/mac/build/
+apps/mac/dist/
+apps/mac/exe/
+*.xcuserstate

@@ -1,0 +1,398 @@
+/// WindowManager.swift
+
+import Cocoa
+
+class WindowManager {
+    
+    private let screenDetection = ScreenDetection()
+    private let standardWindowMoverChain: [WindowMover]
+    private let fixedSizeWindowMoverChain: [WindowMover]
+    
+    init() {
+        standardWindowMoverChain = [
+            StandardWindowMover(),
+            EdgeAlignmentWindowMover(),
+            BestEffortWindowMover()
+        ]
+        
+        fixedSizeWindowMoverChain = [
+            FixedSizeWindowMover(),
+            BestEffortWindowMover()
+        ]
+    }
+    
+    func recordAction(windowId: CGWindowID?,
+                      resultingRect: CGRect,
+                      action: WindowAction,
+                      subAction: SubWindowAction?,
+                      incrementCount: Bool = true) {
+        guard let windowId else { return }
+        let newCount: Int
+        if let lastRectangleAction = AppDelegate.windowHistory.lastRectangleActions[windowId],
+           lastRectangleAction.action == action {
+            newCount = incrementCount ? lastRectangleAction.count + 1 : lastRectangleAction.count
+        } else {
+            newCount = 1
+        }
+        
+        AppDelegate.windowHistory.lastRectangleActions[windowId] = RectangleAction(
+            action: action,
+            subAction: subAction,
+            rect: resultingRect,
+            count: newCount
+        )
+    }
+    
+    func execute(_ parameters: ExecutionParameters) {
+        guard let frontmostWindowElement = parameters.windowElement ?? AccessibilityElement.getFrontWindowElement()
+        else {
+            NSSound.beep()
+            return
+        }
+        
+        // The window id can be unavailable when macOS stops vending window info
+        // after a session transition (#640). Actions still execute; only
+        // window-id-keyed history is skipped.
+        let windowId = parameters.windowId ?? frontmostWindowElement.getWindowId()
+
+        let action = parameters.action
+        
+        if action == .restore {
+            guard let windowId else {
+                NSSound.beep()
+                return
+            }
+            if let restoreRect = AppDelegate.windowHistory.restoreRects[windowId] {
+                frontmostWindowElement.setFrame(restoreRect)
+            }
+            AppDelegate.windowHistory.lastRectangleActions.removeValue(forKey: windowId)
+            return
+        }
+        
+        var screens: UsableScreens?
+        if let screen = parameters.screen {
+            screens = UsableScreens(currentScreen: screen, numScreens: 1)
+        } else {
+            screens = Defaults.useCursorScreenDetection.enabled
+            ? screenDetection.detectScreensAtCursor()
+            : screenDetection.detectScreens(using: frontmostWindowElement)
+        }
+        
+        guard let usableScreens = screens else {
+            NSSound.beep()
+            Logger.log("Unable to obtain usable screens")
+            return
+        }
+        
+        let currentWindowRect: CGRect = frontmostWindowElement.frame
+        
+        var lastRectangleAction = windowId.flatMap { AppDelegate.windowHistory.lastRectangleActions[$0] }
+        
+        let windowMovedExternally = currentWindowRect != lastRectangleAction?.rect
+        
+        if windowMovedExternally {
+            lastRectangleAction = nil
+            if let windowId {
+                AppDelegate.windowHistory.lastRectangleActions.removeValue(forKey: windowId)
+            }
+        }
+        
+        if parameters.updateRestoreRect, let windowId {
+            if AppDelegate.windowHistory.restoreRects[windowId] == nil
+                || windowMovedExternally {
+                AppDelegate.windowHistory.restoreRects[windowId] = currentWindowRect
+            }
+        }
+        
+        let ignoreTodo = windowId.map { TodoManager.isTodoWindow($0) } ?? false
+        
+        if frontmostWindowElement.isSheet == true
+            || currentWindowRect.isNull
+            || usableScreens.frameOfCurrentScreen.isNull
+            || usableScreens.currentScreen.adjustedVisibleFrame(ignoreTodo).isNull {
+            NSSound.beep()
+            Logger.log("Window is not snappable or usable screen is not valid")
+            return
+        }
+        
+        let currentNormalizedRect = currentWindowRect.screenFlipped
+        let currentWindow = Window(id: windowId, rect: currentNormalizedRect)
+        
+        let windowCalculation = WindowCalculationFactory.calculationsByAction[action]
+        
+        let calculationParams = WindowCalculationParameters(window: currentWindow, usableScreens: usableScreens, action: action, lastAction: lastRectangleAction, ignoreTodo: ignoreTodo)
+        guard var calcResult = windowCalculation?.calculate(calculationParams) else {
+            NSSound.beep()
+            Logger.log("Nil calculation result")
+            return
+        }
+        
+        let gapsApplicable = calcResult.resultingAction.gapsApplicable
+        
+        if Defaults.gapSize.value > 0, gapsApplicable != .none {
+            let gapSharedEdges = calcResult.resultingSubAction?.gapSharedEdge ?? calcResult.resultingAction.gapSharedEdge
+            
+            calcResult.rect = GapCalculation.applyGaps(calcResult.rect, dimension: gapsApplicable, sharedEdges: gapSharedEdges, gapSize: Defaults.gapSize.value, skipTopGap: Defaults.skipGapTopEdge.enabled)
+        }
+
+        if Defaults.cyclingOverlapOffset.userEnabled, action.positionCycles {
+            calcResult.rect = applyOverlapOffsetIfNeeded(calcResult.rect, windowId: windowId, screen: calcResult.screen)
+        }
+
+        let isFixedSize = (!frontmostWindowElement.isResizable() && action.resizes) || frontmostWindowElement.isSystemDialog == true
+        let visibleFrameOfDestinationScreen = calcResult.resultingScreenFrame ?? calcResult.screen.adjustedVisibleFrame(ignoreTodo)
+        let cooperativeCornerPlan = cooperativeCornerResizePlan(focusedWindowId: windowId,
+                                                                focusedWindowIsFixedSize: isFixedSize,
+                                                                focusedWindowMinimumSize: frontmostWindowElement.minimumSize,
+                                                                action: action,
+                                                                source: parameters.source,
+                                                                oldFocusedFrame: currentNormalizedRect,
+                                                                newFocusedFrame: calcResult.rect,
+                                                                screenFrame: visibleFrameOfDestinationScreen,
+                                                                destinationScreenIsCurrentScreen: usableScreens.currentScreen == calcResult.screen,
+                                                                lastRectangleAction: lastRectangleAction)
+        if let cooperativeCornerPlan {
+            calcResult.rect = cooperativeCornerPlan.focusedFrame
+            if let sideSplitRecordingFrame = cooperativeCornerPlan.sideSplitRecordingFrame {
+                calcResult.initialRect = sideSplitRecordingFrame
+            }
+        }
+
+        if cooperativeCornerPlan == nil {
+            ActiveSideSplitRatios.shared.recordSideAction(calcResult.resultingAction,
+                                                          targetFrame: calcResult.initialRect,
+                                                          screenFrame: visibleFrameOfDestinationScreen)
+        }
+
+        if let cooperativeCornerPlan {
+            if !cooperativeCornerPlan.needsApplication(focusedCurrentFrame: currentNormalizedRect) {
+                ActiveSideSplitRatios.shared.recordAchievedCooperativeAction(cooperativeCornerPlan.action,
+                                                                            achievedFrame: currentNormalizedRect,
+                                                                            screenFrame: cooperativeCornerPlan.screenFrame,
+                                                                            gapSize: cooperativeCornerPlan.gapSize)
+                Logger.log("Cooperative resize no-op: solved frames already match current frames")
+                recordAction(windowId: windowId, resultingRect: currentWindowRect, action: calcResult.resultingAction, subAction: calcResult.resultingSubAction)
+                return
+            }
+        } else if currentNormalizedRect.equalTo(calcResult.rect) {
+            Logger.log("Current frame is equal to new frame")
+
+            recordAction(windowId: windowId, resultingRect: currentWindowRect, action: calcResult.resultingAction, subAction: calcResult.resultingSubAction)
+
+            return
+        }
+
+        let resultParameters = ResultParameters(windowId: windowId,
+                                                action: action,
+                                                windowElement: frontmostWindowElement,
+                                                calcResult: calcResult,
+                                                usableScreens: usableScreens,
+                                                visibleFrameOfScreen: visibleFrameOfDestinationScreen,
+                                                source: parameters.source,
+                                                isFixedSize: isFixedSize)
+        
+        var resultingRect: CGRect
+        if let cooperativeCornerPlan {
+            resultingRect = applyCooperativeCornerResize(result: resultParameters,
+                                                         plan: cooperativeCornerPlan)
+        } else {
+            resultingRect = apply(result: resultParameters)
+        }
+
+        if let cooperativeCornerPlan {
+            // AX can enforce a minimum size that was not reported before the settling pass.
+            ActiveSideSplitRatios.shared.recordAchievedCooperativeAction(cooperativeCornerPlan.action,
+                                                                        achievedFrame: resultingRect.screenFlipped,
+                                                                        screenFrame: cooperativeCornerPlan.screenFrame,
+                                                                        gapSize: cooperativeCornerPlan.gapSize)
+        }
+        
+        let isMovedAcrossDisplays = usableScreens.currentScreen != calcResult.screen
+        if isMovedAcrossDisplays {
+            if calcResult.rect.height != resultingRect.height {
+                Logger.log("Window size wasn't applied perfectly across displays. Trying again.")
+                resultingRect = apply(result: resultParameters)
+                
+                if calcResult.rect.height != resultingRect.height {
+                    Logger.log("Final attempt to adjust across displays.")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(25)) { [weak self] in
+                        guard let self else { return }
+                        let finalRect = self.apply(result: resultParameters)
+                        self.windowMovedAcrossDisplays(windowElement: frontmostWindowElement, resultingRect: finalRect)
+                        self.postProcess(result: resultParameters, resultingRect: finalRect)
+                    }
+                    return
+                }
+            }
+            windowMovedAcrossDisplays(windowElement: frontmostWindowElement, resultingRect: resultingRect)
+        }
+
+        if !isMovedAcrossDisplays {
+            applyCooperativeCornerCleanupIfNeeded(focusedWindowId: windowId,
+                                                  source: parameters.source,
+                                                  oldFocusedFrame: currentNormalizedRect,
+                                                  newFocusedFrame: resultingRect.screenFlipped,
+                                                  screenFrame: usableScreens.currentScreen.adjustedVisibleFrame(ignoreTodo),
+                                                  currentAction: action,
+                                                  lastRectangleAction: lastRectangleAction)
+            resultingRect = frontmostWindowElement.frame
+        }
+        
+        postProcess(result: resultParameters, resultingRect: resultingRect)
+    }
+    
+    /// Move/resize a window based on the calculation results.
+    /// - Returns: The rect of the window after applying the window action
+    func apply(result: ResultParameters) -> CGRect {
+        let newRect = result.calcResult.rect
+        if !result.windowElement.frame.screenFlipped.equalTo(newRect) {
+            moveWindow(toRect: newRect, result: result)
+        }
+        return result.windowElement.frame
+    }
+
+    func moveWindow(toRect rect: CGRect, result: ResultParameters) {
+        let windowMoverChain = result.isFixedSize
+        ? fixedSizeWindowMoverChain
+        : standardWindowMoverChain
+        for windowMover in windowMoverChain {
+            windowMover.moveWindow(toRect: rect, resultParameters: result)
+        }
+    }
+    
+    func windowMovedAcrossDisplays(windowElement: AccessibilityElement, resultingRect: CGRect) {
+        windowElement.bringToFront(force: true)
+        
+        if Defaults.moveCursorAcrossDisplays.userEnabled {
+            CGWarpMouseCursorPosition(resultingRect.centerPoint)
+        }
+    }
+    
+    private func applyOverlapOffsetIfNeeded(_ rect: CGRect, windowId: CGWindowID?, screen: NSScreen) -> CGRect {
+        let overlapOffset = CGFloat(Defaults.cyclingOverlapOffsetSize.value)
+        guard overlapOffset > 0 else { return rect }
+
+        // Without a window id the current window can't be excluded from the
+        // overlap scan, so skip the offset rather than cascade against itself.
+        guard let windowId else { return rect }
+
+        let screenFrameAX = screen.adjustedVisibleFrame().screenFlipped
+        let tolerance: CGFloat = 4
+        let maxCascade = min(5, max(1, Defaults.cyclingOverlapMaxCascade.value))
+
+        let otherWindows = AccessibilityElement.getAllWindowElements().filter { element in
+            guard element.getWindowId() != windowId,
+                  element.isWindow == true,
+                  element.isMinimized != true,
+                  element.isHidden != true,
+                  element.isSheet != true
+            else { return false }
+
+            let frame = element.frame
+            return !frame.isNull && screenFrameAX.intersects(frame)
+        }
+
+        let screenFrameNormalized = screen.adjustedVisibleFrame()
+        var candidate = rect
+        var cascadeLevel = 0
+
+        while cascadeLevel < maxCascade {
+            let candidateAX = candidate.screenFlipped
+            let hasOverlap = otherWindows.contains { element in
+                let otherFrame = element.frame
+                let originsMatch = abs(otherFrame.origin.x - candidateAX.origin.x) < tolerance
+                    && abs(otherFrame.origin.y - candidateAX.origin.y) < tolerance
+                let otherCoversScreen = otherFrame.width > screenFrameAX.width * 0.9
+                    && otherFrame.height > screenFrameAX.height * 0.9
+                return originsMatch && !otherCoversScreen
+            }
+
+            guard hasOverlap else { break }
+
+            candidate.origin.x += overlapOffset
+            candidate.origin.y += overlapOffset
+            cascadeLevel += 1
+
+            if candidate.origin.x + candidate.width > screenFrameNormalized.maxX {
+                candidate.origin.x = screenFrameNormalized.maxX - candidate.width
+            }
+            if candidate.origin.y + candidate.height > screenFrameNormalized.maxY {
+                candidate.origin.y = screenFrameNormalized.maxY - candidate.height
+            }
+            if candidate.origin.x < screenFrameNormalized.origin.x {
+                candidate.origin.x = screenFrameNormalized.origin.x
+            }
+            if candidate.origin.y < screenFrameNormalized.origin.y {
+                candidate.origin.y = screenFrameNormalized.origin.y
+            }
+        }
+
+        if cascadeLevel > 0 {
+            Logger.log("Cycling overlap detected, applied \(cascadeLevel) x \(overlapOffset)pt cascade offset")
+        }
+        return candidate
+    }
+
+    func postProcess(result: ResultParameters, resultingRect: CGRect) {
+        let calcResult = result.calcResult
+        
+        if Defaults.moveCursor.userEnabled, result.source == .keyboardShortcut {
+            CGWarpMouseCursorPosition(resultingRect.centerPoint)
+        }
+        
+        recordAction(windowId: result.windowId, resultingRect: resultingRect, action: calcResult.resultingAction, subAction: calcResult.resultingSubAction)
+        
+        if Logger.logging {
+            var logItems = ["\(result.action.name)",
+                            "display: \(result.visibleFrameOfScreen.debugDescription)",
+                            "calculatedRect: \(result.calcResult.rect.screenFlipped.debugDescription)",
+                            "resultRect: \(resultingRect.debugDescription)",
+                            "srcScreen: \(result.usableScreens.currentScreen.localizedName)",
+                            "destScreen: \(calcResult.screen.localizedName)"]
+            if let resultScreens = screenDetection.detectScreens(using: result.windowElement) {
+                logItems.append("resultScreen: \(resultScreens.currentScreen.localizedName)")
+            }
+            Logger.log(logItems.joined(separator: ", "))
+        }
+    }
+}
+
+struct ResultParameters {
+    let windowId: CGWindowID?
+    let action: WindowAction
+    let windowElement: AccessibilityElement
+    let calcResult: WindowCalculationResult
+    let usableScreens: UsableScreens
+    let visibleFrameOfScreen: CGRect
+    let source: ExecutionSource
+    let isFixedSize: Bool
+}
+
+struct RectangleAction {
+    let action: WindowAction
+    let subAction: SubWindowAction?
+    let rect: CGRect
+    let count: Int
+}
+
+struct ExecutionParameters {
+    let action: WindowAction
+    let updateRestoreRect: Bool
+    let screen: NSScreen?
+    let windowElement: AccessibilityElement?
+    let windowId: CGWindowID?
+    let source: ExecutionSource
+
+    init(_ action: WindowAction, updateRestoreRect: Bool = true, screen: NSScreen? = nil, windowElement: AccessibilityElement? = nil, windowId: CGWindowID? = nil, source: ExecutionSource = .keyboardShortcut) {
+        self.action = action
+        self.updateRestoreRect = updateRestoreRect
+        self.screen = screen
+        self.windowElement = windowElement
+        self.windowId = windowId
+        self.source = source
+    }
+}
+
+enum ExecutionSource {
+    case keyboardShortcut, dragToSnap, menuItem, url, titleBar
+}

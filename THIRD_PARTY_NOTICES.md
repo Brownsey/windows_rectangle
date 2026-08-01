@@ -2,14 +2,18 @@
 
 ## Rectangle
 
-Window-geometry math, action catalogue, and default shortcut map are
-modelled on the macOS [Rectangle](https://github.com/rxhanson/Rectangle)
-app by Ryan Hanson, distributed under the MIT License.
+This repository vendors a fork snapshot of the macOS
+[Rectangle](https://github.com/rxhanson/Rectangle) app in
+`apps/mac/Rectangle`.
+
+The Windows app's window-geometry math, action catalogue, and default shortcut
+map are modelled on Rectangle.
 
 ```
 MIT License
 
-Copyright (c) 2019 Ryan Hanson
+Copyright (c) 2019-2026 Ryan Hanson
+Based on the Spectacle app, Copyright (c) 2017 Eric Czarny eczarny@gmail.com
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -30,4 +34,5 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-No Swift source code is copied; this project is a fresh Python implementation.
+The upstream Rectangle README, license, credits, and source files are preserved
+under `apps/mac/Rectangle`.
