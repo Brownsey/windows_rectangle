@@ -162,4 +162,4 @@ def test_is_reserved_unparseable_is_false():
 
 def test_is_unregisterable_blocks_ctrl_alt_delete():
     assert is_unregisterable("Ctrl+Alt+Delete")
-    assert not is_unregisterable("Ctrl+Alt+Insert")
+    assert not is_unregisterable("Ctrl+Delete")

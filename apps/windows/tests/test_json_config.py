@@ -255,7 +255,7 @@ def test_load_v5_custom_sixth_shortcut_is_preserved(store):
     assert loaded.shortcuts[Action.TOP_LEFT_SIXTH] == "ctrl+alt+shift+u"
 
 
-def test_load_v5_shift_insert_sixth_defaults_migrate_to_plain_ctrl_alt(store):
+def test_load_v5_shift_insert_sixth_defaults_migrate_to_plain_ctrl(store):
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text(
         json.dumps(
@@ -266,6 +266,33 @@ def test_load_v5_shift_insert_sixth_defaults_migrate_to_plain_ctrl_alt(store):
                     "top_right_sixth": "ctrl+alt+shift+pageup",
                     "bottom_left_sixth": "ctrl+alt+shift+delete",
                     "bottom_right_sixth": "ctrl+alt+shift+pagedown",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = store.load()
+
+    assert loaded.shortcuts[Action.TOP_LEFT_SIXTH] == DEFAULT_SHORTCUTS[Action.TOP_LEFT_SIXTH]
+    assert loaded.shortcuts[Action.TOP_RIGHT_SIXTH] == DEFAULT_SHORTCUTS[Action.TOP_RIGHT_SIXTH]
+    assert loaded.shortcuts[Action.BOTTOM_LEFT_SIXTH] == DEFAULT_SHORTCUTS[Action.BOTTOM_LEFT_SIXTH]
+    assert (
+        loaded.shortcuts[Action.BOTTOM_RIGHT_SIXTH] == DEFAULT_SHORTCUTS[Action.BOTTOM_RIGHT_SIXTH]
+    )
+
+
+def test_load_v6_ctrl_alt_insert_sixth_defaults_migrate_to_plain_ctrl(store):
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(
+        json.dumps(
+            {
+                "schema_version": 6,
+                "shortcuts": {
+                    "top_left_sixth": "ctrl+alt+insert",
+                    "top_right_sixth": "ctrl+alt+pageup",
+                    "bottom_left_sixth": "ctrl+alt+shift+delete",
+                    "bottom_right_sixth": "ctrl+alt+pagedown",
                 },
             }
         ),

@@ -174,10 +174,10 @@ Default shortcuts:
 | `Ctrl+Alt+I` | Top Right |
 | `Ctrl+Alt+J` | Bottom Left |
 | `Ctrl+Alt+K` | Bottom Right |
-| `Ctrl+Alt+Insert` | Top Left 1/6 |
-| `Ctrl+Alt+Pg Up` | Top Right 3/6 |
-| `Ctrl+Alt+Shift+Delete` | Bottom Left 4/6 |
-| `Ctrl+Alt+Pg Down` | Bottom Right 6/6 |
+| `Ctrl+Insert` | Top Left 1/6 |
+| `Ctrl+Pg Up` | Top Right 3/6 |
+| `Ctrl+Delete` | Bottom Left 4/6 |
+| `Ctrl+Pg Down` | Bottom Right 6/6 |
 | `Ctrl+Alt+Enter` | Maximize |
 | `Ctrl+Alt+Shift+Up` | Maximize Height |
 | `Ctrl+Alt+Shift+Right` | Maximize Width |

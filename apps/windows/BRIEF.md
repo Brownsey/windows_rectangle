@@ -42,7 +42,7 @@ source snapshot under `apps/mac/Rectangle`.
 |---|--------|------------------------------------------|
 | 1 | Left / Right / Top / Bottom half | `Ctrl+Alt+←/→/↑/↓` |
 | 2 | Top-Left/-Right, Bottom-Left/-Right quarter | `Ctrl+Alt+U/I/J/K` |
-| 3 | Top-left/-right, Bottom-left/-right sixth | `Ctrl+Alt+Insert/PgUp`, `Ctrl+Alt+Shift+Delete`, `Ctrl+Alt+PgDown` |
+| 3 | Top-left/-right, Bottom-left/-right sixth | `Ctrl+Insert/PgUp/Delete/PgDown` |
 | 4 | First / Center / Last third | `Ctrl+Alt+D/F/G` |
 | 5 | First / Last two-thirds | `Ctrl+Alt+E/T` |
 | 6 | Maximize | `Ctrl+Alt+Enter` |

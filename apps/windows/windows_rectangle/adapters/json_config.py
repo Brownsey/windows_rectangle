@@ -19,7 +19,7 @@ from ..core.actions import DEFAULT_SHORTCUTS, Action
 from ..core.shortcuts import ShortcutParseError, normalise
 from ..ports.config_store import Settings
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _FORMERLY_DISABLED_DEFAULT_ACTIONS: frozenset[Action] = frozenset(
     {
@@ -109,6 +109,13 @@ _PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V5: dict[Action, str] = {
     Action.TOP_RIGHT_SIXTH: "ctrl+alt+shift+pageup",
     Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+delete",
     Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+shift+pagedown",
+}
+
+_PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V6: dict[Action, str] = {
+    Action.TOP_LEFT_SIXTH: "ctrl+alt+insert",
+    Action.TOP_RIGHT_SIXTH: "ctrl+alt+pageup",
+    Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+delete",
+    Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+pagedown",
 }
 
 
@@ -209,6 +216,10 @@ def _from_dict(raw: dict[str, Any]) -> Settings:
                 continue
             if schema_version < 6 and _matches_previous_insert_sixth_default(action, combo):
                 continue
+            if schema_version < 7 and _matches_previous_ctrl_alt_insert_sixth_default(
+                action, combo
+            ):
+                continue
             shortcuts[action] = combo
 
     return Settings(
@@ -266,6 +277,16 @@ def _matches_previous_sixth_default(action: Action, combo: str) -> bool:
 
 def _matches_previous_insert_sixth_default(action: Action, combo: str) -> bool:
     previous_default = _PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V5.get(action)
+    if not previous_default:
+        return False
+    try:
+        return normalise(combo) == normalise(previous_default)
+    except ShortcutParseError:
+        return combo.strip().lower() == previous_default
+
+
+def _matches_previous_ctrl_alt_insert_sixth_default(action: Action, combo: str) -> bool:
+    previous_default = _PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V6.get(action)
     if not previous_default:
         return False
     try:
