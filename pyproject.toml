@@ -7,22 +7,27 @@ name = "windows_rectangle"
 version = "0.1.0"
 description = "A Rectangle-for-Windows window manager"
 requires-python = ">=3.11"
-readme = "BRIEF.md"
+readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Windows Rectangle contributors" }]
 dependencies = []
 
+[project.scripts]
+windows-rectangle = "windows_rectangle.__main__:main"
+
 [project.optional-dependencies]
 win = ["pywin32>=306", "PySide6>=6.6"]
+build = ["pyinstaller>=6.11"]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["apps/windows"]
 include = ["windows_rectangle*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["apps/windows/tests"]
 addopts = "-ra --strict-markers"
+pythonpath = ["apps/windows"]
 
 [tool.ruff]
 line-length = 100
@@ -41,9 +46,9 @@ ignore = ["UP042", "E741"]
 # parameter lists). F841 dropped — the only offender was the vestigial
 # double-assign in test_dispatcher cleaned up in iter 52; if anyone needs
 # to capture-for-clarity again, prefer a deliberate `_ = expr`.
-"tests/*" = ["E501"]
+"apps/windows/tests/*" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["windows_rectangle/core"]
+files = ["apps/windows/windows_rectangle/core"]

@@ -94,8 +94,8 @@ EXCLUDES = [
 ]
 
 a = Analysis(
-    ["windows_rectangle/__main__.py"],
-    pathex=["."],
+    ["apps/windows/windows_rectangle/__main__.py"],
+    pathex=["apps/windows"],
     binaries=[],
     datas=[],
     hiddenimports=HIDDEN,

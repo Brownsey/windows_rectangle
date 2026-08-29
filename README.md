@@ -1,262 +1,253 @@
-# Windows Rectangle
+# Rectangle Desktop Apps
 
-A Rectangle-for-Windows window manager — a feature-parity clone of the macOS
-[Rectangle](https://github.com/rxhanson/Rectangle) app, built in Python and
-runnable on Windows 10/11.
+This repository contains two platform apps:
 
-Snap windows to halves, quarters, thirds, sixths, maximize, almost-maximize,
-restore (undo) and more — all via fully rebindable keyboard shortcuts.
-Drag a window to a screen edge for live snap previews.
+- `apps/mac/Rectangle`: a vendored fork snapshot of the macOS Rectangle app.
+- `apps/windows`: the Python Windows Rectangle implementation.
 
----
+The macOS app is copied from the upstream Rectangle repository so builds do not
+depend on fetching the application source from upstream at release time. The
+Windows app remains a separate implementation that follows Rectangle's behavior
+and shortcut model on Windows.
 
-## Quick start (for users)
+## Shared Logo
 
-You have two ways to run Windows Rectangle:
+Custom logo files live in the repository root `logo` folder. The same folder is
+used by both platform builds.
 
-### Option A — Run the prebuilt .exe (recommended)
+Recommended cross-platform setup:
 
-1. Open a PowerShell window in this directory.
-2. Run the one-shot build script. It installs PyInstaller + PySide6 + pywin32
-   into your current Python and produces a single-file `.exe`:
+```text
+logo/logo.png
+logo/logo.webp
+logo/windows.ico
+logo/tray_logo.png
+logo/tray_logo.webp
+logo/tray_logo.ico
+logo/mac/logo.png
+logo/mac/logo.webp
+logo/mac/tray_logo.png
+logo/mac/tray_logo.webp
+```
 
-   ```powershell
-   .\Build-Exe.ps1
-   ```
+Use a 1024x1024 PNG or WebP for `logo/logo.*` or `logo/mac/logo.*`. PNG remains
+the preferred format for the widest tooling compatibility. On Windows,
+`logo/logo.png` is shown in the Preferences UI. On Windows, `logo/tray_logo.png`
+is used for the system tray icon and `logo/windows.ico` is used for the
+executable icon. On macOS, `logo/mac/logo.*` and `logo/mac/tray_logo.*` take
+priority, with root `logo/logo.*` and `logo/tray_logo.*` as fallbacks. If
+`tray_logo.*` is missing, the tray/menu bar uses a transparent blank icon. More
+detail is in `logo/README.md`.
 
-3. Double-click `dist\WindowsRectangle.exe`. A tray icon appears in the
-   notification area (small blue tile with a 2×2 grid — right-click it).
-4. Right-click the tray icon → **Preferences…** to rebind shortcuts,
-   change the gap, enable launch-at-login, etc.
-5. Other tray menu items:
-   - **Pause shortcuts** — checkable. Unregisters every hotkey at the OS
-     level so other apps (full-screen games, RDP sessions) get the keys
-     back. Uncheck to resume. Settings are kept; no reload required.
-     The tooltip appends ` • paused` while active.
-   - **Cheat sheet…** — at-a-glance list of every action and its current combo.
-   - **Binding status…** — shows "X of Y shortcuts bound" plus the specific
-     combos and error messages for any failures (e.g. another app already
-     owns `Ctrl+Alt+←`). Hover the tray icon for the same count in the tooltip.
-   - **Reload config from disk** — re-reads the JSON after you hand-edit it.
-   - **Open config folder…** — jumps to `%APPDATA%\windows_rectangle\` in
-     Explorer (created if missing).
-   - **Open log file…** — opens the rotating log file (or its folder if
-     nothing has been logged yet). Attach the contents to a bug report.
-   - **About…** — version + license.
-6. Preferences dialog has a **Reset shortcuts to defaults** button under
-   the shortcuts table — handy after experimenting with custom combos.
-7. Right-click the tray icon → **Quit** to fully stop the app (all
-   shortcuts and the mouse hook are released).
+## macOS App
 
-Windows SmartScreen may warn the first time you run an unsigned `.exe` —
-click **More info → Run anyway**. Code-signing is a future to-do.
+Source: `apps/mac/Rectangle`
 
-Want it findable via the Start Menu / search? Pass `-InstallStartMenuShortcut`.
-Want to build *and* run in one step? Pass `-Launch`:
+Upstream project: <https://github.com/rxhanson/Rectangle>
+
+Snapshot commit: `6cfcb4720b3a6f83df82a8896a3da4751e90ca4e`
+
+Upstream commit date: `2026-07-28 22:12:35 -0400`
+
+Requirements:
+
+- macOS with Xcode installed.
+- Xcode command line tools available through `xcodebuild`.
+- Accessibility permission granted to the built app the first time it runs.
+
+Run the fork locally from the repository root:
+
+```bash
+bash build-mac-release.sh
+open apps/mac/build/Build/Products/Release/Rectangle.app
+```
+
+To build a local downloadable zip on macOS:
+
+```bash
+bash build-mac-release.sh
+```
+
+The output is written to `apps/mac/exe/Rectangle-macOS.zip`, with a SHA-256
+checksum beside it. For distribution outside local testing, use an Apple
+Developer signing identity and notarize the resulting app.
+
+Mac build checklist from a Mac:
+
+```bash
+git pull
+bash build-mac-release.sh
+open apps/mac/build/Build/Products/Release/Rectangle.app
+```
+
+The build creates a zip containing `Rectangle.app`; it does not currently create
+a `.pkg` or `.dmg` installer. Users can extract the zip and move the app into
+`/Applications`.
+
+To customize the macOS logo, place one of these before building:
+
+```text
+logo/mac/AppIcon.appiconset
+logo/mac/logo.png
+logo/mac/logo.webp
+logo/mac/tray_logo.png
+logo/mac/tray_logo.webp
+logo/logo.png
+logo/logo.webp
+logo/tray_logo.png
+logo/tray_logo.webp
+```
+
+If a PNG or WebP app logo is provided, `apps/mac/build-release.sh` uses macOS
+`sips` to generate the required app icon sizes automatically for the build. The
+same script also creates temporary `CustomAppLogo` and `CustomTrayLogo` asset
+catalog entries so the Preferences UI and menu bar icon use the custom assets.
+The script restores the vendored Rectangle icon and generated logo assets after
+the build completes.
+
+## Windows App
+
+Source: `apps/windows/windows_rectangle`
+
+Tests: `apps/windows/tests`
+
+Requirements for local development:
+
+- Windows 10 or Windows 11.
+- Python 3.11 or newer available as `py` or `python`.
+- PowerShell available on PATH.
+
+Run the app locally from the repository root:
 
 ```powershell
-.\Build-Exe.ps1 -InstallStartMenuShortcut -Launch
+.\run-windows.bat
 ```
 
-The script verifies Python ≥ 3.11 up front and refuses to build over a
-running `WindowsRectangle.exe` (it tells you to quit the tray first).
+The launcher creates `.venv` when needed, installs dependencies, stops any
+existing Windows Rectangle instance, and opens the Preferences window.
 
-### Option B — Run from source
-
-For contributors who want the tray running without producing an .exe.
-One shot:
+Useful local run commands:
 
 ```powershell
-.\Run-Dev.ps1
+.\run-windows.bat            # open Preferences and tray app
+.\run-windows.bat tray       # start tray-only
+.\run-windows.bat stop       # stop existing app instances
+.\run-windows.bat test       # run pytest only
+.\run-windows.bat check      # run lint, format check, mypy, and tests
 ```
 
-The script installs PySide6 + pywin32 if needed, then launches
-`python -m windows_rectangle`. Pass `-Headless` to skip Qt and run the
-stdlib-only fallback (hotkeys + dispatcher only, no tray):
+Manual development commands, if you do not want to use the batch file:
 
 ```powershell
-.\Run-Dev.ps1 -Headless
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[win,dev]"
+.\.venv\Scripts\python.exe -m windows_rectangle --open-preferences
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-You can also do it by hand:
+Build a shareable Windows executable with:
 
 ```powershell
-pip install -e ".[win]"
-python -m windows_rectangle
+.\build-windows-exe.bat
 ```
 
----
+All generated Windows release files are placed in the `exe` folder inside the
+Windows app:
 
-## Default shortcuts
-
-| Action | Default shortcut |
-|---|---|
-| Left / Right / Top / Bottom half | `Ctrl+Alt+←/→/↑/↓` |
-| Top-Left / Top-Right quarter | `Ctrl+Alt+U` / `Ctrl+Alt+I` |
-| Bottom-Left / Bottom-Right quarter | `Ctrl+Alt+J` / `Ctrl+Alt+K` |
-| First / Center / Last third | `Ctrl+Alt+D` / `Ctrl+Alt+F` / `Ctrl+Alt+G` |
-| First / Last two-thirds | `Ctrl+Alt+E` / `Ctrl+Alt+T` |
-| Maximize | `Ctrl+Alt+Enter` |
-| Maximize height | `Ctrl+Alt+Shift+↑` |
-| Almost-maximize (~85%) | `Ctrl+Alt+Shift+Enter` |
-| Center (no resize) | `Ctrl+Alt+C` |
-| Larger / smaller | `Ctrl+Alt+=` / `Ctrl+Alt+-` |
-| Restore (undo) | `Ctrl+Alt+Backspace` |
-| Next / previous display | `Ctrl+Alt+.` / `Ctrl+Alt+,` |
-
-Every binding is rebindable from **Preferences…**. Clearing a row's combo
-cell unbinds that action.
-
----
-
-## Tips
-
-- **Repeat-key cycling.** Pressing a half/third shortcut twice cycles between
-  related positions, exactly like macOS Rectangle. The idle timeout is
-  configurable in Preferences.
-- **Drag-to-edge.** Drag a window to a screen edge or corner and a translucent
-  preview shows where it will land on release. Toggle the feature in
-  Preferences.
-- **Gap between tiled windows.** Set in Preferences; takes effect immediately
-  without restart.
-- **Per-monitor DPI.** The app declares Per-Monitor-V2 DPI awareness on
-  startup, so geometry stays correct on mixed-DPI multi-monitor setups.
-- **Admin windows.** Windows blocks non-admin processes from moving windows
-  owned by elevated processes (UIPI). If a hotkey seems to do nothing on an
-  admin window, that's why. Run Windows Rectangle elevated if you need it.
-- **Launch at login.** Toggle in the tray menu or Preferences; persists to
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
-
----
-
-## Configuration
-
-Settings are stored as JSON at:
-
-```
-%APPDATA%\WindowsRectangle\config.json
+```text
+apps/windows/exe
 ```
 
-Editing the file by hand works — the Preferences dialog is the supported
-path, but you can also use tray → **Reload config from disk** after a
-hand-edit to pick up changes without restarting the app.
-
-### Quick CLI helpers
-
-These short-circuit before any Win32 wiring, so they're safe to run while
-a tray copy is open:
+The full build command above is equivalent to:
 
 ```powershell
-# Self-diagnostic — version, dep importability, config path
-.\dist\WindowsRectangle.exe --check-install
-
-# Same, but JSON for scripting / CI
-.\dist\WindowsRectangle.exe --check-install-json
-
-# Print the on-disk config path
-.\dist\WindowsRectangle.exe --print-config-path
-
-# Print every action and its currently-configured shortcut
-.\dist\WindowsRectangle.exe --list-shortcuts
-
-# Snapshot your settings to a portable file (backup / new machine)
-.\dist\WindowsRectangle.exe --export-config "C:\Backup\winrect.json"
-
-# Restore settings from a snapshot on this machine — takes effect on next launch
-.\dist\WindowsRectangle.exe --import-config "C:\Backup\winrect.json"
-
-# Preview an import without writing anything
-.\dist\WindowsRectangle.exe --import-config "C:\Backup\winrect.json" --dry-run
-
-# Dump every monitor's bounds, work_area and primary flag — debug
-# multi-monitor / DPI surprises
-.\dist\WindowsRectangle.exe --print-monitors
-.\dist\WindowsRectangle.exe --print-monitors-json
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 ```
 
----
-
-## Building a custom .exe
-
-The repo ships with a tuned PyInstaller spec (`windows_rectangle.spec`).
-The `Build-Exe.ps1` / `Build-Exe.bat` scripts call it. To customise:
-
-- **Onefile vs onedir.** `--onefile` (current) gives a single `.exe` with
-  ~1-2s extraction lag on launch. Switch to `--onedir` for faster cold
-  start by editing the spec (see the header comment).
-- **Icon.** Drop a `.ico` next to the spec and uncomment the `icon=`
-  line in the EXE() block.
-- **Excluded Qt modules.** The spec already excludes WebEngine, Multimedia,
-  Qml, etc. — see `EXCLUDES` at the top.
-
----
-
-## Uninstalling
-
-Symmetric counterpart to `Build-Exe.ps1`:
+For a faster rebuild after dependencies have already been installed:
 
 ```powershell
-.\Uninstall-WindowsRectangle.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1 -NoInstall -SkipChecks
 ```
 
-This stops a running tray copy (asking it to shut down cleanly first),
-removes the per-user Start-Menu shortcut, and removes the `HKCU\…\Run`
-"Launch at login" registry entry. Your config is kept; pass
-`-PurgeConfig` to also delete `%APPDATA%\windows_rectangle\`.
+The build creates a portable executable folder:
 
-The `.exe` and source tree are left in place — delete them by hand if
-you want them gone too.
+```text
+apps/windows/exe/WindowsRectangle.exe
+apps/windows/exe/_internal/
+apps/windows/exe/WindowsRectangle.exe.sha256
+apps/windows/exe/WindowsRectangle-<version>-windows-x64.zip
+apps/windows/exe/WindowsRectangle-<version>-windows-x64.zip.sha256
+```
 
-## Doctor — collect a support package for bug reports
+The build bundles Python and runtime dependencies, so the user does not need
+this repository or a Python environment. Share the zip or the whole
+`apps/windows/exe` folder. Keep `WindowsRectangle.exe` beside `_internal`; this
+portable layout avoids the PyInstaller one-file extraction path that can produce
+`Failed to extract PySide6...` errors on some machines.
+
+To customize the Windows logo, place one of these before running
+`.\build-windows-exe.bat`:
+
+App logo for the Preferences UI, in priority order:
+
+```text
+logo/windows.ico
+logo/logo.ico
+logo/app.ico
+logo/windows.png
+logo/logo.png
+logo/app.png
+logo/windows.webp
+logo/logo.webp
+logo/app.webp
+```
+
+Tray icon, in priority order:
+
+```text
+logo/tray_logo.ico
+logo/tray_logo.png
+logo/tray_logo.webp
+```
+
+The Windows Preferences UI loads the app logo automatically. The tray icon uses
+only `tray_logo.ico`, `tray_logo.png`, or `tray_logo.webp`; if none exists, it
+uses a transparent blank icon. The build also bundles the `logo` folder into
+`apps/windows/exe/_internal/logo`. If you need to override logos after building,
+create the relevant files in `apps/windows/exe/logo` next to the executable
+folder.
+
+The root `pyproject.toml` points packaging and tests at `apps/windows`, so the
+existing Python module name remains `windows_rectangle`.
+
+The Windows Preferences window edits every supported command shortcut and the
+general settings. It opens on normal launcher startup and is also available from
+the tray menu via `Preferences...`. Use the shortcut search box to filter
+commands. Click a shortcut to open the `Record Shortcut` popup, press the
+replacement key combo, then click `Apply` or `Save`. Use `Clear` in the popup to
+disable that command. Settings are stored in `%APPDATA%\windows_rectangle\config.json`.
+The active default shortcut profile is documented in `apps/windows/README.md`.
+
+Run the full Windows quality gate with:
 
 ```powershell
-.\Doctor.ps1            # writes $env:TEMP\windows_rectangle_doctor.txt
-.\Doctor.ps1 -Show      # opens it in your default text editor
+.\scripts\check.ps1
 ```
 
-`Doctor.ps1` runs `--check-install`, `--print-monitors`, `--list-shortcuts`
-against either `dist\WindowsRectangle.exe` (preferred) or
-`python -m windows_rectangle`, plus the last 50 lines of
-`windows_rectangle.log` and your PowerShell + OS build info. Review for
-anything you'd rather not share before pasting into a bug report.
+The root GitHub Actions workflow runs the same gate on `windows-latest`.
 
-## Troubleshooting
+## Credits
 
-- **Tray icon doesn't appear.** Make sure your tray "Notification area"
-  isn't hiding it. Open the up-arrow in the taskbar and drag the icon
-  to a permanent slot. If the .exe seems to have exited, run it from a
-  PowerShell window so you can see the startup log.
-- **A shortcut does nothing.** Right-click the tray → **Binding status…**
-  — if the action is listed under "Failed", another app already owns
-  that combo. Rebind in **Preferences…** or close the conflicting app.
-- **Shortcut works on most windows but not on one specific app.** That
-  app is probably running elevated (Task Manager → Details → "Elevated"
-  column). Windows blocks non-admin processes from moving elevated
-  windows (UIPI). Run Windows Rectangle as administrator if you need it.
-- **PyInstaller build fails with PermissionError.** The script now
-  blocks this — but if you bypass the check, the cause is a live
-  WindowsRectangle.exe locking the file. Quit it via the tray menu and
-  re-run the build.
-- **SmartScreen blocks the .exe.** Click **More info → Run anyway**.
-  The build isn't code-signed yet (see roadmap in `BRIEF.md` §6).
-- **App says PySide6 missing** when running from source. Re-run
-  `.\Run-Dev.ps1` without `-NoInstall`, or install manually with
-  `pip install PySide6 pywin32`.
+Full credit for the macOS Rectangle app goes to the original Rectangle project:
 
-## What's new
+- Rectangle by Ryan Hanson: <https://github.com/rxhanson/Rectangle>
+- Rectangle is MIT licensed. See `apps/mac/Rectangle/LICENSE`.
+- Rectangle is based on Spectacle by Eric Czarny.
+- Rectangle uses MASShortcut and Sparkle, as documented in the upstream
+  `apps/mac/Rectangle/README.md`.
+- App icon credits and community contributor credits remain in the upstream
+  README copied into `apps/mac/Rectangle/README.md`.
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the user-visible release log.
-
-## Architecture, brief, and contributing
-
-For the technical brief, architecture, and design decisions see
-[`BRIEF.md`](BRIEF.md). Contributors should run the test suite:
-
-```powershell
-pip install -e ".[dev]"
-pytest
-```
-
-407+ tests, no Windows required for the `core/` layer (adapters do require
-Windows). License is MIT; see `THIRD_PARTY_NOTICES.md` for upstream
-attribution.
+The Windows app was built to match Rectangle's behavior on Windows and credits
+Rectangle in `THIRD_PARTY_NOTICES.md`.
