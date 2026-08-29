@@ -50,6 +50,10 @@ def capture_workspace(manager: WorkspaceWindows, name: str) -> Workspace:
     work_areas = manager.list_work_areas()
     placements: list[WorkspacePlacement] = []
     for window in manager.list_windows():
+        # Never save this utility's own preferences/editor windows into a
+        # workspace captured while its UI is open.
+        if window.title.casefold().startswith("windows rectangle"):
+            continue
         monitor_index = manager.monitor_index_for_window(window.handle)
         if monitor_index is None or monitor_index >= len(work_areas):
             continue

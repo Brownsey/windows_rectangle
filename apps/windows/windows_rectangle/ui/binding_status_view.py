@@ -44,11 +44,22 @@ def binding_status_text(report: BindingReport | None) -> str:
         lines.append("Would re-register on resume:" if paused else "Bound:")
         lines.extend(f"  {action.value:<28} {combo}" for action, combo in report.bound)
         lines.append("")
+    if report.workspace_bound:
+        lines.append("Workspace shortcuts:")
+        lines.extend(
+            f"  {name:<28} {combo}" for _workspace_id, name, combo in report.workspace_bound
+        )
+        lines.append("")
     if report.failed:
         lines.append("Failed:")
         for action, combo, err in report.failed:
             err_brief = err.strip().splitlines()[0] if err else ""
             lines.append(f"  {action.value:<28} {combo}   <- {err_brief}")
+    if report.workspace_failed:
+        lines.append("Failed workspace shortcuts:")
+        for _workspace_id, name, combo, err in report.workspace_failed:
+            err_brief = err.strip().splitlines()[0] if err else ""
+            lines.append(f"  {name:<28} {combo}   <- {err_brief}")
     return "\n".join(lines).rstrip()
 
 
@@ -69,7 +80,7 @@ def binding_status_html(report: BindingReport | None) -> str:
     if paused:
         summary += " <span style='color:#a60;'>(paused)</span>"
     summary += "."
-    if report.failed:
+    if report.failed_count:
         summary += f" <span style='color:#b22;'>{report.failed_count} failed.</span>"
     summary += "</p>"
     parts.append(summary)
@@ -87,6 +98,17 @@ def binding_status_html(report: BindingReport | None) -> str:
             f"<tbody>{rows}</tbody></table>"
         )
 
+    if report.workspace_bound:
+        rows = "".join(
+            f"<tr><td>{html.escape(name)}</td><td><kbd>{html.escape(combo)}</kbd></td></tr>"
+            for _workspace_id, name, combo in report.workspace_bound
+        )
+        parts.append(
+            f"<h4 style='{_HEADER_STYLE}'>Workspace shortcuts</h4>"
+            "<table cellspacing='4' cellpadding='2'>"
+            f"<tbody>{rows}</tbody></table>"
+        )
+
     if report.failed:
         rows = "".join(
             f"<tr><td>{html.escape(a.value)}</td>"
@@ -97,6 +119,20 @@ def binding_status_html(report: BindingReport | None) -> str:
         )
         parts.append(
             f"<h4 style='{_HEADER_STYLE}; color:#b22;'>Failed</h4>"
+            "<table cellspacing='4' cellpadding='2'>"
+            f"<tbody>{rows}</tbody></table>"
+        )
+
+    if report.workspace_failed:
+        rows = "".join(
+            f"<tr><td>{html.escape(name)}</td>"
+            f"<td><kbd>{html.escape(combo)}</kbd></td>"
+            f"<td style='color:#b22;'>{html.escape(err.splitlines()[0] if err else '')}</td>"
+            "</tr>"
+            for _workspace_id, name, combo, err in report.workspace_failed
+        )
+        parts.append(
+            f"<h4 style='{_HEADER_STYLE}; color:#b22;'>Failed workspace shortcuts</h4>"
             "<table cellspacing='4' cellpadding='2'>"
             f"<tbody>{rows}</tbody></table>"
         )

@@ -14,6 +14,12 @@ from windows_rectangle.app import (
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.core.cleanup import CleanupRegistry
 from windows_rectangle.core.geometry import Rect
+from windows_rectangle.core.workspaces import (
+    NormalizedRect,
+    WindowMatcher,
+    Workspace,
+    WorkspacePlacement,
+)
 from windows_rectangle.ports.config_store import Settings
 
 from .conftest import FakeWindowManager, make_monitor
@@ -374,7 +380,31 @@ def test_bind_hotkeys_registers_every_action(windows):
     ctx = build(Settings(), windows, hotkeys=hot)
     bound = bind_hotkeys(ctx, hot.register)
     assert bound == len(DEFAULT_SHORTCUTS)
-    assert len(hot.registered) == len(DEFAULT_SHORTCUTS)
+
+
+def test_workspace_shortcut_queues_restore_for_main_thread(windows):
+    workspace = Workspace(
+        "office",
+        "Office",
+        (
+            WorkspacePlacement(
+                "app",
+                "App",
+                WindowMatcher(process_name="app.exe"),
+                NormalizedRect(0, 0, 5000, 10000),
+            ),
+        ),
+        "ctrl+alt+1",
+    )
+    settings = Settings(workspaces=(workspace,))
+    ctx = build(settings, windows)
+    hot = FakeHotkeys()
+    bound = bind_hotkeys_via_bus(ctx, hot.register)
+    assert bound == len(DEFAULT_SHORTCUTS) + 1
+    workspace_callback = next(cb for combo, cb in hot.registered.values() if combo == "ctrl+alt+1")
+    workspace_callback()
+    assert ctx._workspace_queue.qsize() == 1
+    assert len(hot.registered) == len(DEFAULT_SHORTCUTS) + 1
 
 
 def test_bind_hotkeys_dispatches_through_callback(windows):

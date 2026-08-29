@@ -88,3 +88,12 @@ def test_capture_skips_windows_without_a_monitor():
     wm.monitor_indexes.pop(2)
     workspace = capture_workspace(wm, "Office")
     assert [placement.name for placement in workspace.placements] == ["Slack", "Docs - Chrome"]
+
+
+def test_capture_excludes_its_own_editor_window():
+    wm = manager()
+    wm.windows.append(WindowIdentity(9, "Windows Rectangle — Workspaces", "python.exe"))
+    wm.rects[9] = Rect(100, 100, 900, 700)
+    wm.monitor_indexes[9] = 0
+    workspace = capture_workspace(wm, "Office")
+    assert all("Windows Rectangle" not in placement.name for placement in workspace.placements)

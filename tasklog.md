@@ -21,9 +21,12 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [ ] Reconcile Rectangle feature-parity inventory against the vendored upstream source.
 - [x] Implement the pure named-workspace model: layered process/title/regex matching, normalized capture/restore geometry, deterministic multi-monitor planning, and duplicate-window prevention.
 - [x] Add schema-v2 workspace persistence, schema-v1 migration, active-workspace validation, and malformed-entry recovery.
-- [ ] Wire workspace capture/apply to Win32 enumeration, shortcuts, and the editor UI.
+- [x] Wire workspace capture/apply to Win32 enumeration, shortcuts, and the editor UI.
 - [x] Wire workspace capture/apply to Win32 visible-window enumeration and return per-placement moved/not-found/blocked results.
-- [ ] Wire workspace capture/apply to shortcuts, tray actions, editor UI, and a restore-status overlay.
+- [x] Register per-workspace global shortcuts using a bounded main-thread dispatch queue, with binding failures shown alongside action-shortcut status.
+- [x] Add tray capture, manage, and restore actions with compact moved/not-found/blocked status feedback.
+- [x] Add a staged workspace editor for capture, rename, shortcut assignment, process/title/regex matching, monitor targeting, rule deletion, match testing, validation, save, and immediate restore.
+- [x] Exclude Windows Rectangle's own editor windows from workspace capture.
 - [x] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
 - [x] Generate `research/Windows-Rectangle-UX-Research.docx` with first-party citations and a prioritized roadmap.
 
@@ -40,10 +43,11 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - Pytest: 517 passed, 16 skipped (the skipped tests require optional PySide6, which is not installed in the current environment).
 - After workspace foundation: 530 passed, 16 skipped.
 - After Win32 workspace capture/apply: 534 passed, 16 skipped, including Windows-only enumeration smoke coverage.
+- After end-to-end workspace UX: 544 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - Research DOCX structural QA: valid archive, 89 paragraphs, 20 headings, one table, and 10 external hyperlinks. Visual rendering was unavailable.
 - Updated subprocess and PyInstaller-spec tests for the new `apps/windows` package location.
 - Updated the PyInstaller entry point and search path for the monorepo layout.
 
 ## Next iteration
 
-Build the capture/review workspace editor, bind workspace shortcuts and tray actions, and add a compact per-window restore result overlay.
+Reconcile the remaining Rectangle feature-parity inventory, then modernize the general preferences surface and add a visual custom-zone editor with previewable layouts.

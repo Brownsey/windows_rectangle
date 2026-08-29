@@ -81,6 +81,9 @@ def install(
     prefs.triggered.connect(lambda: (on_open_preferences or _noop)())
     menu.addAction(prefs)
 
+    workspaces_menu = menu.addMenu("Workspaces")
+    _populate_workspace_menu(workspaces_menu, ctx, tray)
+
     cheat = QtGui.QAction("Cheat sheet…", menu)
     cheat.triggered.connect(lambda: _show_cheat_sheet(ctx))
     menu.addAction(cheat)
@@ -120,6 +123,7 @@ def install(
         "launch_at_login": launch,
         "pause": pause,
         "preferences": prefs,
+        "workspaces": workspaces_menu,
         "cheat_sheet": cheat,
         "binding_status": binding_status,
         "reload_config": reload_action,
@@ -141,6 +145,7 @@ def install(
             pause.blockSignals(True)
             pause.setChecked(bool(getattr(ctx, "paused", False)))
             pause.blockSignals(False)
+            _populate_workspace_menu(workspaces_menu, ctx, tray)
         except Exception:  # noqa: BLE001 — tray refresh failure is non-fatal
             _log.debug("tray refresh failed", exc_info=True)
 
@@ -163,6 +168,92 @@ def install(
             _log.debug("first-run balloon failed", exc_info=True)
 
     return tc
+
+
+def _populate_workspace_menu(menu, ctx: AppContext, tray) -> None:
+    """Rebuild workspace actions after settings change without stale callbacks."""
+    from PySide6 import QtGui
+
+    menu.clear()
+    capture = QtGui.QAction("Capture current workspace…", menu)
+    capture.triggered.connect(lambda: _capture_workspace(ctx, tray))
+    menu.addAction(capture)
+    manage = QtGui.QAction("Manage workspaces…", menu)
+    manage.triggered.connect(lambda: _manage_workspaces(ctx, tray))
+    menu.addAction(manage)
+    menu.addSeparator()
+    if not ctx.settings.workspaces:
+        empty = QtGui.QAction("No saved workspaces", menu)
+        empty.setEnabled(False)
+        menu.addAction(empty)
+        return
+    for workspace in ctx.settings.workspaces:
+        label = workspace.name
+        if workspace.shortcut:
+            label += f"\t{workspace.shortcut}"
+        action = QtGui.QAction(label, menu)
+        action.setData(workspace.id)
+        action.triggered.connect(
+            lambda _checked=False, workspace_id=workspace.id: _apply_named_workspace(
+                ctx, workspace_id, tray
+            )
+        )
+        menu.addAction(action)
+
+
+def _capture_workspace(ctx: AppContext, tray) -> None:
+    from PySide6 import QtWidgets
+
+    name, accepted = QtWidgets.QInputDialog.getText(
+        None,
+        "Capture Workspace",
+        "Workspace name:",
+    )
+    if not accepted or not name.strip():
+        return
+    try:
+        workspace = ctx.capture_named_workspace(name.strip())
+    except Exception as exc:  # noqa: BLE001
+        _log.exception("workspace capture failed")
+        tray.showMessage("Workspace capture failed", str(exc))
+        return
+    tray.showMessage(
+        "Workspace saved",
+        f"{workspace.name}: {len(workspace.placements)} windows captured.",
+    )
+
+
+def _manage_workspaces(ctx: AppContext, tray) -> None:
+    try:
+        from .workspaces_dialog import show
+
+        show(ctx)
+    except Exception as exc:  # noqa: BLE001
+        _log.exception("workspace editor failed")
+        tray.showMessage("Could not open workspace editor", str(exc))
+
+
+def _apply_named_workspace(ctx: AppContext, workspace_id: str, tray) -> None:
+    try:
+        result = ctx.apply_named_workspace(workspace_id)
+    except Exception as exc:  # noqa: BLE001
+        _log.exception("workspace restore failed")
+        tray.showMessage("Workspace restore failed", str(exc))
+        return
+    tray.showMessage("Workspace restored", _workspace_result_text(result))
+
+
+def _workspace_result_text(result) -> str:
+    counts: dict[str, int] = {}
+    for placement in result.placements:
+        counts[placement.status] = counts.get(placement.status, 0) + 1
+    labels = (
+        ("moved", "moved"),
+        ("not_found", "not found"),
+        ("blocked", "blocked"),
+    )
+    summary = [f"{counts[key]} {label}" for key, label in labels if counts.get(key)]
+    return " · ".join(summary) if summary else "No workspace windows were configured."
 
 
 def _build_icon(QtGui):

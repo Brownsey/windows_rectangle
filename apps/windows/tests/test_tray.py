@@ -28,6 +28,22 @@ def test_tray_controller_defaults():
     assert tc.on_open_preferences is None
 
 
+def test_workspace_result_summary_is_compact():
+    from types import SimpleNamespace
+
+    from windows_rectangle.ui.tray import _workspace_result_text
+
+    result = SimpleNamespace(
+        placements=(
+            SimpleNamespace(status="moved"),
+            SimpleNamespace(status="moved"),
+            SimpleNamespace(status="not_found"),
+            SimpleNamespace(status="blocked"),
+        )
+    )
+    assert _workspace_result_text(result) == "2 moved · 1 not found · 1 blocked"
+
+
 def _make_fake_report(*, bound_count=0, would_bind_count=0, failed_count=0, total=0):
     """Mini stand-in for BindingReport for tooltip unit tests."""
 

@@ -10,9 +10,11 @@ fake, as the tests demonstrate.
 from __future__ import annotations
 
 import logging
+import queue
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .core.actionbus import ActionBus
 from .core.actions import Action
@@ -23,6 +25,12 @@ from .core.dragsession import DragSession
 from .core.geometry import Rect
 from .core.history import History
 from .core.snap import SnapHit
+from .core.workspace_service import (
+    WorkspaceResult,
+    WorkspaceWindows,
+    apply_workspace,
+    capture_workspace,
+)
 from .ports.config_store import ConfigStore, Settings
 
 if TYPE_CHECKING:
@@ -55,6 +63,8 @@ class BindingReport:
 
     bound: tuple[tuple[Action, str], ...] = ()
     failed: tuple[tuple[Action, str, str], ...] = ()
+    workspace_bound: tuple[tuple[str, str, str], ...] = ()
+    workspace_failed: tuple[tuple[str, str, str, str], ...] = ()
     # User paused the global hotkey set (via the tray "Pause shortcuts"
     # toggle). When True, `bound` still describes what *would* be
     # registered on resume — we don't squash it into `failed` because
@@ -63,7 +73,12 @@ class BindingReport:
 
     @property
     def total(self) -> int:
-        return len(self.bound) + len(self.failed)
+        return (
+            len(self.bound)
+            + len(self.failed)
+            + len(self.workspace_bound)
+            + len(self.workspace_failed)
+        )
 
     @property
     def bound_count(self) -> int:
@@ -72,7 +87,7 @@ class BindingReport:
         # still available via `would_bind_count`.
         if self.paused:
             return 0
-        return len(self.bound)
+        return len(self.bound) + len(self.workspace_bound)
 
     @property
     def would_bind_count(self) -> int:
@@ -81,15 +96,20 @@ class BindingReport:
         Lets the tray say "0/22 bound (paused)" rather than collapsing
         the count to zero with no context.
         """
-        return len(self.bound)
+        return len(self.bound) + len(self.workspace_bound)
 
     @property
     def failed_count(self) -> int:
-        return len(self.failed)
+        return len(self.failed) + len(self.workspace_failed)
 
     @property
     def all_bound(self) -> bool:
-        return not self.failed and bool(self.bound) and not self.paused
+        return (
+            not self.failed
+            and not self.workspace_failed
+            and bool(self.bound or self.workspace_bound)
+            and not self.paused
+        )
 
 
 # Sentinel "no binding has happened yet" — clearer than None at the call
@@ -166,6 +186,10 @@ class AppContext:
     # toggle so a user can free up the keymap during full-screen apps
     # without losing their bindings.
     paused: bool = field(default=False, init=False, repr=False)
+    _workspace_queue: queue.Queue[str] = field(
+        default_factory=lambda: queue.Queue(maxsize=64), init=False, repr=False
+    )
+    last_workspace_result: WorkspaceResult | None = field(default=None, init=False)
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -176,6 +200,9 @@ class AppContext:
         note: "all shortcuts can be configured... those shortcuts work").
         """
         shortcuts_changed = settings.shortcuts != self.settings.shortcuts
+        workspace_shortcuts_changed = tuple(
+            (workspace.id, workspace.shortcut) for workspace in settings.workspaces
+        ) != tuple((workspace.id, workspace.shortcut) for workspace in self.settings.workspaces)
         drag_toggle_changed = settings.drag_to_edge_enabled != self.settings.drag_to_edge_enabled
         self.settings = settings
         self.dispatcher.gap = settings.gap
@@ -184,7 +211,7 @@ class AppContext:
         self.dispatcher._cycle.idle_timeout = settings.cycle_idle_timeout
         self.dispatcher.almost_maximize_scale = settings.almost_maximize_scale
         self.drag.gap = settings.gap
-        if shortcuts_changed and self.hotkeys is not None:
+        if (shortcuts_changed or workspace_shortcuts_changed) and self.hotkeys is not None:
             self.rebind_hotkeys()
         # Mirror the drag-to-edge toggle into the WH_MOUSE_LL lifecycle.
         # Lifts the restart restriction that bind_mousehook used to
@@ -232,6 +259,8 @@ class AppContext:
         self.last_binding_report = BindingReport(
             bound=prev.bound,
             failed=prev.failed,
+            workspace_bound=prev.workspace_bound,
+            workspace_failed=prev.workspace_failed,
             paused=True,
         )
         self._notify_settings_subscribers()
@@ -448,7 +477,54 @@ class AppContext:
 
         Called by the Qt main thread on a timer. Returns the count drained.
         """
-        return self.bus.drain(self.dispatcher.dispatch)
+        return self.bus.drain(self.dispatcher.dispatch) + self.drain_workspaces()
+
+    # ----- named workspaces -----------------------------------------
+
+    def capture_named_workspace(self, name: str):
+        """Capture visible windows, persist the workspace, and make it active."""
+        workspace = capture_workspace(cast(WorkspaceWindows, self.windows), name)
+        updated = deepcopy(self.settings)
+        updated.workspaces = (*updated.workspaces, workspace)
+        updated.active_workspace_id = workspace.id
+        if self.config_store is not None:
+            self.config_store.save(updated)
+        self.apply_settings(updated)
+        return workspace
+
+    def apply_named_workspace(self, workspace_id: str) -> WorkspaceResult:
+        workspace = next(
+            (workspace for workspace in self.settings.workspaces if workspace.id == workspace_id),
+            None,
+        )
+        if workspace is None:
+            raise KeyError(f"unknown workspace: {workspace_id}")
+        result = apply_workspace(cast(WorkspaceWindows, self.windows), workspace)
+        self.last_workspace_result = result
+        return result
+
+    def queue_workspace(self, workspace_id: str) -> bool:
+        """Non-blocking producer path used by the Win32 hotkey thread."""
+        try:
+            self._workspace_queue.put_nowait(workspace_id)
+            return True
+        except queue.Full:
+            _log.warning("workspace queue full; dropped %s", workspace_id)
+            return False
+
+    def drain_workspaces(self) -> int:
+        """Apply queued workspace requests on the main/Qt thread."""
+        count = 0
+        while True:
+            try:
+                workspace_id = self._workspace_queue.get_nowait()
+            except queue.Empty:
+                return count
+            try:
+                self.apply_named_workspace(workspace_id)
+            except Exception:  # noqa: BLE001
+                _log.exception("workspace restore failed: %s", workspace_id)
+            count += 1
 
     # ----- Drag-preview pump (brief §2 #13) --------------------------
 
@@ -651,6 +727,8 @@ def _bind_shortcuts(
     """
     bound_pairs: list[tuple[Action, str]] = []
     failed_pairs: list[tuple[Action, str, str]] = []
+    workspace_bound: list[tuple[str, str, str]] = []
+    workspace_failed: list[tuple[str, str, str, str]] = []
     for action, combo in ctx.settings.shortcuts.items():
         try:
             register(combo, lambda a=action: dispatch(a))
@@ -658,8 +736,23 @@ def _bind_shortcuts(
         except Exception as e:  # noqa: BLE001 — surface in UI, not as a crash
             _log.warning("failed to bind %s -> %s", action.value, combo, exc_info=True)
             failed_pairs.append((action, combo, str(e)))
-    ctx.last_binding_report = BindingReport(bound=tuple(bound_pairs), failed=tuple(failed_pairs))
-    return len(bound_pairs)
+    for workspace in ctx.settings.workspaces:
+        combo = workspace.shortcut.strip()
+        if not combo:
+            continue
+        try:
+            register(combo, lambda workspace_id=workspace.id: ctx.queue_workspace(workspace_id))
+            workspace_bound.append((workspace.id, workspace.name, combo))
+        except Exception as e:  # noqa: BLE001
+            _log.warning("failed to bind workspace %s -> %s", workspace.name, combo, exc_info=True)
+            workspace_failed.append((workspace.id, workspace.name, combo, str(e)))
+    ctx.last_binding_report = BindingReport(
+        bound=tuple(bound_pairs),
+        failed=tuple(failed_pairs),
+        workspace_bound=tuple(workspace_bound),
+        workspace_failed=tuple(workspace_failed),
+    )
+    return len(bound_pairs) + len(workspace_bound)
 
 
 def bind_hotkeys(ctx: AppContext, register: Callable[[str, Callable[[], None]], int]) -> int:
