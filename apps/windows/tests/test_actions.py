@@ -58,6 +58,19 @@ def test_quarters(action, expected):
     assert apply(action, WIN, WORK) == expected
 
 
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.TOP_LEFT_SIXTH, Rect(0, 0, 640, 540)),
+        (Action.TOP_RIGHT_SIXTH, Rect(1280, 0, 640, 540)),
+        (Action.BOTTOM_LEFT_SIXTH, Rect(0, 540, 640, 540)),
+        (Action.BOTTOM_RIGHT_SIXTH, Rect(1280, 540, 640, 540)),
+    ],
+)
+def test_corner_sixths(action, expected):
+    assert apply(action, WIN, WORK) == expected
+
+
 # ----- Thirds ---------------------------------------------------------
 
 
@@ -89,6 +102,17 @@ def test_maximize_height_keeps_horizontal_position():
     assert r.width == WIN.width
     assert r.y == WORK.y
     assert r.height == WORK.height
+
+
+def test_maximize_width_keeps_vertical_position():
+    r = apply(Action.MAXIMIZE_WIDTH, WIN, WORK)
+    assert r == Rect(0, WIN.y, WORK.width, WIN.height)
+
+
+def test_maximize_width_applies_horizontal_gap_only():
+    assert apply(Action.MAXIMIZE_WIDTH, WIN, WORK, gap=10) == Rect(
+        10, WIN.y, WORK.width - 20, WIN.height
+    )
 
 
 def test_maximize_height_applies_top_bottom_gap():
@@ -185,7 +209,15 @@ def test_maximize_with_gap_insets_all_sides():
 # ----- Non-pure actions -----------------------------------------------
 
 
-@pytest.mark.parametrize("action", [Action.RESTORE, Action.NEXT_DISPLAY, Action.PREV_DISPLAY])
+@pytest.mark.parametrize(
+    "action",
+    [
+        Action.RESTORE,
+        Action.NEXT_DISPLAY,
+        Action.PREV_DISPLAY,
+        Action.TOGGLE_ALWAYS_ON_TOP,
+    ],
+)
 def test_apply_rejects_non_geometry_actions(action):
     assert not is_geometry_action(action)
     with pytest.raises(KeyError):

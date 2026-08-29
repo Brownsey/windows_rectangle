@@ -18,7 +18,7 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [x] Identified an interrupted merge between 64 newer local Windows commits and the remote monorepo reorganization.
 - [x] Resolved content conflicts by retaining the newer Windows implementation/tests at `apps/windows` paths, the monorepo README, and both platforms' ignore rules.
 - [x] Verify the reorganized app with lint, type checks, and tests.
-- [ ] Reconcile Rectangle feature-parity inventory against the vendored upstream source.
+- [x] Reconcile Rectangle feature-parity inventory against the vendored upstream source; priorities and acceptance criteria are recorded in `research/rectangle-parity-audit.md`.
 - [x] Implement the pure named-workspace model: layered process/title/regex matching, normalized capture/restore geometry, deterministic multi-monitor planning, and duplicate-window prevention.
 - [x] Add schema-v2 workspace persistence, schema-v1 migration, active-workspace validation, and malformed-entry recovery.
 - [x] Wire workspace capture/apply to Win32 enumeration, shortcuts, and the editor UI.
@@ -27,6 +27,7 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [x] Add tray capture, manage, and restore actions with compact moved/not-found/blocked status feedback.
 - [x] Add a staged workspace editor for capture, rename, shortcut assignment, process/title/regex matching, monitor targeting, rule deletion, match testing, validation, save, and immediate restore.
 - [x] Exclude Windows Rectangle's own editor windows from workspace capture.
+- [x] Restore the advertised corner-sixth actions, maximize-width, and always-on-top toggle across geometry, Win32, shortcuts, configuration, and UI labels.
 - [x] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
 - [x] Generate `research/Windows-Rectangle-UX-Research.docx` with first-party citations and a prioritized roadmap.
 
@@ -44,10 +45,11 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - After workspace foundation: 530 passed, 16 skipped.
 - After Win32 workspace capture/apply: 534 passed, 16 skipped, including Windows-only enumeration smoke coverage.
 - After end-to-end workspace UX: 544 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
+- After the first parity restoration pass: 554 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - Research DOCX structural QA: valid archive, 89 paragraphs, 20 headings, one table, and 10 external hyperlinks. Visual rendering was unavailable.
 - Updated subprocess and PyInstaller-spec tests for the new `apps/windows` package location.
 - Updated the PyInstaller entry point and search path for the monorepo layout.
 
 ## Next iteration
 
-Reconcile the remaining Rectangle feature-parity inventory, then modernize the general preferences surface and add a visual custom-zone editor with previewable layouts.
+Implement the P0 parity actions using reusable fractional-grid and anchored move/resize primitives, then expose advanced commands cleanly in Preferences.

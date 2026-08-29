@@ -66,3 +66,12 @@ def test_window_flags_for_active_window_are_sane():
     # Whatever it is, the boolean fields should be bools, not None.
     assert isinstance(flags.has_caption, bool)
     assert isinstance(flags.has_thick_frame, bool)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="win32 only")
+def test_topmost_state_for_active_window_is_boolean():
+    wm = Win32WindowManager()
+    h = wm.get_active_window()
+    if h is None:
+        pytest.skip("no active window")
+    assert isinstance(wm.is_always_on_top(h), bool)

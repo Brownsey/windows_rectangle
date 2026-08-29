@@ -27,6 +27,10 @@ ACTION_LABELS: dict[Action, str] = {
     Action.TOP_RIGHT_QUARTER: "Top-right quarter",
     Action.BOTTOM_LEFT_QUARTER: "Bottom-left quarter",
     Action.BOTTOM_RIGHT_QUARTER: "Bottom-right quarter",
+    Action.TOP_LEFT_SIXTH: "Top-left sixth",
+    Action.TOP_RIGHT_SIXTH: "Top-right sixth",
+    Action.BOTTOM_LEFT_SIXTH: "Bottom-left sixth",
+    Action.BOTTOM_RIGHT_SIXTH: "Bottom-right sixth",
     Action.FIRST_THIRD: "First third",
     Action.CENTER_THIRD: "Center third",
     Action.LAST_THIRD: "Last third",
@@ -34,6 +38,7 @@ ACTION_LABELS: dict[Action, str] = {
     Action.LAST_TWO_THIRDS: "Last two-thirds",
     Action.MAXIMIZE: "Maximize",
     Action.MAXIMIZE_HEIGHT: "Maximize height",
+    Action.MAXIMIZE_WIDTH: "Maximize width",
     Action.ALMOST_MAXIMIZE: "Almost maximize",
     Action.CENTER: "Center (no resize)",
     Action.LARGER: "Larger",
@@ -41,6 +46,7 @@ ACTION_LABELS: dict[Action, str] = {
     Action.RESTORE: "Restore (undo)",
     Action.NEXT_DISPLAY: "Move to next display",
     Action.PREV_DISPLAY: "Move to previous display",
+    Action.TOGGLE_ALWAYS_ON_TOP: "Toggle always on top",
 }
 
 

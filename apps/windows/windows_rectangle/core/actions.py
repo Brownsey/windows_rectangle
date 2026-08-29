@@ -37,6 +37,11 @@ class Action(str, Enum):
     BOTTOM_LEFT_QUARTER = "bottom_left_quarter"
     BOTTOM_RIGHT_QUARTER = "bottom_right_quarter"
 
+    TOP_LEFT_SIXTH = "top_left_sixth"
+    TOP_RIGHT_SIXTH = "top_right_sixth"
+    BOTTOM_LEFT_SIXTH = "bottom_left_sixth"
+    BOTTOM_RIGHT_SIXTH = "bottom_right_sixth"
+
     FIRST_THIRD = "first_third"
     CENTER_THIRD = "center_third"
     LAST_THIRD = "last_third"
@@ -45,6 +50,7 @@ class Action(str, Enum):
 
     MAXIMIZE = "maximize"
     MAXIMIZE_HEIGHT = "maximize_height"
+    MAXIMIZE_WIDTH = "maximize_width"
     ALMOST_MAXIMIZE = "almost_maximize"
     CENTER = "center"
 
@@ -54,6 +60,7 @@ class Action(str, Enum):
     RESTORE = "restore"  # handled by history, not a geometry transform
     NEXT_DISPLAY = "next_display"
     PREV_DISPLAY = "prev_display"
+    TOGGLE_ALWAYS_ON_TOP = "toggle_always_on_top"
 
 
 # ---------------------------------------------------------------------
@@ -69,6 +76,10 @@ DEFAULT_SHORTCUTS: dict[Action, str] = {
     Action.TOP_RIGHT_QUARTER: "ctrl+alt+i",
     Action.BOTTOM_LEFT_QUARTER: "ctrl+alt+j",
     Action.BOTTOM_RIGHT_QUARTER: "ctrl+alt+k",
+    Action.TOP_LEFT_SIXTH: "ctrl+insert",
+    Action.TOP_RIGHT_SIXTH: "ctrl+pageup",
+    Action.BOTTOM_LEFT_SIXTH: "ctrl+delete",
+    Action.BOTTOM_RIGHT_SIXTH: "ctrl+pagedown",
     Action.FIRST_THIRD: "ctrl+alt+d",
     Action.CENTER_THIRD: "ctrl+alt+f",
     Action.LAST_THIRD: "ctrl+alt+g",
@@ -76,6 +87,7 @@ DEFAULT_SHORTCUTS: dict[Action, str] = {
     Action.LAST_TWO_THIRDS: "ctrl+alt+t",
     Action.MAXIMIZE: "ctrl+alt+enter",
     Action.MAXIMIZE_HEIGHT: "ctrl+alt+shift+up",
+    Action.MAXIMIZE_WIDTH: "ctrl+alt+shift+right",
     Action.ALMOST_MAXIMIZE: "ctrl+alt+shift+enter",
     Action.CENTER: "ctrl+alt+c",
     Action.LARGER: "ctrl+alt+=",
@@ -83,6 +95,7 @@ DEFAULT_SHORTCUTS: dict[Action, str] = {
     Action.RESTORE: "ctrl+alt+backspace",
     Action.NEXT_DISPLAY: "ctrl+alt+.",
     Action.PREV_DISPLAY: "ctrl+alt+,",
+    Action.TOGGLE_ALWAYS_ON_TOP: "ctrl+alt+shift+space",
 }
 
 
@@ -110,6 +123,10 @@ _TILES: dict[Action, TileSpec] = {
     Action.TOP_RIGHT_QUARTER: TileSpec(_F(1, 2), _F(0), _F(1), _F(1, 2)),
     Action.BOTTOM_LEFT_QUARTER: TileSpec(_F(0), _F(1, 2), _F(1, 2), _F(1)),
     Action.BOTTOM_RIGHT_QUARTER: TileSpec(_F(1, 2), _F(1, 2), _F(1), _F(1)),
+    Action.TOP_LEFT_SIXTH: TileSpec(_F(0), _F(0), _F(1, 3), _F(1, 2)),
+    Action.TOP_RIGHT_SIXTH: TileSpec(_F(2, 3), _F(0), _F(1), _F(1, 2)),
+    Action.BOTTOM_LEFT_SIXTH: TileSpec(_F(0), _F(1, 2), _F(1, 3), _F(1)),
+    Action.BOTTOM_RIGHT_SIXTH: TileSpec(_F(2, 3), _F(1, 2), _F(1), _F(1)),
     Action.FIRST_THIRD: TileSpec(_F(0), _F(0), _F(1, 3), _F(1)),
     Action.CENTER_THIRD: TileSpec(_F(1, 3), _F(0), _F(2, 3), _F(1)),
     Action.LAST_THIRD: TileSpec(_F(2, 3), _F(0), _F(1), _F(1)),
@@ -149,6 +166,14 @@ def maximize_height(window: Rect, work_area: Rect, gap: int) -> Rect:
     # Apply outer gap top/bottom only; horizontal sides untouched.
     if gap > 0:
         target = Rect(target.x, target.y + gap, target.width, max(1, target.height - 2 * gap))
+    return target.clamp_to(work_area)
+
+
+def maximize_width(window: Rect, work_area: Rect, gap: int) -> Rect:
+    """Stretch to the work-area width while preserving vertical geometry."""
+    target = Rect(work_area.x, window.y, work_area.width, window.height)
+    if gap > 0:
+        target = Rect(target.x + gap, target.y, max(1, target.width - 2 * gap), target.height)
     return target.clamp_to(work_area)
 
 
@@ -205,6 +230,7 @@ def _resize_step(window: Rect, work_area: Rect, delta: int) -> Rect:
 _HANDLERS: dict[Action, ActionFn] = {
     **{a: _tile_handler(a) for a in _TILES},
     Action.MAXIMIZE_HEIGHT: maximize_height,
+    Action.MAXIMIZE_WIDTH: maximize_width,
     Action.ALMOST_MAXIMIZE: almost_maximize,
     Action.CENTER: center,
     Action.LARGER: larger,

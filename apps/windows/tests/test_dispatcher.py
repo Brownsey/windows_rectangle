@@ -161,6 +161,24 @@ def test_prev_display_wraps(fake_wm):
     assert r.x >= 1920
 
 
+def test_toggle_always_on_top_enables_and_disables(fake_wm, dispatcher):
+    enabled = dispatcher.dispatch(Action.TOGGLE_ALWAYS_ON_TOP)
+    assert enabled.moved
+    assert enabled.after == enabled.before
+    assert 101 in fake_wm.always_on_top
+
+    disabled = dispatcher.dispatch(Action.TOGGLE_ALWAYS_ON_TOP)
+    assert disabled.moved
+    assert 101 not in fake_wm.always_on_top
+
+
+def test_toggle_always_on_top_reports_blocked(fake_wm, dispatcher):
+    fake_wm.blocked_topmost.add(101)
+    result = dispatcher.dispatch(Action.TOGGLE_ALWAYS_ON_TOP)
+    assert not result.moved
+    assert result.reason == "blocked"
+
+
 # ----- Prune stale state --------------------------------------------
 
 
