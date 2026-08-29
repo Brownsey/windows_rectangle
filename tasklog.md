@@ -19,8 +19,13 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [x] Resolved content conflicts by retaining the newer Windows implementation/tests at `apps/windows` paths, the monorepo README, and both platforms' ignore rules.
 - [x] Verify the reorganized app with lint, type checks, and tests.
 - [ ] Reconcile Rectangle feature-parity inventory against the vendored upstream source.
-- [ ] Design and implement customizable named-window layouts with capture, matching, preview, and shortcut restore.
-- [ ] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
+- [x] Implement the pure named-workspace model: layered process/title/regex matching, normalized capture/restore geometry, deterministic multi-monitor planning, and duplicate-window prevention.
+- [x] Add schema-v2 workspace persistence, schema-v1 migration, active-workspace validation, and malformed-entry recovery.
+- [ ] Wire workspace capture/apply to Win32 enumeration, shortcuts, and the editor UI.
+- [x] Wire workspace capture/apply to Win32 visible-window enumeration and return per-placement moved/not-found/blocked results.
+- [ ] Wire workspace capture/apply to shortcuts, tray actions, editor UI, and a restore-status overlay.
+- [x] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
+- [x] Generate `research/Windows-Rectangle-UX-Research.docx` with first-party citations and a prioritized roadmap.
 
 ## Product principles
 
@@ -33,9 +38,12 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 
 - `scripts/check.ps1`: passed Ruff lint, Ruff format, and strict mypy for the pure core.
 - Pytest: 517 passed, 16 skipped (the skipped tests require optional PySide6, which is not installed in the current environment).
+- After workspace foundation: 530 passed, 16 skipped.
+- After Win32 workspace capture/apply: 534 passed, 16 skipped, including Windows-only enumeration smoke coverage.
+- Research DOCX structural QA: valid archive, 89 paragraphs, 20 headings, one table, and 10 external hyperlinks. Visual rendering was unavailable.
 - Updated subprocess and PyInstaller-spec tests for the new `apps/windows` package location.
 - Updated the PyInstaller entry point and search path for the monorepo layout.
 
 ## Next iteration
 
-Run the full quality gate, fix regressions from the repository move, then implement the named-layout domain model and matching tests before adding its UI.
+Build the capture/review workspace editor, bind workspace shortcuts and tray actions, and add a compact per-window restore result overlay.

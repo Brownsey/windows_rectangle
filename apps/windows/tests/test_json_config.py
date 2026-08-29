@@ -9,6 +9,12 @@ from windows_rectangle.adapters.json_config import (
     default_config_path,
 )
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
+from windows_rectangle.core.workspaces import (
+    NormalizedRect,
+    WindowMatcher,
+    Workspace,
+    WorkspacePlacement,
+)
 from windows_rectangle.ports.config_store import Settings
 
 
@@ -38,6 +44,55 @@ def test_save_writes_schema_version(store):
     store.save(Settings())
     data = json.loads(store.path.read_text(encoding="utf-8"))
     assert data["schema_version"] == SCHEMA_VERSION
+
+
+def test_workspace_round_trips_with_active_selection(store):
+    workspace = Workspace(
+        id="office",
+        name="Office",
+        shortcut="ctrl+alt+1",
+        placements=(
+            WorkspacePlacement(
+                id="slack",
+                name="Slack top left",
+                matcher=WindowMatcher(process_name="slack.exe", title_contains="Slack"),
+                rect=NormalizedRect(0, 0, 5000, 5000),
+            ),
+        ),
+    )
+    store.save(Settings(workspaces=(workspace,), active_workspace_id="office"))
+    loaded = store.load()
+    assert loaded.workspaces == (workspace,)
+    assert loaded.active_workspace_id == "office"
+
+
+def test_legacy_schema_loads_with_empty_workspaces(store):
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(json.dumps({"schema_version": 1, "gap": 7}), encoding="utf-8")
+    loaded = store.load()
+    assert loaded.gap == 7
+    assert loaded.workspaces == ()
+    assert loaded.active_workspace_id == ""
+
+
+def test_malformed_workspaces_are_skipped_and_invalid_active_id_is_cleared(store):
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "active_workspace_id": "broken",
+                "workspaces": [
+                    {"id": "broken", "name": "Broken", "placements": "not-a-list"},
+                    {"id": "", "name": "Missing id", "placements": []},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = store.load()
+    assert loaded.workspaces == ()
+    assert loaded.active_workspace_id == ""
 
 
 def test_save_creates_parent_dir(tmp_path):

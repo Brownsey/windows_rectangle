@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from ..core.actions import DEFAULT_SHORTCUTS, Action
+from ..core.workspaces import Workspace
 
 
 @dataclass(slots=True)
@@ -40,6 +41,10 @@ class Settings:
     # (brief §2 #7). Wired through dispatcher.almost_maximize_scale in
     # iter 60.
     almost_maximize_scale: float = 0.85
+    # Named multi-window arrangements. Tuple keeps snapshots safe to share
+    # between the runtime, preferences dialog, and config adapter.
+    workspaces: tuple[Workspace, ...] = ()
+    active_workspace_id: str = ""
 
 
 class ConfigStore(Protocol):

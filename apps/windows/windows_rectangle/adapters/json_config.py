@@ -15,9 +15,10 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..core.actions import DEFAULT_SHORTCUTS, Action
+from ..core.workspaces import NormalizedRect, WindowMatcher, Workspace, WorkspacePlacement
 from ..ports.config_store import Settings
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _log = logging.getLogger(__name__)
 
@@ -160,6 +161,7 @@ def _to_dict(settings: Settings) -> dict:
     # cleared shortcut survives a save+load round-trip; otherwise the
     # loader would re-populate it from DEFAULT_SHORTCUTS on next start.
     data["shortcuts"] = {a.value: settings.shortcuts.get(a, "") for a in Action}
+    data["workspaces"] = [_workspace_to_dict(workspace) for workspace in settings.workspaces]
     data["schema_version"] = SCHEMA_VERSION
     return data
 
@@ -189,6 +191,15 @@ def _from_dict(raw: dict) -> Settings:
         elif action in DEFAULT_SHORTCUTS:
             shortcuts[action] = DEFAULT_SHORTCUTS[action]
 
+    workspaces = tuple(
+        workspace
+        for item in raw.get("workspaces", [])
+        if isinstance(item, dict) and (workspace := _workspace_from_dict(item)) is not None
+    )
+    active_workspace_id = str(raw.get("active_workspace_id", ""))
+    if active_workspace_id and all(w.id != active_workspace_id for w in workspaces):
+        active_workspace_id = ""
+
     return Settings(
         shortcuts=shortcuts,
         gap=int(raw.get("gap", defaults.gap)),
@@ -198,4 +209,66 @@ def _from_dict(raw: dict) -> Settings:
         almost_maximize_scale=float(
             raw.get("almost_maximize_scale", defaults.almost_maximize_scale)
         ),
+        workspaces=workspaces,
+        active_workspace_id=active_workspace_id,
     )
+
+
+def _workspace_to_dict(workspace: Workspace) -> dict[str, object]:
+    return {
+        "id": workspace.id,
+        "name": workspace.name,
+        "shortcut": workspace.shortcut,
+        "placements": [
+            {
+                "id": placement.id,
+                "name": placement.name,
+                "monitor_index": placement.monitor_index,
+                "matcher": asdict(placement.matcher),
+                "rect": asdict(placement.rect),
+            }
+            for placement in workspace.placements
+        ],
+    }
+
+
+def _workspace_from_dict(raw: dict[str, object]) -> Workspace | None:
+    """Decode one workspace; malformed user entries are skipped safely."""
+    try:
+        placements_raw = raw.get("placements", [])
+        if not isinstance(placements_raw, list):
+            return None
+        placements: list[WorkspacePlacement] = []
+        for item in placements_raw:
+            if not isinstance(item, dict):
+                return None
+            matcher_raw = item.get("matcher")
+            rect_raw = item.get("rect")
+            if not isinstance(matcher_raw, dict) or not isinstance(rect_raw, dict):
+                return None
+            placements.append(
+                WorkspacePlacement(
+                    id=str(item.get("id", "")),
+                    name=str(item.get("name", "")),
+                    monitor_index=int(item.get("monitor_index", 0)),
+                    matcher=WindowMatcher(
+                        process_name=str(matcher_raw.get("process_name", "")),
+                        title_contains=str(matcher_raw.get("title_contains", "")),
+                        title_regex=str(matcher_raw.get("title_regex", "")),
+                    ),
+                    rect=NormalizedRect(
+                        left=int(rect_raw.get("left", -1)),
+                        top=int(rect_raw.get("top", -1)),
+                        right=int(rect_raw.get("right", -1)),
+                        bottom=int(rect_raw.get("bottom", -1)),
+                    ),
+                )
+            )
+        return Workspace(
+            id=str(raw.get("id", "")),
+            name=str(raw.get("name", "")),
+            shortcut=str(raw.get("shortcut", "")),
+            placements=tuple(placements),
+        )
+    except (TypeError, ValueError):
+        return None
