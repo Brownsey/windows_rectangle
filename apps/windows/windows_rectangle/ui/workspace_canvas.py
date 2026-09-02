@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from ..core.workspaces import BASIS, NormalizedRect, WorkspacePlacement
 
 CANVAS_PADDING = 18
-SNAP_STEP = 250
+MIN_RECT_SIZE = 300
 
 
 def canvas_rect(
@@ -30,7 +30,7 @@ def translate_rect(
     height: int,
     *,
     padding: int = CANVAS_PADDING,
-    snap: int = SNAP_STEP,
+    snap: int = 1,
 ) -> NormalizedRect:
     usable_width = max(1, width - padding * 2)
     usable_height = max(1, height - padding * 2)
@@ -44,6 +44,34 @@ def translate_rect(
         new_left + rect.right - rect.left,
         new_top + rect.bottom - rect.top,
     )
+
+
+def resize_rect(
+    rect: NormalizedRect,
+    edges: frozenset[str],
+    dx_pixels: int,
+    dy_pixels: int,
+    width: int,
+    height: int,
+    *,
+    padding: int = CANVAS_PADDING,
+    minimum: int = MIN_RECT_SIZE,
+) -> NormalizedRect:
+    """Resize selected edges with basis-point precision and safe bounds."""
+    usable_width = max(1, width - padding * 2)
+    usable_height = max(1, height - padding * 2)
+    dx = round(dx_pixels * BASIS / usable_width)
+    dy = round(dy_pixels * BASIS / usable_height)
+    left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+    if "left" in edges:
+        left = min(max(0, left + dx), right - minimum)
+    if "right" in edges:
+        right = max(min(BASIS, right + dx), left + minimum)
+    if "top" in edges:
+        top = min(max(0, top + dy), bottom - minimum)
+    if "bottom" in edges:
+        bottom = max(min(BASIS, bottom + dy), top + minimum)
+    return NormalizedRect(left, top, right, bottom)
 
 
 def create_layout_canvas(
@@ -64,6 +92,7 @@ def create_layout_canvas(
             self._selected = ""
             self._drag_origin = None
             self._original_rect = None
+            self._resize_edges: frozenset[str] = frozenset()
 
         def set_placements(
             self, placements: Sequence[WorkspacePlacement], selected: str = ""
@@ -104,6 +133,17 @@ def create_layout_canvas(
                     QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop,
                     placement.name,
                 )
+                if placement.id == self._selected:
+                    painter.setBrush(QtGui.QColor("white"))
+                    painter.setPen(QtGui.QPen(QtGui.QColor("#175cd3"), 1))
+                    corners = (
+                        box.topLeft(),
+                        box.topRight(),
+                        box.bottomLeft(),
+                        box.bottomRight(),
+                    )
+                    for corner in corners:
+                        painter.drawRect(QtCore.QRect(corner.x() - 4, corner.y() - 4, 8, 8))
 
         def mousePressEvent(self, event) -> None:
             if event.button() != QtCore.Qt.LeftButton:
@@ -115,6 +155,7 @@ def create_layout_canvas(
                     self._selected = placement.id
                     self._drag_origin = point
                     self._original_rect = placement.rect
+                    self._resize_edges = _edges_at(point, QtCore.QRect(x, y, width, height))
                     on_select(placement.id)
                     self.update()
                     return
@@ -123,13 +164,23 @@ def create_layout_canvas(
             if self._drag_origin is None or self._original_rect is None:
                 return
             delta = event.position().toPoint() - self._drag_origin
-            preview = translate_rect(
-                self._original_rect,
-                delta.x(),
-                delta.y(),
-                self.width(),
-                self.height(),
-            )
+            if self._resize_edges:
+                preview = resize_rect(
+                    self._original_rect,
+                    self._resize_edges,
+                    delta.x(),
+                    delta.y(),
+                    self.width(),
+                    self.height(),
+                )
+            else:
+                preview = translate_rect(
+                    self._original_rect,
+                    delta.x(),
+                    delta.y(),
+                    self.width(),
+                    self.height(),
+                )
             self._placements = tuple(
                 placement
                 if placement.id != self._selected
@@ -150,7 +201,21 @@ def create_layout_canvas(
             placement = next((item for item in self._placements if item.id == self._selected), None)
             self._drag_origin = None
             self._original_rect = None
+            self._resize_edges = frozenset()
             if placement is not None:
                 on_move(placement.id, placement.rect)
+
+    def _edges_at(point, box) -> frozenset[str]:
+        margin = 10
+        edges: set[str] = set()
+        if abs(point.x() - box.left()) <= margin:
+            edges.add("left")
+        elif abs(point.x() - box.right()) <= margin:
+            edges.add("right")
+        if abs(point.y() - box.top()) <= margin:
+            edges.add("top")
+        elif abs(point.y() - box.bottom()) <= margin:
+            edges.add("bottom")
+        return frozenset(edges)
 
     return LayoutCanvas()
