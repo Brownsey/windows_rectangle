@@ -47,6 +47,15 @@ class Action(str, Enum):
     LAST_THIRD = "last_third"
     FIRST_TWO_THIRDS = "first_two_thirds"
     LAST_TWO_THIRDS = "last_two_thirds"
+    CENTER_HALF = "center_half"
+    CENTER_TWO_THIRDS = "center_two_thirds"
+    FIRST_FOURTH = "first_fourth"
+    SECOND_FOURTH = "second_fourth"
+    THIRD_FOURTH = "third_fourth"
+    LAST_FOURTH = "last_fourth"
+    FIRST_THREE_FOURTHS = "first_three_fourths"
+    CENTER_THREE_FOURTHS = "center_three_fourths"
+    LAST_THREE_FOURTHS = "last_three_fourths"
 
     MAXIMIZE = "maximize"
     MAXIMIZE_HEIGHT = "maximize_height"
@@ -56,6 +65,15 @@ class Action(str, Enum):
 
     LARGER = "larger"
     SMALLER = "smaller"
+    LARGER_WIDTH = "larger_width"
+    SMALLER_WIDTH = "smaller_width"
+    LARGER_HEIGHT = "larger_height"
+    SMALLER_HEIGHT = "smaller_height"
+
+    MOVE_LEFT = "move_left"
+    MOVE_RIGHT = "move_right"
+    MOVE_UP = "move_up"
+    MOVE_DOWN = "move_down"
 
     RESTORE = "restore"  # handled by history, not a geometry transform
     NEXT_DISPLAY = "next_display"
@@ -136,6 +154,22 @@ _TILES: dict[Action, TileSpec] = {
 }
 
 
+# Rectangle treats these as horizontal bands on landscape displays and
+# vertical bands on portrait displays. Keeping the fractions declarative makes
+# fourths and centered spans share one tested calculation path.
+_ORIENTED_BANDS: dict[Action, tuple[Fraction, Fraction]] = {
+    Action.CENTER_HALF: (_F(1, 4), _F(3, 4)),
+    Action.CENTER_TWO_THIRDS: (_F(1, 6), _F(5, 6)),
+    Action.FIRST_FOURTH: (_F(0), _F(1, 4)),
+    Action.SECOND_FOURTH: (_F(1, 4), _F(1, 2)),
+    Action.THIRD_FOURTH: (_F(1, 2), _F(3, 4)),
+    Action.LAST_FOURTH: (_F(3, 4), _F(1)),
+    Action.FIRST_THREE_FOURTHS: (_F(0), _F(3, 4)),
+    Action.CENTER_THREE_FOURTHS: (_F(1, 8), _F(7, 8)),
+    Action.LAST_THREE_FOURTHS: (_F(1, 4), _F(1)),
+}
+
+
 # ---------------------------------------------------------------------
 # Action handler signature
 # ---------------------------------------------------------------------
@@ -155,6 +189,21 @@ def _tile_handler(action: Action) -> ActionFn:
             bottom=spec.bottom,
         )
         edges = tile_edges(spec.left, spec.top, spec.right, spec.bottom)
+        return apply_gap(work_area, tile, edges, gap)
+
+    return handler
+
+
+def _oriented_band_handler(action: Action) -> ActionFn:
+    start, end = _ORIENTED_BANDS[action]
+
+    def handler(window: Rect, work_area: Rect, gap: int) -> Rect:
+        if work_area.width >= work_area.height:
+            tile = fraction_rect(work_area, left=start, right=end)
+            edges = tile_edges(start, 0, end, 1)
+        else:
+            tile = fraction_rect(work_area, top=start, bottom=end)
+            edges = tile_edges(0, start, 1, end)
         return apply_gap(work_area, tile, edges, gap)
 
     return handler
@@ -210,6 +259,31 @@ def smaller(window: Rect, work_area: Rect, gap: int) -> Rect:
     return _resize_step(window, work_area, -LARGER_SMALLER_STEP)
 
 
+def _resize_dimension(window: Rect, work_area: Rect, delta: int, *, width: bool) -> Rect:
+    new_width = window.width + delta if width else window.width
+    new_height = window.height if width else window.height + delta
+    new_width = min(work_area.width, max(MIN_WINDOW_W, new_width))
+    new_height = min(work_area.height, max(MIN_WINDOW_H, new_height))
+    return Rect(
+        window.center_x - new_width // 2,
+        window.center_y - new_height // 2,
+        new_width,
+        new_height,
+    ).clamp_to(work_area)
+
+
+def _move_to_edge(window: Rect, work_area: Rect, action: Action) -> Rect:
+    width = min(window.width, work_area.width)
+    height = min(window.height, work_area.height)
+    if action in (Action.MOVE_LEFT, Action.MOVE_RIGHT):
+        x = work_area.left if action is Action.MOVE_LEFT else work_area.right - width
+        y = work_area.y + (work_area.height - height) // 2
+    else:
+        x = work_area.x + (work_area.width - width) // 2
+        y = work_area.top if action is Action.MOVE_UP else work_area.bottom - height
+    return Rect(x, y, width, height)
+
+
 def _resize_step(window: Rect, work_area: Rect, delta: int) -> Rect:
     """Grow/shrink each side by `delta`, keeping the center stable."""
     new_w = max(MIN_WINDOW_W, window.width + 2 * delta)
@@ -229,12 +303,29 @@ def _resize_step(window: Rect, work_area: Rect, delta: int) -> Rect:
 
 _HANDLERS: dict[Action, ActionFn] = {
     **{a: _tile_handler(a) for a in _TILES},
+    **{a: _oriented_band_handler(a) for a in _ORIENTED_BANDS},
     Action.MAXIMIZE_HEIGHT: maximize_height,
     Action.MAXIMIZE_WIDTH: maximize_width,
     Action.ALMOST_MAXIMIZE: almost_maximize,
     Action.CENTER: center,
     Action.LARGER: larger,
     Action.SMALLER: smaller,
+    Action.LARGER_WIDTH: lambda window, work, gap: _resize_dimension(
+        window, work, LARGER_SMALLER_STEP, width=True
+    ),
+    Action.SMALLER_WIDTH: lambda window, work, gap: _resize_dimension(
+        window, work, -LARGER_SMALLER_STEP, width=True
+    ),
+    Action.LARGER_HEIGHT: lambda window, work, gap: _resize_dimension(
+        window, work, LARGER_SMALLER_STEP, width=False
+    ),
+    Action.SMALLER_HEIGHT: lambda window, work, gap: _resize_dimension(
+        window, work, -LARGER_SMALLER_STEP, width=False
+    ),
+    Action.MOVE_LEFT: lambda window, work, gap: _move_to_edge(window, work, Action.MOVE_LEFT),
+    Action.MOVE_RIGHT: lambda window, work, gap: _move_to_edge(window, work, Action.MOVE_RIGHT),
+    Action.MOVE_UP: lambda window, work, gap: _move_to_edge(window, work, Action.MOVE_UP),
+    Action.MOVE_DOWN: lambda window, work, gap: _move_to_edge(window, work, Action.MOVE_DOWN),
 }
 
 

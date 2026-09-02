@@ -71,6 +71,34 @@ def test_corner_sixths(action, expected):
     assert apply(action, WIN, WORK) == expected
 
 
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.FIRST_FOURTH, Rect(0, 0, 480, 1080)),
+        (Action.SECOND_FOURTH, Rect(480, 0, 480, 1080)),
+        (Action.THIRD_FOURTH, Rect(960, 0, 480, 1080)),
+        (Action.LAST_FOURTH, Rect(1440, 0, 480, 1080)),
+        (Action.CENTER_HALF, Rect(480, 0, 960, 1080)),
+        (Action.CENTER_TWO_THIRDS, Rect(320, 0, 1280, 1080)),
+        (Action.FIRST_THREE_FOURTHS, Rect(0, 0, 1440, 1080)),
+        (Action.CENTER_THREE_FOURTHS, Rect(240, 0, 1440, 1080)),
+        (Action.LAST_THREE_FOURTHS, Rect(480, 0, 1440, 1080)),
+    ],
+)
+def test_oriented_bands_on_landscape(action, expected):
+    assert apply(action, WIN, WORK) == expected
+
+
+def test_oriented_bands_rotate_on_portrait_display():
+    portrait = Rect(-200, 50, 900, 1600)
+    assert apply(Action.FIRST_FOURTH, WIN, portrait) == Rect(-200, 50, 900, 400)
+    assert apply(Action.CENTER_HALF, WIN, portrait) == Rect(-200, 450, 900, 800)
+
+
+def test_oriented_band_gap_has_outer_and_inner_gutters():
+    assert apply(Action.SECOND_FOURTH, WIN, WORK, gap=10) == Rect(485, 10, 470, 1060)
+
+
 # ----- Thirds ---------------------------------------------------------
 
 
@@ -162,6 +190,34 @@ def test_center_doesnt_resize():
     assert abs(r.center_x - WORK.center_x) <= 1
 
 
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.MOVE_LEFT, Rect(0, 240, 800, 600)),
+        (Action.MOVE_RIGHT, Rect(1120, 240, 800, 600)),
+        (Action.MOVE_UP, Rect(560, 0, 800, 600)),
+        (Action.MOVE_DOWN, Rect(560, 480, 800, 600)),
+    ],
+)
+def test_move_actions_preserve_size_and_center_other_axis(action, expected):
+    assert apply(action, WIN, WORK) == expected
+
+
+@pytest.mark.parametrize(
+    "action, expected_size",
+    [
+        (Action.LARGER_WIDTH, (830, 600)),
+        (Action.SMALLER_WIDTH, (770, 600)),
+        (Action.LARGER_HEIGHT, (800, 630)),
+        (Action.SMALLER_HEIGHT, (800, 570)),
+    ],
+)
+def test_dimension_only_resize_keeps_center(action, expected_size):
+    result = apply(action, WIN, WORK)
+    assert (result.width, result.height) == expected_size
+    assert (result.center_x, result.center_y) == (WIN.center_x, WIN.center_y)
+
+
 def test_larger_grows_keeps_center():
     r = apply(Action.LARGER, WIN, WORK)
     assert r.width > WIN.width
@@ -227,9 +283,27 @@ def test_apply_rejects_non_geometry_actions(action):
 # ----- Defaults catalogue --------------------------------------------
 
 
-def test_every_action_has_default_shortcut():
-    for a in Action:
-        assert a in DEFAULT_SHORTCUTS, f"missing shortcut for {a}"
+def test_advanced_actions_are_discoverable_but_unbound_by_default():
+    advanced = set(Action) - set(DEFAULT_SHORTCUTS)
+    assert advanced == {
+        Action.CENTER_HALF,
+        Action.CENTER_TWO_THIRDS,
+        Action.FIRST_FOURTH,
+        Action.SECOND_FOURTH,
+        Action.THIRD_FOURTH,
+        Action.LAST_FOURTH,
+        Action.FIRST_THREE_FOURTHS,
+        Action.CENTER_THREE_FOURTHS,
+        Action.LAST_THREE_FOURTHS,
+        Action.LARGER_WIDTH,
+        Action.SMALLER_WIDTH,
+        Action.LARGER_HEIGHT,
+        Action.SMALLER_HEIGHT,
+        Action.MOVE_LEFT,
+        Action.MOVE_RIGHT,
+        Action.MOVE_UP,
+        Action.MOVE_DOWN,
+    }
 
 
 def test_default_shortcuts_are_unique():

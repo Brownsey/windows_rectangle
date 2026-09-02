@@ -9,11 +9,14 @@ Windows implementation. The authoritative command list is
 
 ## Current coverage
 
-Windows Rectangle now exposes 30 keyboard actions:
+Windows Rectangle now exposes 47 keyboard actions:
 
 - Halves, corner quarters, corner sixths, horizontal thirds, and two-thirds.
 - Maximize, maximize height, maximize width, almost maximize, and center.
-- Symmetric larger/smaller, restore, next/previous display, and always-on-top.
+- Fourths and three-fourths, centered half/two-thirds/three-fourths, with
+  orientation-aware behavior on portrait displays.
+- Symmetric and width/height-only larger/smaller, edge-aligned movement,
+  restore, next/previous display, and always-on-top.
 
 It also has Windows-native drag-to-edge snapping, previews, gaps, cycling, undo,
 multi-monitor movement, shortcut customization, tray controls, diagnostics, and named
@@ -24,11 +27,7 @@ beyond the open-source Rectangle feature set.
 
 ### P0 — common daily layout operations
 
-- Move without resize: left, right, up, and down.
-- Fourths and three-fourths: first/second/third/last fourth plus first/center/last
-  three-fourths.
-- Center half, center two-thirds, center three-fourths, and prominent center.
-- Width-only and height-only larger/smaller.
+- Prominent center.
 - Double/halve width or height anchored in each direction.
 - Direct monitor 1–9 targeting.
 

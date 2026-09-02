@@ -25,11 +25,12 @@ def test_action_labels_cover_every_action():
     assert missing == [], f"missing labels for: {missing}"
 
 
-def test_rows_default_shortcuts_yields_no_unbound():
+def test_rows_show_advanced_actions_as_unbound():
     rows = cheat_sheet_rows(DEFAULT_SHORTCUTS)
     assert len(rows) == len(ACTION_LABELS)
     unbound = [label for label, combo in rows if combo == UNBOUND_PLACEHOLDER]
-    assert unbound == [], "DEFAULT_SHORTCUTS should bind every action"
+    assert "Move left" in unbound
+    assert "Center two-thirds" in unbound
 
 
 def test_unbound_action_uses_placeholder():
