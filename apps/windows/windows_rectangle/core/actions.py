@@ -62,6 +62,7 @@ class Action(str, Enum):
     MAXIMIZE_WIDTH = "maximize_width"
     ALMOST_MAXIMIZE = "almost_maximize"
     CENTER = "center"
+    CENTER_PROMINENTLY = "center_prominently"
 
     LARGER = "larger"
     SMALLER = "smaller"
@@ -75,10 +76,28 @@ class Action(str, Enum):
     MOVE_UP = "move_up"
     MOVE_DOWN = "move_down"
 
+    HALVE_HEIGHT_UP = "halve_height_up"
+    HALVE_HEIGHT_DOWN = "halve_height_down"
+    HALVE_WIDTH_LEFT = "halve_width_left"
+    HALVE_WIDTH_RIGHT = "halve_width_right"
+    DOUBLE_HEIGHT_UP = "double_height_up"
+    DOUBLE_HEIGHT_DOWN = "double_height_down"
+    DOUBLE_WIDTH_LEFT = "double_width_left"
+    DOUBLE_WIDTH_RIGHT = "double_width_right"
+
     RESTORE = "restore"  # handled by history, not a geometry transform
     NEXT_DISPLAY = "next_display"
     PREV_DISPLAY = "prev_display"
     TOGGLE_ALWAYS_ON_TOP = "toggle_always_on_top"
+    DISPLAY_1 = "display_1"
+    DISPLAY_2 = "display_2"
+    DISPLAY_3 = "display_3"
+    DISPLAY_4 = "display_4"
+    DISPLAY_5 = "display_5"
+    DISPLAY_6 = "display_6"
+    DISPLAY_7 = "display_7"
+    DISPLAY_8 = "display_8"
+    DISPLAY_9 = "display_9"
 
 
 # ---------------------------------------------------------------------
@@ -251,6 +270,18 @@ def center(window: Rect, work_area: Rect, gap: int) -> Rect:
     return window.centered_in(work_area)
 
 
+def center_prominently(window: Rect, work_area: Rect, gap: int) -> Rect:
+    """Center horizontally and place the window in the upper visual quarter."""
+    width = min(window.width, work_area.width)
+    height = min(window.height, work_area.height)
+    return Rect(
+        work_area.x + (work_area.width - width) // 2,
+        work_area.y + (work_area.height - height) // 4,
+        width,
+        height,
+    )
+
+
 def larger(window: Rect, work_area: Rect, gap: int) -> Rect:
     return _resize_step(window, work_area, +LARGER_SMALLER_STEP)
 
@@ -284,6 +315,42 @@ def _move_to_edge(window: Rect, work_area: Rect, action: Action) -> Rect:
     return Rect(x, y, width, height)
 
 
+def _scale_anchored(window: Rect, work_area: Rect, action: Action) -> Rect:
+    halves = action in {
+        Action.HALVE_HEIGHT_UP,
+        Action.HALVE_HEIGHT_DOWN,
+        Action.HALVE_WIDTH_LEFT,
+        Action.HALVE_WIDTH_RIGHT,
+    }
+    changes_width = action in {
+        Action.HALVE_WIDTH_LEFT,
+        Action.HALVE_WIDTH_RIGHT,
+        Action.DOUBLE_WIDTH_LEFT,
+        Action.DOUBLE_WIDTH_RIGHT,
+    }
+    factor = _F(1, 2) if halves else _F(2)
+    width, height = window.width, window.height
+    if changes_width:
+        width = max(MIN_WINDOW_W, round(window.width * factor))
+    else:
+        height = max(MIN_WINDOW_H, round(window.height * factor))
+    width = min(width, work_area.width)
+    height = min(height, work_area.height)
+    x, y = window.x, window.y
+    if action in {Action.HALVE_WIDTH_RIGHT, Action.DOUBLE_WIDTH_LEFT}:
+        x = window.right - width
+    if action in {Action.HALVE_HEIGHT_DOWN, Action.DOUBLE_HEIGHT_UP}:
+        y = window.bottom - height
+    return Rect(x, y, width, height).clamp_to(work_area)
+
+
+def _anchored_handler(action: Action) -> ActionFn:
+    def handler(window: Rect, work_area: Rect, gap: int) -> Rect:
+        return _scale_anchored(window, work_area, action)
+
+    return handler
+
+
 def _resize_step(window: Rect, work_area: Rect, delta: int) -> Rect:
     """Grow/shrink each side by `delta`, keeping the center stable."""
     new_w = max(MIN_WINDOW_W, window.width + 2 * delta)
@@ -308,6 +375,7 @@ _HANDLERS: dict[Action, ActionFn] = {
     Action.MAXIMIZE_WIDTH: maximize_width,
     Action.ALMOST_MAXIMIZE: almost_maximize,
     Action.CENTER: center,
+    Action.CENTER_PROMINENTLY: center_prominently,
     Action.LARGER: larger,
     Action.SMALLER: smaller,
     Action.LARGER_WIDTH: lambda window, work, gap: _resize_dimension(
@@ -326,6 +394,19 @@ _HANDLERS: dict[Action, ActionFn] = {
     Action.MOVE_RIGHT: lambda window, work, gap: _move_to_edge(window, work, Action.MOVE_RIGHT),
     Action.MOVE_UP: lambda window, work, gap: _move_to_edge(window, work, Action.MOVE_UP),
     Action.MOVE_DOWN: lambda window, work, gap: _move_to_edge(window, work, Action.MOVE_DOWN),
+    **{
+        action: _anchored_handler(action)
+        for action in (
+            Action.HALVE_HEIGHT_UP,
+            Action.HALVE_HEIGHT_DOWN,
+            Action.HALVE_WIDTH_LEFT,
+            Action.HALVE_WIDTH_RIGHT,
+            Action.DOUBLE_HEIGHT_UP,
+            Action.DOUBLE_HEIGHT_DOWN,
+            Action.DOUBLE_WIDTH_LEFT,
+            Action.DOUBLE_WIDTH_RIGHT,
+        )
+    },
 }
 
 

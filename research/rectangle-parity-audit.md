@@ -9,7 +9,7 @@ Windows implementation. The authoritative command list is
 
 ## Current coverage
 
-Windows Rectangle now exposes 47 keyboard actions:
+Windows Rectangle now exposes 65 keyboard actions:
 
 - Halves, corner quarters, corner sixths, horizontal thirds, and two-thirds.
 - Maximize, maximize height, maximize width, almost maximize, and center.
@@ -17,6 +17,8 @@ Windows Rectangle now exposes 47 keyboard actions:
   orientation-aware behavior on portrait displays.
 - Symmetric and width/height-only larger/smaller, edge-aligned movement,
   restore, next/previous display, and always-on-top.
+- Anchored halve/double width and height, prominent center, and direct display
+  1–9 targeting.
 
 It also has Windows-native drag-to-edge snapping, previews, gaps, cycling, undo,
 multi-monitor movement, shortcut customization, tray controls, diagnostics, and named
@@ -27,9 +29,7 @@ beyond the open-source Rectangle feature set.
 
 ### P0 — common daily layout operations
 
-- Prominent center.
-- Double/halve width or height anchored in each direction.
-- Direct monitor 1–9 targeting.
+Complete. Advanced P0 commands are discoverable but unbound by default.
 
 ### P1 — dense grid layouts
 

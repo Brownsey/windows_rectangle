@@ -161,6 +161,24 @@ def test_prev_display_wraps(fake_wm):
     assert r.x >= 1920
 
 
+def test_direct_display_moves_to_requested_monitor(fake_wm, dispatcher):
+    result = dispatcher.dispatch(Action.DISPLAY_2)
+    assert result.moved
+    assert fake_wm.windows[101].x >= M2.work_area.x
+
+
+def test_direct_display_reports_missing_monitor(fake_wm, dispatcher):
+    result = dispatcher.dispatch(Action.DISPLAY_3)
+    assert not result.moved
+    assert result.reason == "display_unavailable"
+
+
+def test_direct_display_on_current_monitor_is_no_change(fake_wm, dispatcher):
+    result = dispatcher.dispatch(Action.DISPLAY_1)
+    assert not result.moved
+    assert result.reason == "no_change"
+
+
 def test_toggle_always_on_top_enables_and_disables(fake_wm, dispatcher):
     enabled = dispatcher.dispatch(Action.TOGGLE_ALWAYS_ON_TOP)
     assert enabled.moved

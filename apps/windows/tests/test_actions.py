@@ -190,6 +190,10 @@ def test_center_doesnt_resize():
     assert abs(r.center_x - WORK.center_x) <= 1
 
 
+def test_center_prominently_uses_upper_visual_quarter():
+    assert apply(Action.CENTER_PROMINENTLY, WIN, WORK) == Rect(560, 120, 800, 600)
+
+
 @pytest.mark.parametrize(
     "action, expected",
     [
@@ -216,6 +220,23 @@ def test_dimension_only_resize_keeps_center(action, expected_size):
     result = apply(action, WIN, WORK)
     assert (result.width, result.height) == expected_size
     assert (result.center_x, result.center_y) == (WIN.center_x, WIN.center_y)
+
+
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.HALVE_WIDTH_LEFT, Rect(100, 100, 400, 600)),
+        (Action.HALVE_WIDTH_RIGHT, Rect(500, 100, 400, 600)),
+        (Action.DOUBLE_WIDTH_LEFT, Rect(0, 100, 900, 600)),
+        (Action.DOUBLE_WIDTH_RIGHT, Rect(100, 100, 1600, 600)),
+        (Action.HALVE_HEIGHT_UP, Rect(100, 100, 800, 300)),
+        (Action.HALVE_HEIGHT_DOWN, Rect(100, 400, 800, 300)),
+        (Action.DOUBLE_HEIGHT_UP, Rect(100, 0, 800, 700)),
+        (Action.DOUBLE_HEIGHT_DOWN, Rect(100, 100, 800, 980)),
+    ],
+)
+def test_anchored_dimension_scaling(action, expected):
+    assert apply(action, WIN, WORK) == expected
 
 
 def test_larger_grows_keeps_center():
@@ -303,6 +324,24 @@ def test_advanced_actions_are_discoverable_but_unbound_by_default():
         Action.MOVE_RIGHT,
         Action.MOVE_UP,
         Action.MOVE_DOWN,
+        Action.CENTER_PROMINENTLY,
+        Action.HALVE_HEIGHT_UP,
+        Action.HALVE_HEIGHT_DOWN,
+        Action.HALVE_WIDTH_LEFT,
+        Action.HALVE_WIDTH_RIGHT,
+        Action.DOUBLE_HEIGHT_UP,
+        Action.DOUBLE_HEIGHT_DOWN,
+        Action.DOUBLE_WIDTH_LEFT,
+        Action.DOUBLE_WIDTH_RIGHT,
+        Action.DISPLAY_1,
+        Action.DISPLAY_2,
+        Action.DISPLAY_3,
+        Action.DISPLAY_4,
+        Action.DISPLAY_5,
+        Action.DISPLAY_6,
+        Action.DISPLAY_7,
+        Action.DISPLAY_8,
+        Action.DISPLAY_9,
     }
 
 

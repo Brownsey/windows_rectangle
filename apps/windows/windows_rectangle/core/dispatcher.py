@@ -18,6 +18,18 @@ from .eligibility import Capability, classify
 from .geometry import Rect
 from .history import History
 
+_DISPLAY_ACTION_INDEX = {
+    Action.DISPLAY_1: 0,
+    Action.DISPLAY_2: 1,
+    Action.DISPLAY_3: 2,
+    Action.DISPLAY_4: 3,
+    Action.DISPLAY_5: 4,
+    Action.DISPLAY_6: 5,
+    Action.DISPLAY_7: 6,
+    Action.DISPLAY_8: 7,
+    Action.DISPLAY_9: 8,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class DispatchResult:
@@ -74,6 +86,9 @@ class Dispatcher:
 
         if action in (Action.NEXT_DISPLAY, Action.PREV_DISPLAY):
             return self._move_to_neighbor_display(handle, action)
+
+        if action in _DISPLAY_ACTION_INDEX:
+            return self._move_to_display(handle, action, _DISPLAY_ACTION_INDEX[action])
 
         if action == Action.TOGGLE_ALWAYS_ON_TOP:
             return self._toggle_always_on_top(handle)
@@ -136,6 +151,19 @@ class Dispatcher:
         destination = monitors_mod.neighbor(all_monitors, current, direction=direction)
         before = self._windows.get_window_rect(handle)
         target = monitors_mod.move_to_monitor(before, current, destination)
+        return self._move(handle, action, before, target)
+
+    def _move_to_display(
+        self, handle: object, action: Action, display_index: int
+    ) -> DispatchResult:
+        monitors = self._windows.list_monitors()
+        if display_index >= len(monitors):
+            return DispatchResult(action, handle, None, None, False, "display_unavailable")
+        current = self._windows.monitor_for_window(handle)
+        if current is None:
+            return DispatchResult(action, handle, None, None, False, "no_monitor")
+        before = self._windows.get_window_rect(handle)
+        target = monitors_mod.move_to_monitor(before, current, monitors[display_index])
         return self._move(handle, action, before, target)
 
     def _restore(self, handle: object) -> DispatchResult:
