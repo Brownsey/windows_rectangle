@@ -127,7 +127,7 @@ def create_layout_canvas(
                     else QtGui.QPen(QtGui.QColor("white"), 1)
                 )
                 painter.drawRoundedRect(box.adjusted(2, 2, -2, -2), 7, 7)
-                painter.setPen(QtGui.QColor("white"))
+                painter.setPen(QtGui.QColor("#101828"))
                 painter.drawText(
                     box.adjusted(9, 7, -7, -7),
                     QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop,
@@ -190,6 +190,7 @@ def create_layout_canvas(
                     placement.matcher,
                     preview,
                     placement.monitor_index,
+                    placement.launch_command,
                 )
                 for placement in self._placements
             )

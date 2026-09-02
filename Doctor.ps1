@@ -66,7 +66,9 @@ function Resolve-Runner {
     if (Test-Path $distExe) {
         return @{ Kind = "exe"; Cmd = $distExe }
     }
-    return @{ Kind = "python"; Cmd = "python -m windows_rectangle" }
+    $venvPython = Join-Path $here ".venv\Scripts\python.exe"
+    $python = if (Test-Path $venvPython) { $venvPython } else { "python" }
+    return @{ Kind = "python"; Cmd = $python }
 }
 
 $runner = Resolve-Runner
@@ -76,7 +78,12 @@ $runner = Resolve-Runner
 $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine("Windows Rectangle - Doctor report")
 [void]$sb.AppendLine("Generated: $(Get-Date -Format 'u')")
-[void]$sb.AppendLine("Runner:    $($runner.Cmd) ($($runner.Kind))")
+$runnerLabel = if ($runner.Kind -eq "python") {
+    "$($runner.Cmd) -m windows_rectangle"
+} else {
+    $runner.Cmd
+}
+[void]$sb.AppendLine("Runner:    $runnerLabel ($($runner.Kind))")
 [void]$sb.AppendLine()
 
 function Capture($title, $argstr) {
@@ -85,7 +92,12 @@ function Capture($title, $argstr) {
         if ($runner.Kind -eq "exe") {
             $output = & $runner.Cmd $argstr.Split(" ") 2>&1
         } else {
-            $output = & python -m windows_rectangle $argstr.Split(" ") 2>&1
+            Push-Location (Join-Path $here "apps\windows")
+            try {
+                $output = & $runner.Cmd -m windows_rectangle $argstr.Split(" ") 2>&1
+            } finally {
+                Pop-Location
+            }
         }
         $rc = $LASTEXITCODE
         [void]$sb.AppendLine(($output -join [Environment]::NewLine))

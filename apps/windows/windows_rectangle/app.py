@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ from .core.workspace_service import (
     WorkspaceWindows,
     apply_workspace,
     capture_workspace,
+    launch_and_apply_workspace,
 )
 from .ports.config_store import ConfigStore, Settings
 
@@ -187,8 +189,15 @@ class AppContext:
     # without losing their bindings.
     paused: bool = field(default=False, init=False, repr=False)
     _workspace_queue: queue.Queue[str] = field(
-        default_factory=lambda: queue.Queue(maxsize=64), init=False, repr=False
+        default_factory=lambda: queue.Queue(maxsize=1), init=False, repr=False
     )
+    _workspace_results: queue.Queue[tuple[str, WorkspaceResult | None, str]] = field(
+        default_factory=queue.Queue, init=False, repr=False
+    )
+    _workspace_threads: dict[str, threading.Thread] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _workspace_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     last_workspace_result: WorkspaceResult | None = field(default=None, init=False)
 
     def apply_settings(self, settings: Settings) -> None:
@@ -505,15 +514,21 @@ class AppContext:
 
     def queue_workspace(self, workspace_id: str) -> bool:
         """Non-blocking producer path used by the Win32 hotkey thread."""
-        try:
-            self._workspace_queue.put_nowait(workspace_id)
-            return True
-        except queue.Full:
-            _log.warning("workspace queue full; dropped %s", workspace_id)
-            return False
+        with self._workspace_lock:
+            if not self._workspace_queue.empty() or any(
+                thread.is_alive() for thread in self._workspace_threads.values()
+            ):
+                _log.info("layout already running; dropped %s", workspace_id)
+                return False
+            try:
+                self._workspace_queue.put_nowait(workspace_id)
+                return True
+            except queue.Full:
+                _log.warning("workspace queue full; dropped %s", workspace_id)
+                return False
 
     def drain_workspaces(self) -> int:
-        """Apply queued workspace requests on the main/Qt thread."""
+        """Start queued workspace requests without blocking the main/Qt thread."""
         count = 0
         while True:
             try:
@@ -521,10 +536,75 @@ class AppContext:
             except queue.Empty:
                 return count
             try:
-                self.apply_named_workspace(workspace_id)
+                count += int(self.start_named_workspace(workspace_id))
             except Exception:  # noqa: BLE001
                 _log.exception("workspace restore failed: %s", workspace_id)
+
+    def start_named_workspace(self, workspace_id: str) -> bool:
+        workspace = next(
+            (workspace for workspace in self.settings.workspaces if workspace.id == workspace_id),
+            None,
+        )
+        if workspace is None:
+            raise KeyError(f"unknown workspace: {workspace_id}")
+        with self._workspace_lock:
+            self._workspace_threads = {
+                key: thread for key, thread in self._workspace_threads.items() if thread.is_alive()
+            }
+            if self._workspace_threads:
+                return False
+
+            def restore() -> None:
+                try:
+                    result = launch_and_apply_workspace(
+                        cast(WorkspaceWindows, self.windows), workspace
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._workspace_results.put((workspace_id, None, str(exc)))
+                else:
+                    self._workspace_results.put((workspace_id, result, ""))
+
+            thread = threading.Thread(
+                target=restore,
+                name=f"WindowsRectangle-Workspace-{workspace_id}",
+                daemon=True,
+            )
+            self._workspace_threads[workspace_id] = thread
+            thread.start()
+            return True
+
+    def drain_workspace_results(
+        self,
+        handler: Callable[[str, WorkspaceResult | None, str], None] | None = None,
+    ) -> int:
+        count = 0
+        while True:
+            try:
+                workspace_id, result, error = self._workspace_results.get_nowait()
+            except queue.Empty:
+                return count
+            with self._workspace_lock:
+                current = self._workspace_threads.get(workspace_id)
+                if current is not None and not current.is_alive():
+                    self._workspace_threads.pop(workspace_id, None)
+            if result is not None:
+                self.last_workspace_result = result
+            if handler is not None:
+                handler(workspace_id, result, error)
+            elif error:
+                _log.error("workspace restore failed: %s", error)
             count += 1
+
+    def wait_for_workspace_restores(self, timeout: float) -> bool:
+        """Wait for active restore workers; intended for shutdown and tests."""
+        import time
+
+        deadline = time.monotonic() + timeout
+        with self._workspace_lock:
+            threads = tuple(self._workspace_threads.values())
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        return all(not thread.is_alive() for thread in threads)
 
     # ----- Drag-preview pump (brief §2 #13) --------------------------
 
@@ -730,6 +810,8 @@ def _bind_shortcuts(
     workspace_bound: list[tuple[str, str, str]] = []
     workspace_failed: list[tuple[str, str, str, str]] = []
     for action, combo in ctx.settings.shortcuts.items():
+        if not combo.strip():
+            continue
         try:
             register(combo, lambda a=action: dispatch(a))
             bound_pairs.append((action, combo))

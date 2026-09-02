@@ -3,8 +3,18 @@
 from dataclasses import dataclass, field
 
 from windows_rectangle.core.geometry import Rect
-from windows_rectangle.core.workspace_service import apply_workspace, capture_workspace
-from windows_rectangle.core.workspaces import WindowIdentity
+from windows_rectangle.core.workspace_service import (
+    apply_workspace,
+    capture_workspace,
+    launch_and_apply_workspace,
+)
+from windows_rectangle.core.workspaces import (
+    NormalizedRect,
+    WindowIdentity,
+    WindowMatcher,
+    Workspace,
+    WorkspacePlacement,
+)
 
 
 @dataclass
@@ -16,6 +26,7 @@ class WorkspaceManager:
     maximized: set[object] = field(default_factory=set)
     blocked: set[object] = field(default_factory=set)
     moves: list[tuple[object, Rect]] = field(default_factory=list)
+    launches: list[str] = field(default_factory=list)
 
     def list_windows(self):
         return list(self.windows)
@@ -41,6 +52,12 @@ class WorkspaceManager:
         self.moves.append((handle, rect))
         self.rects[handle] = rect
         return True
+
+    def launch(self, command):
+        self.launches.append(command)
+        self.windows.append(WindowIdentity(99, "Alice - RuneLite", "runelite.exe"))
+        self.rects[99] = Rect(100, 100, 800, 600)
+        self.monitor_indexes[99] = 0
 
 
 def manager():
@@ -97,3 +114,27 @@ def test_capture_excludes_its_own_editor_window():
     wm.monitor_indexes[9] = 0
     workspace = capture_workspace(wm, "Office")
     assert all("Windows Rectangle" not in placement.name for placement in workspace.placements)
+
+
+def test_launch_and_apply_starts_missing_app_then_positions_it():
+    wm = manager()
+    wm.windows = []
+    workspace = Workspace(
+        "gaming",
+        "RuneScape",
+        (
+            WorkspacePlacement(
+                "alice",
+                "Alice",
+                WindowMatcher(process_name="runelite.exe", title_contains="Alice"),
+                NormalizedRect(0, 0, 5000, 10000),
+                launch_command=r"C:\RuneLite\RuneLite.exe --profile Alice",
+            ),
+        ),
+    )
+
+    result = launch_and_apply_workspace(wm, workspace, timeout=0)
+
+    assert wm.launches == [r"C:\RuneLite\RuneLite.exe --profile Alice"]
+    assert result.moved == 1
+    assert wm.rects[99] == Rect(0, 0, 960, 1080)

@@ -65,6 +65,27 @@ class WorkspaceEditorController:
         except StopIteration as exc:
             raise KeyError(workspace_id) from exc
 
+    def rebase_onto(self, current: Settings) -> None:
+        """Keep layout edits while adopting newer shortcut/general settings."""
+        merged = deepcopy(current)
+        baseline_by_id = {workspace.id: workspace for workspace in self.baseline.workspaces}
+        staged_by_id = {workspace.id: workspace for workspace in self.staged.workspaces}
+        current_by_id = {workspace.id: workspace for workspace in current.workspaces}
+        workspaces: list[Workspace] = []
+        for staged in self.staged.workspaces:
+            baseline = baseline_by_id.get(staged.id)
+            if baseline is None or staged != baseline:
+                workspaces.append(deepcopy(staged))
+            else:
+                workspaces.append(deepcopy(current_by_id.get(staged.id, staged)))
+        for workspace in current.workspaces:
+            if workspace.id not in baseline_by_id and workspace.id not in staged_by_id:
+                workspaces.append(deepcopy(workspace))
+        merged.workspaces = tuple(workspaces)
+        if self.staged.active_workspace_id != self.baseline.active_workspace_id:
+            merged.active_workspace_id = self.staged.active_workspace_id
+        self.staged = merged
+
     def capture(self, manager: WorkspaceWindows, name: str) -> Workspace:
         workspace = capture_workspace(manager, name)
         self.staged.workspaces = (*self.staged.workspaces, workspace)
@@ -115,6 +136,7 @@ class WorkspaceEditorController:
         title_regex: str = "",
         monitor_index: int = 0,
         preset_id: str = "full",
+        launch_command: str = "",
     ) -> WorkspacePlacement:
         workspace = self.get(workspace_id)
         placement = WorkspacePlacement(
@@ -123,6 +145,7 @@ class WorkspaceEditorController:
             WindowMatcher(process_name.strip(), title_contains.strip(), title_regex.strip()),
             preset_rect(preset_id),
             monitor_index,
+            launch_command.strip(),
         )
         self._replace_workspace(workspace_id, placements=(*workspace.placements, placement))
         return placement
@@ -161,6 +184,7 @@ class WorkspaceEditorController:
         title_contains: str,
         title_regex: str,
         monitor_index: int,
+        launch_command: str | None = None,
     ) -> None:
         workspace = self.get(workspace_id)
         matcher = WindowMatcher(
@@ -168,19 +192,22 @@ class WorkspaceEditorController:
             title_contains=title_contains.strip(),
             title_regex=title_regex.strip(),
         )
+        if not any(placement.id == placement_id for placement in workspace.placements):
+            raise KeyError(placement_id)
         placements = tuple(
             replace(
                 placement,
                 name=name.strip(),
                 matcher=matcher,
                 monitor_index=monitor_index,
+                launch_command=(
+                    placement.launch_command if launch_command is None else launch_command.strip()
+                ),
             )
             if placement.id == placement_id
             else placement
             for placement in workspace.placements
         )
-        if placements == workspace.placements:
-            raise KeyError(placement_id)
         self._replace_workspace(workspace_id, placements=placements)
 
     def delete_workspace(self, workspace_id: str) -> None:

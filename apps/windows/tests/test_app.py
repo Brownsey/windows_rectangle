@@ -382,6 +382,16 @@ def test_bind_hotkeys_registers_every_action(windows):
     assert bound == len(DEFAULT_SHORTCUTS)
 
 
+def test_bind_hotkeys_skips_blank_shortcuts(windows):
+    settings = Settings(shortcuts={Action.LEFT_HALF: ""})
+    hot = FakeHotkeys()
+    ctx = build(settings, windows, hotkeys=hot)
+
+    assert bind_hotkeys(ctx, hot.register) == 0
+    assert hot.registered == {}
+    assert ctx.last_binding_report.failed == ()
+
+
 def test_workspace_shortcut_queues_restore_for_main_thread(windows):
     workspace = Workspace(
         "office",
@@ -405,6 +415,64 @@ def test_workspace_shortcut_queues_restore_for_main_thread(windows):
     workspace_callback()
     assert ctx._workspace_queue.qsize() == 1
     assert len(hot.registered) == len(DEFAULT_SHORTCUTS) + 1
+
+
+def test_workspace_restore_runs_off_main_thread(windows, monkeypatch):
+    import threading
+
+    import windows_rectangle.app as app_module
+    from windows_rectangle.core.workspace_service import PlacementResult, WorkspaceResult
+
+    workspace = Workspace("office", "Office", ())
+    ctx = build(Settings(workspaces=(workspace,)), windows)
+    started = threading.Event()
+    release = threading.Event()
+    result = WorkspaceResult((PlacementResult("app", "moved"),))
+
+    def fake_restore(_manager, _workspace):
+        started.set()
+        assert release.wait(2)
+        return result
+
+    monkeypatch.setattr(app_module, "launch_and_apply_workspace", fake_restore)
+    assert ctx.queue_workspace("office")
+
+    assert ctx.drain_workspaces() == 1
+    assert started.wait(1)
+    assert ctx.last_workspace_result is None
+
+    release.set()
+    assert ctx.wait_for_workspace_restores(timeout=2)
+    assert ctx.drain_workspace_results() == 1
+    assert ctx.last_workspace_result is result
+
+
+def test_workspace_restores_are_globally_serialized(windows, monkeypatch):
+    import threading
+
+    import windows_rectangle.app as app_module
+    from windows_rectangle.core.workspace_service import WorkspaceResult
+
+    first = Workspace("first", "First", ())
+    second = Workspace("second", "Second", ())
+    ctx = build(Settings(workspaces=(first, second)), windows)
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_restore(_manager, _workspace):
+        started.set()
+        assert release.wait(2)
+        return WorkspaceResult(())
+
+    monkeypatch.setattr(app_module, "launch_and_apply_workspace", fake_restore)
+    assert ctx.queue_workspace("first")
+    assert ctx.drain_workspaces() == 1
+    assert started.wait(1)
+
+    assert not ctx.queue_workspace("second")
+
+    release.set()
+    assert ctx.wait_for_workspace_restores(timeout=2)
 
 
 def test_bind_hotkeys_dispatches_through_callback(windows):

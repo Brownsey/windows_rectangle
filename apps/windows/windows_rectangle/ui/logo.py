@@ -19,6 +19,8 @@ LOGO_FILENAMES: tuple[str, ...] = (
 )
 
 TRAY_LOGO_FILENAMES: tuple[str, ...] = (
+    "windows.ico",
+    "windows.png",
     "tray_logo.ico",
     "tray_logo.png",
     "tray_logo.webp",
@@ -43,6 +45,8 @@ def _find_first_logo_file(filenames: tuple[str, ...]) -> Path | None:
 
 
 def build_qicon(qt_gui):
+    if find_tray_logo_file() is not None:
+        return build_tray_qicon(qt_gui)
     icon_path = find_logo_file()
     if icon_path is not None:
         icon = qt_gui.QIcon(str(icon_path))

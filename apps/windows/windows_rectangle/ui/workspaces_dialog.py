@@ -7,14 +7,14 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from ..core.workspace_presets import POSITION_PRESETS, preset_label
-from ..core.workspace_service import WorkspaceWindows, apply_workspace
+from ..core.workspace_service import WorkspaceWindows
 from .workspace_canvas import create_layout_canvas
 from .workspace_editor import WorkspaceEditorController
 
 _log = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, weakref_slot=True)
 class WorkspaceDialog:
     ctx: object
     editor: WorkspaceEditorController
@@ -73,12 +73,17 @@ class WorkspaceDialog:
             self.shortcut_edit.setText(workspace.shortcut)
             self.placements.setRowCount(len(workspace.placements))
             for row, placement in enumerate(workspace.placements):
+                matcher = placement.matcher
+                match_parts = [matcher.process_name]
+                if matcher.title_contains:
+                    match_parts.append(f"title contains “{matcher.title_contains}”")
+                if matcher.title_regex:
+                    match_parts.append(f"title regex {matcher.title_regex}")
                 values = (
                     placement.name,
-                    placement.matcher.process_name,
-                    placement.matcher.title_contains,
-                    placement.matcher.title_regex,
-                    str(placement.monitor_index + 1),
+                    " · ".join(part for part in match_parts if part),
+                    placement.launch_command or "Uses an open window",
+                    f"Display {placement.monitor_index + 1}",
                     preset_label(placement.rect),
                     (
                         "Matched"
@@ -91,9 +96,8 @@ class WorkspaceDialog:
                 for column, value in enumerate(values):
                     cell = QtWidgets.QTableWidgetItem(value)
                     cell.setData(QtCore.Qt.UserRole, placement.id)
-                    if column >= 5:
-                        cell.setFlags(cell.flags() & ~QtCore.Qt.ItemIsEditable)
-                    if column == 6 and placement.id in self.match_results:
+                    cell.setFlags(cell.flags() & ~QtCore.Qt.ItemIsEditable)
+                    if column == 5 and placement.id in self.match_results:
                         cell.setForeground(
                             QtCore.Qt.darkGreen
                             if self.match_results[placement.id]
@@ -114,8 +118,10 @@ class WorkspaceDialog:
             text, state = report.errors[0], "error"
         elif report.warnings:
             text, state = report.warnings[0], "warning"
+        elif not self.editor.staged.workspaces:
+            text, state = "Create your first layout to get started", "saved"
         elif self.editor.is_dirty:
-            text, state = "Unsaved workspace changes", "dirty"
+            text, state = "Unsaved layout changes", "dirty"
         else:
             text, state = "All changes saved automatically", "saved"
         self.status.setText(text)
@@ -156,6 +162,7 @@ class WorkspaceDialog:
         self.autosave()
 
     def autosave(self, success_text: str = "Saved automatically") -> bool:
+        self.editor.rebase_onto(self.ctx.settings)
         store = getattr(self.ctx, "config_store", None)
         outcome = self.editor.autosave(
             getattr(store, "save", None),
@@ -204,16 +211,16 @@ def _build(ctx) -> WorkspaceDialog:
 
     window = QtWidgets.QDialog()
     window.setObjectName("workspaceEditor")
-    window.setWindowTitle("Windows Rectangle — Workspaces")
-    window.setMinimumSize(940, 620)
-    window.resize(1040, 700)
+    window.setWindowTitle("Windows Rectangle — Layouts")
+    window.setMinimumSize(960, 640)
+    window.resize(1180, 780)
     root = QtWidgets.QVBoxLayout(window)
 
-    title = QtWidgets.QLabel("Workspaces")
+    title = QtWidgets.QLabel("Custom Layouts")
     title.setObjectName("workspaceTitle")
     subtitle = QtWidgets.QLabel(
-        "Capture open windows, start from a template, or add applications by name. "
-        "Drag cards to arrange them, then restore the setup with one shortcut."
+        "Launch and position any mix of apps or named accounts with one shortcut. "
+        "Match each window by app and title, then drag it to the exact place you want."
     )
     subtitle.setWordWrap(True)
     root.addWidget(title)
@@ -225,16 +232,16 @@ def _build(ctx) -> WorkspaceDialog:
     left_layout = QtWidgets.QVBoxLayout(left)
     workspace_list = QtWidgets.QListWidget()
     workspace_list.setObjectName("workspaceList")
-    workspace_list.setAccessibleName("Saved workspaces")
+    workspace_list.setAccessibleName("Saved layouts")
     left_layout.addWidget(workspace_list, 1)
-    template = QtWidgets.QPushButton("Start from template…")
-    template.setAccessibleName("Create a workspace from a template")
-    create = QtWidgets.QPushButton("New empty workspace")
-    create.setAccessibleName("Create an empty workspace")
-    capture = QtWidgets.QPushButton("Capture current windows…")
-    capture.setAccessibleName("Capture current windows as a workspace")
-    duplicate = QtWidgets.QPushButton("Duplicate workspace")
-    remove = QtWidgets.QPushButton("Delete workspace")
+    template = QtWidgets.QPushButton("Use a Template…")
+    template.setAccessibleName("Create a layout from a template")
+    create = QtWidgets.QPushButton("New Layout")
+    create.setAccessibleName("Create an empty layout")
+    capture = QtWidgets.QPushButton("Capture Open Apps…")
+    capture.setAccessibleName("Capture open apps as a layout")
+    duplicate = QtWidgets.QPushButton("Duplicate Layout")
+    remove = QtWidgets.QPushButton("Delete Layout")
     left_layout.addWidget(template)
     left_layout.addWidget(create)
     left_layout.addWidget(capture)
@@ -248,13 +255,14 @@ def _build(ctx) -> WorkspaceDialog:
     name_edit.setObjectName("workspaceName")
     shortcut_edit = QtWidgets.QLineEdit()
     shortcut_edit.setObjectName("workspaceShortcut")
-    shortcut_edit.setPlaceholderText("Optional, for example ctrl+alt+1")
-    form.addRow("Name", name_edit)
-    form.addRow("Shortcut", shortcut_edit)
+    shortcut_edit.setPlaceholderText("For example Ctrl+Alt+1")
+    form.addRow("Layout name", name_edit)
+    form.addRow("Launch shortcut", shortcut_edit)
     detail_layout.addLayout(form)
 
     hint = QtWidgets.QLabel(
-        "Process + title text is the recommended match. Use regex only for titles that change."
+        "Tip: use the account or document name from the window title to distinguish several "
+        "copies of the same app."
     )
     hint.setWordWrap(True)
     detail_layout.addWidget(hint)
@@ -265,49 +273,63 @@ def _build(ctx) -> WorkspaceDialog:
     detail_layout.addWidget(canvas)
     placements = QtWidgets.QTableWidget()
     placements.setObjectName("workspacePlacements")
-    placements.setAccessibleName("Window matching and placement rules")
-    placements.setToolTip("Double-click Position to choose a preset")
-    placements.setColumnCount(7)
+    placements.setAccessibleName("Apps in this layout")
+    placements.setToolTip("Select an app to edit its matching, launch, display, or position")
+    placements.setColumnCount(6)
     placements.setHorizontalHeaderLabels(
         [
-            "Window",
-            "Process",
-            "Title contains",
-            "Title regex",
-            "Monitor",
+            "App or account",
+            "Window match",
+            "Launch",
+            "Display",
             "Position",
-            "Match status",
+            "Status",
         ]
     )
-    placements.horizontalHeader().setStretchLastSection(True)
+    header = placements.horizontalHeader()
+    header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+    header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+    header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
+    header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
+    header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
+    header.setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeToContents)
     placements.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     detail_layout.addWidget(placements, 1)
-    tools = QtWidgets.QHBoxLayout()
-    add_rule = QtWidgets.QPushButton("Add application…")
-    remove_rule = QtWidgets.QPushButton("Remove selected rule")
+    edit_tools = QtWidgets.QHBoxLayout()
+    add_rule = QtWidgets.QPushButton("Add App…")
+    edit_rule = QtWidgets.QPushButton("Edit App…")
+    remove_rule = QtWidgets.QPushButton("Remove App")
+    choose_position = QtWidgets.QPushButton("Choose Position…")
+    edit_tools.addWidget(add_rule)
+    edit_tools.addWidget(edit_rule)
+    edit_tools.addWidget(remove_rule)
+    edit_tools.addWidget(choose_position)
+    edit_tools.addStretch(1)
+    detail_layout.addLayout(edit_tools)
+
+    actions = QtWidgets.QHBoxLayout()
     record_positions = QtWidgets.QPushButton("Record current positions")
     record_positions.setToolTip(
         "Learn the exact size, position, and monitor of each matching open window"
     )
     test_matches = QtWidgets.QPushButton("Test matches")
-    restore = QtWidgets.QPushButton("Restore now")
-    tools.addWidget(add_rule)
-    tools.addWidget(remove_rule)
-    tools.addStretch(1)
-    tools.addWidget(record_positions)
-    tools.addWidget(test_matches)
-    tools.addWidget(restore)
-    detail_layout.addLayout(tools)
+    restore = QtWidgets.QPushButton("Launch & Arrange")
+    restore.setObjectName("primaryAction")
+    actions.addWidget(record_positions)
+    actions.addWidget(test_matches)
+    actions.addStretch(1)
+    actions.addWidget(restore)
+    detail_layout.addLayout(actions)
 
     splitter.addWidget(left)
     splitter.addWidget(detail)
-    splitter.setSizes([250, 750])
+    splitter.setSizes([230, 950])
     root.addWidget(splitter, 1)
 
     status = QtWidgets.QLabel()
     status.setObjectName("workspaceStatus")
     buttons = QtWidgets.QDialogButtonBox()
-    apply_button = buttons.addButton("Save now", QtWidgets.QDialogButtonBox.ApplyRole)
+    apply_button = buttons.addButton("Save Changes", QtWidgets.QDialogButtonBox.ApplyRole)
     close_button = buttons.addButton("Done", QtWidgets.QDialogButtonBox.AcceptRole)
     footer = QtWidgets.QHBoxLayout()
     footer.addWidget(status, 1)
@@ -329,19 +351,20 @@ def _build(ctx) -> WorkspaceDialog:
     workspace_list.currentItemChanged.connect(lambda *_: controller.load_selected())
     name_edit.editingFinished.connect(controller.edit_workspace_fields)
     shortcut_edit.editingFinished.connect(controller.edit_workspace_fields)
-    placements.itemChanged.connect(controller.edit_placement)
     placements.itemSelectionChanged.connect(lambda: _table_selected(controller))
-    placements.cellDoubleClicked.connect(
-        lambda row, column: _choose_position(controller, row, QtWidgets) if column == 5 else None
-    )
+    placements.cellDoubleClicked.connect(lambda *_: _edit_application(controller, QtWidgets))
     template.clicked.connect(lambda: _create_from_template(controller, QtWidgets))
     create.clicked.connect(lambda: _create_empty(controller, QtWidgets))
     capture.clicked.connect(lambda: _capture(controller, QtWidgets))
     duplicate.clicked.connect(lambda: _duplicate_workspace(controller))
     remove.clicked.connect(lambda: _delete_workspace(controller, QtWidgets))
     add_rule.clicked.connect(lambda: _add_application(controller, QtWidgets))
-    remove_rule.clicked.connect(lambda: _delete_rule(controller))
-    record_positions.clicked.connect(lambda: _record_positions(controller))
+    edit_rule.clicked.connect(lambda: _edit_application(controller, QtWidgets))
+    remove_rule.clicked.connect(lambda: _delete_rule(controller, QtWidgets))
+    choose_position.clicked.connect(
+        lambda: _choose_position(controller, controller.placements.currentRow(), QtWidgets)
+    )
+    record_positions.clicked.connect(lambda: _record_positions(controller, QtWidgets))
     test_matches.clicked.connect(lambda: _test_matches(controller, QtWidgets))
     restore.clicked.connect(lambda: _restore(controller, QtWidgets))
     apply_button.clicked.connect(lambda: controller.commit(False))
@@ -407,7 +430,7 @@ def _create_from_template(controller: WorkspaceDialog, QtWidgets) -> None:
 
 def _duplicate_workspace(controller: WorkspaceDialog) -> None:
     if not controller.selected_id:
-        controller.update_validation("Select a workspace to duplicate")
+        controller.update_validation("Select a layout to duplicate")
         return
     workspace = controller.editor.duplicate(controller.selected_id)
     controller.selected_id = workspace.id
@@ -422,8 +445,8 @@ def _close(controller: WorkspaceDialog, QtWidgets) -> None:
         return
     choice = QtWidgets.QMessageBox.warning(
         controller.window,
-        "Unsaved workspace changes",
-        "Save your workspace changes before closing?",
+        "Unsaved layout changes",
+        "Save your layout changes before closing?",
         QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel,
         QtWidgets.QMessageBox.Save,
     )
@@ -435,9 +458,7 @@ def _close(controller: WorkspaceDialog, QtWidgets) -> None:
 
 
 def _create_empty(controller: WorkspaceDialog, QtWidgets) -> None:
-    name, accepted = QtWidgets.QInputDialog.getText(
-        controller.window, "New Workspace", "Workspace name:"
-    )
+    name, accepted = QtWidgets.QInputDialog.getText(controller.window, "New Layout", "Layout name:")
     if not accepted or not name.strip():
         return
     try:
@@ -452,26 +473,117 @@ def _create_empty(controller: WorkspaceDialog, QtWidgets) -> None:
 
 def _add_application(controller: WorkspaceDialog, QtWidgets) -> None:
     if not controller.selected_id:
-        controller.update_validation("Create or select a workspace first")
+        controller.update_validation("Create or select a layout first")
         return
+    values = _application_rule_dialog(controller, QtWidgets)
+    if values is None:
+        return
+    try:
+        controller.editor.add_placement(controller.selected_id, **values)
+    except ValueError as exc:
+        controller.update_validation(str(exc))
+        return
+    controller.load_selected()
+    controller.autosave("App saved to layout")
+
+
+def _edit_application(controller: WorkspaceDialog, QtWidgets) -> None:
+    row = controller.placements.currentRow()
+    if row < 0 or not controller.selected_id:
+        controller.update_validation("Select an app to edit")
+        return
+    item = controller.placements.item(row, 0)
+    if item is None:
+        return
+    workspace = controller.editor.get(controller.selected_id)
+    placement_id = str(item.data(0x0100))
+    placement = next(entry for entry in workspace.placements if entry.id == placement_id)
+    values = _application_rule_dialog(controller, QtWidgets, placement)
+    if values is None:
+        return
+    preset_id = values.pop("preset_id")
+    try:
+        controller.editor.update_placement(
+            controller.selected_id,
+            placement_id,
+            **values,
+        )
+        if preset_id:
+            controller.editor.set_placement_preset(controller.selected_id, placement_id, preset_id)
+    except ValueError as exc:
+        controller.update_validation(str(exc))
+        return
+    controller.load_selected()
+    controller.autosave("App changes saved")
+
+
+def _application_rule_dialog(controller: WorkspaceDialog, QtWidgets, placement=None):
     dialog = QtWidgets.QDialog(controller.window)
-    dialog.setWindowTitle("Add application rule")
+    dialog.setWindowTitle("Edit App" if placement is not None else "Add App")
+    dialog.setMinimumWidth(560)
     form = QtWidgets.QFormLayout(dialog)
     name = QtWidgets.QLineEdit()
+    name.setAccessibleName("App or account name")
     process = QtWidgets.QLineEdit()
     process.setPlaceholderText("For example RuneLite.exe or chrome.exe")
+    process.setAccessibleName("Application process")
     title = QtWidgets.QLineEdit()
-    title.setPlaceholderText("Optional account, document, or window name")
+    title.setPlaceholderText("For example Alice, Outlook, or ChatGPT")
+    title.setAccessibleName("Window title contains")
+    title_regex = QtWidgets.QLineEdit()
+    title_regex.setPlaceholderText("Optional advanced regular expression")
+    launch = QtWidgets.QLineEdit()
+    launch.setPlaceholderText("Optional executable path and arguments")
+    launch.setAccessibleName("Launch command")
+    browse = QtWidgets.QPushButton("Browse…")
+
+    def browse_executable() -> None:
+        path, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            dialog,
+            "Choose Application",
+            "",
+            "Applications (*.exe);;All Files (*)",
+        )
+        if path:
+            launch.setText(f'"{path}"')
+
+    browse.clicked.connect(browse_executable)
+    launch_row = QtWidgets.QWidget()
+    launch_layout = QtWidgets.QHBoxLayout(launch_row)
+    launch_layout.setContentsMargins(0, 0, 0, 0)
+    launch_layout.addWidget(launch, 1)
+    launch_layout.addWidget(browse)
     monitor = QtWidgets.QSpinBox()
     monitor.setRange(1, 32)
     position = QtWidgets.QComboBox()
+    if placement is not None and all(placement.rect != preset.rect for preset in POSITION_PRESETS):
+        position.addItem("Custom — keep canvas position", "")
     for preset in POSITION_PRESETS:
         position.addItem(preset.label, preset.id)
-    form.addRow("Rule name", name)
-    form.addRow("Application process", process)
+    if placement is not None:
+        name.setText(placement.name)
+        process.setText(placement.matcher.process_name)
+        title.setText(placement.matcher.title_contains)
+        title_regex.setText(placement.matcher.title_regex)
+        launch.setText(placement.launch_command)
+        monitor.setValue(placement.monitor_index + 1)
+        for preset in POSITION_PRESETS:
+            if placement.rect == preset.rect:
+                position.setCurrentIndex(position.findData(preset.id))
+                break
+    form.addRow("Name", name)
+    form.addRow("Process", process)
     form.addRow("Window title contains", title)
-    form.addRow("Monitor", monitor)
-    form.addRow("Position", position)
+    form.addRow("Title regex", title_regex)
+    form.addRow("Launch command", launch_row)
+    form.addRow("Display", monitor)
+    form.addRow("Starting position", position)
+    help_text = QtWidgets.QLabel(
+        "For several copies of one app, give each rule a different window-title match. "
+        "Add a launch command when this layout should open the app if it is missing."
+    )
+    help_text.setWordWrap(True)
+    form.addRow(help_text)
     buttons = QtWidgets.QDialogButtonBox(
         QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel
     )
@@ -480,21 +592,16 @@ def _add_application(controller: WorkspaceDialog, QtWidgets) -> None:
     form.addRow(buttons)
     name.setFocus()
     if dialog.exec() != QtWidgets.QDialog.Accepted:
-        return
-    try:
-        controller.editor.add_placement(
-            controller.selected_id,
-            name=name.text(),
-            process_name=process.text(),
-            title_contains=title.text(),
-            monitor_index=monitor.value() - 1,
-            preset_id=str(position.currentData()),
-        )
-    except ValueError as exc:
-        controller.update_validation(str(exc))
-        return
-    controller.load_selected()
-    controller.autosave("Application rule saved automatically")
+        return None
+    return {
+        "name": name.text(),
+        "process_name": process.text(),
+        "title_contains": title.text(),
+        "title_regex": title_regex.text(),
+        "launch_command": launch.text(),
+        "monitor_index": monitor.value() - 1,
+        "preset_id": str(position.currentData()),
+    }
 
 
 def _choose_position(controller: WorkspaceDialog, row: int, QtWidgets) -> None:
@@ -519,7 +626,7 @@ def _choose_position(controller: WorkspaceDialog, row: int, QtWidgets) -> None:
 
 def _capture(controller: WorkspaceDialog, QtWidgets) -> None:
     name, accepted = QtWidgets.QInputDialog.getText(
-        controller.window, "Capture Workspace", "Workspace name:"
+        controller.window, "Capture Open Apps", "Layout name:"
     )
     if not accepted or not name.strip():
         return
@@ -541,7 +648,7 @@ def _delete_workspace(controller: WorkspaceDialog, QtWidgets) -> None:
     workspace = controller.editor.get(controller.selected_id)
     reply = QtWidgets.QMessageBox.question(
         controller.window,
-        "Delete workspace",
+        "Delete layout",
         f"Delete ‘{workspace.name}’?",
         QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
         QtWidgets.QMessageBox.No,
@@ -553,12 +660,21 @@ def _delete_workspace(controller: WorkspaceDialog, QtWidgets) -> None:
         controller.autosave("Workspace deleted")
 
 
-def _delete_rule(controller: WorkspaceDialog) -> None:
+def _delete_rule(controller: WorkspaceDialog, QtWidgets) -> None:
     row = controller.placements.currentRow()
     if row < 0 or not controller.selected_id:
         return
     item = controller.placements.item(row, 0)
     if item is None:
+        return
+    reply = QtWidgets.QMessageBox.question(
+        controller.window,
+        "Remove app",
+        f"Remove ‘{item.text()}’ from this layout?",
+        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        QtWidgets.QMessageBox.No,
+    )
+    if reply != QtWidgets.QMessageBox.Yes:
         return
     controller.editor.delete_placement(controller.selected_id, str(item.data(0x0100)))
     controller.load_selected()
@@ -578,9 +694,18 @@ def _test_matches(controller: WorkspaceDialog, QtWidgets) -> None:
     controller.status.setProperty("status", "saved" if not missing else "warning")
 
 
-def _record_positions(controller: WorkspaceDialog) -> None:
+def _record_positions(controller: WorkspaceDialog, QtWidgets) -> None:
     if not controller.selected_id:
-        controller.update_validation("Select a workspace first")
+        controller.update_validation("Select a layout first")
+        return
+    reply = QtWidgets.QMessageBox.question(
+        controller.window,
+        "Record current positions",
+        "Replace the saved positions for every matching open app?",
+        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        QtWidgets.QMessageBox.No,
+    )
+    if reply != QtWidgets.QMessageBox.Yes:
         return
     result = controller.editor.record_current_positions(
         cast(WorkspaceWindows, controller.ctx.windows), controller.selected_id
@@ -597,16 +722,19 @@ def _record_positions(controller: WorkspaceDialog) -> None:
 def _restore(controller: WorkspaceDialog, QtWidgets) -> None:
     if not controller.selected_id:
         return
-    workspace = controller.editor.get(controller.selected_id)
-    result = apply_workspace(cast(WorkspaceWindows, controller.ctx.windows), workspace)
-    moved = result.moved
-    missing = sum(item.status == "not_found" for item in result.placements)
-    blocked = sum(item.status == "blocked" for item in result.placements)
-    QtWidgets.QMessageBox.information(
-        controller.window,
-        "Workspace restored",
-        f"{moved} moved · {missing} not found · {blocked} blocked.",
-    )
+    if controller.editor.is_dirty and not controller.autosave("Layout saved"):
+        return
+    try:
+        queued = controller.ctx.queue_workspace(controller.selected_id)
+    except Exception as exc:  # noqa: BLE001
+        controller.update_validation(f"Could not launch layout: {exc}")
+        return
+    if queued:
+        controller.status.setText("Launching apps and waiting for their windows…")
+        controller.status.setProperty("status", "dirty")
+    else:
+        controller.status.setText("This layout is already being launched")
+        controller.status.setProperty("status", "warning")
 
 
 def _apply_style(window) -> None:
@@ -625,5 +753,11 @@ def _apply_style(window) -> None:
         QLabel#workspaceStatus[status="saved"] { color: #1f6f43; }
         QLabel#workspaceStatus[status="dirty"] { color: #8a5a00; }
         QPushButton { min-height: 30px; padding: 4px 10px; }
+        QPushButton#primaryAction {
+            background: #175cd3; color: white; border: 1px solid #175cd3;
+            border-radius: 6px; font-weight: 600; padding: 5px 16px;
+        }
+        QPushButton#primaryAction:hover { background: #1849a9; }
+        QPushButton#primaryAction:pressed { background: #153f82; }
         """
     )

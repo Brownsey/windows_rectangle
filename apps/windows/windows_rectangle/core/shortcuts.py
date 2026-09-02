@@ -54,6 +54,8 @@ _KEY_ALIASES = {
     "equals": "=",
     "equal": "=",
     "spacebar": "space",
+    "pgup": "pageup",
+    "pgdown": "pagedown",
 }
 
 
@@ -135,11 +137,15 @@ RESERVED_COMBOS: frozenset[str] = frozenset(
         "win+right",
         "win+up",
         "win+down",
+        "ctrl+win+left",
+        "ctrl+win+right",
         "alt+f4",
         "alt+tab",
         "ctrl+alt+delete",
     }
 )
+
+UNREGISTERABLE_COMBOS: frozenset[str] = frozenset({"ctrl+alt+delete"})
 
 
 def is_reserved(combo: str) -> bool:
@@ -149,3 +155,12 @@ def is_reserved(combo: str) -> bool:
     except ShortcutParseError:
         return False
     return canon in RESERVED_COMBOS
+
+
+def is_unregisterable(combo: str) -> bool:
+    """Return whether Windows blocks normal apps from registering the combo."""
+    try:
+        canon = normalise(combo)
+    except ShortcutParseError:
+        return False
+    return canon in UNREGISTERABLE_COMBOS

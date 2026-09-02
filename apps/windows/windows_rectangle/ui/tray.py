@@ -81,7 +81,7 @@ def install(
     prefs.triggered.connect(lambda: (on_open_preferences or _noop)())
     menu.addAction(prefs)
 
-    workspaces_menu = menu.addMenu("Workspaces")
+    workspaces_menu = menu.addMenu("Layouts")
     _populate_workspace_menu(workspaces_menu, ctx, tray)
 
     cheat = QtGui.QAction("Cheat sheet…", menu)
@@ -115,6 +115,7 @@ def install(
     menu.addAction(quit_action)
 
     tray.setContextMenu(menu)
+    tray.activated.connect(lambda reason: _handle_activation(reason, on_open_preferences or _noop))
     tray.show()
 
     tc.icon = tray
@@ -175,15 +176,15 @@ def _populate_workspace_menu(menu, ctx: AppContext, tray) -> None:
     from PySide6 import QtGui
 
     menu.clear()
-    capture = QtGui.QAction("Capture current workspace…", menu)
+    capture = QtGui.QAction("Capture current layout…", menu)
     capture.triggered.connect(lambda: _capture_workspace(ctx, tray))
     menu.addAction(capture)
-    manage = QtGui.QAction("Manage workspaces…", menu)
+    manage = QtGui.QAction("Manage layouts…", menu)
     manage.triggered.connect(lambda: _manage_workspaces(ctx, tray))
     menu.addAction(manage)
     menu.addSeparator()
     if not ctx.settings.workspaces:
-        empty = QtGui.QAction("No saved workspaces", menu)
+        empty = QtGui.QAction("No saved layouts", menu)
         empty.setEnabled(False)
         menu.addAction(empty)
         return
@@ -206,19 +207,19 @@ def _capture_workspace(ctx: AppContext, tray) -> None:
 
     name, accepted = QtWidgets.QInputDialog.getText(
         None,
-        "Capture Workspace",
-        "Workspace name:",
+        "Capture Layout",
+        "Layout name:",
     )
     if not accepted or not name.strip():
         return
     try:
         workspace = ctx.capture_named_workspace(name.strip())
     except Exception as exc:  # noqa: BLE001
-        _log.exception("workspace capture failed")
-        tray.showMessage("Workspace capture failed", str(exc))
+        _log.exception("layout capture failed")
+        tray.showMessage("Layout capture failed", str(exc))
         return
     tray.showMessage(
-        "Workspace saved",
+        "Layout saved",
         f"{workspace.name}: {len(workspace.placements)} windows captured.",
     )
 
@@ -229,21 +230,24 @@ def _manage_workspaces(ctx: AppContext, tray) -> None:
 
         show(ctx)
     except Exception as exc:  # noqa: BLE001
-        _log.exception("workspace editor failed")
-        tray.showMessage("Could not open workspace editor", str(exc))
+        _log.exception("layout editor failed")
+        tray.showMessage("Could not open layout editor", str(exc))
 
 
 def _apply_named_workspace(ctx: AppContext, workspace_id: str, tray) -> None:
     try:
-        result = ctx.apply_named_workspace(workspace_id)
+        queued = ctx.queue_workspace(workspace_id)
     except Exception as exc:  # noqa: BLE001
-        _log.exception("workspace restore failed")
-        tray.showMessage("Workspace restore failed", str(exc))
+        _log.exception("layout restore failed")
+        tray.showMessage("Layout restore failed", str(exc))
         return
-    tray.showMessage("Workspace restored", _workspace_result_text(result))
+    if queued:
+        tray.showMessage("Launching & arranging", "Starting configured apps and finding windows…")
+    else:
+        tray.showMessage("Layout already running", "Wait for the current arrangement to finish.")
 
 
-def _workspace_result_text(result) -> str:
+def workspace_result_text(result) -> str:
     counts: dict[str, int] = {}
     for placement in result.placements:
         counts[placement.status] = counts.get(placement.status, 0) + 1
@@ -251,9 +255,10 @@ def _workspace_result_text(result) -> str:
         ("moved", "moved"),
         ("not_found", "not found"),
         ("blocked", "blocked"),
+        ("launch_failed", "failed to launch"),
     )
     summary = [f"{counts[key]} {label}" for key, label in labels if counts.get(key)]
-    return " · ".join(summary) if summary else "No workspace windows were configured."
+    return " · ".join(summary) if summary else "No layout windows were configured."
 
 
 def _build_icon(QtGui):
@@ -263,6 +268,11 @@ def _build_icon(QtGui):
     one less file to keep in sync with the spec. The four panes hint at
     the halves/quarters tiling that's the app's whole purpose.
     """
+    from .logo import build_tray_qicon, find_tray_logo_file
+
+    if find_tray_logo_file() is not None:
+        return build_tray_qicon(QtGui)
+
     # Render at 64 then let Qt scale down per-DPI — sharper than rendering
     # straight to 16×16 on hi-DPI displays.
     pixmap = QtGui.QPixmap(64, 64)
@@ -282,6 +292,16 @@ def _build_icon(QtGui):
     finally:
         painter.end()
     return QtGui.QIcon(pixmap)
+
+
+def _handle_activation(reason, on_open_preferences: Callable[[], None]) -> None:
+    from PySide6 import QtWidgets
+
+    if reason in (
+        QtWidgets.QSystemTrayIcon.ActivationReason.Trigger,
+        QtWidgets.QSystemTrayIcon.ActivationReason.DoubleClick,
+    ):
+        on_open_preferences()
 
 
 def _toggle_pause(ctx: AppContext, checked: bool) -> None:

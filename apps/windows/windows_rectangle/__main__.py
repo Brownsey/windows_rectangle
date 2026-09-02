@@ -12,8 +12,10 @@ import argparse
 import json
 import logging
 import signal
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 from . import __version__
 from .app import SecondInstanceError, bind_win32
@@ -24,6 +26,7 @@ _log = logging.getLogger("windows_rectangle")
 _EPILOG = """\
 examples:
   windows_rectangle                        run the tray app
+  windows_rectangle --open-preferences     run the tray app and open Preferences
   windows_rectangle --headless             run without Qt (hotkeys only)
   windows_rectangle --check-install        verify the install
   windows_rectangle --list-shortcuts       print current shortcuts
@@ -51,6 +54,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--headless",
         action="store_true",
         help="run without Qt - hotkeys + dispatcher only, no tray UI",
+    )
+    runtime.add_argument(
+        "--open-preferences",
+        action="store_true",
+        help="open Preferences after starting the tray app",
+    )
+    runtime.add_argument(
+        "--tray",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     runtime.add_argument(
         "--command-line",
@@ -154,6 +167,49 @@ def _setup_logging(level_name: str) -> None:
     install_file_handler(level=level)
 
 
+def _default_command_line() -> str:
+    """Return the source or packaged command used by Launch at login."""
+    if getattr(sys, "frozen", False):
+        return subprocess.list2cmdline([sys.executable, "--tray"])
+    pythonw = str(Path(sys.executable).with_name("pythonw.exe"))
+    source_root = str(Path(__file__).resolve().parents[1])
+    bootstrap = (
+        "import runpy,sys;"
+        f"sys.path.insert(0,{source_root!r});"
+        "sys.argv=['windows_rectangle','--tray'];"
+        "runpy.run_module('windows_rectangle',run_name='__main__')"
+    )
+    return subprocess.list2cmdline([pythonw, "-c", bootstrap])
+
+
+def _show_tray_message(tray_controller, title: str, body: str) -> None:
+    icon = getattr(tray_controller, "icon", None)
+    if icon is not None:
+        icon.showMessage(title, body)
+
+
+def _activate_existing_preferences() -> bool:
+    """Show the resident instance's hidden Preferences window on Windows."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    window = user32.FindWindowW(None, "Windows Rectangle")
+    if not window:
+        return False
+    user32.ShowWindow(window, 9)  # SW_RESTORE also reveals a hidden Qt window.
+    user32.SetForegroundWindow(window)
+    return True
+
+
 def _run_headless(ctx) -> int:
     """Stdlib-only main loop: drain the ActionBus on a ~60 Hz schedule.
 
@@ -185,35 +241,69 @@ def _run_headless(ctx) -> int:
     return 0
 
 
-def _run_qt(ctx) -> int:
+def _run_qt(ctx, *, open_preferences: bool = False) -> int:
     """Qt loop with a 16ms QTimer that drains the ActionBus + drag preview.
 
     Single Qt event loop, single drain timer (brief §5 #8 "competing event
     loops"). The mouse hook + hotkey pump each have their own daemon
     Win32 message loops; both marshal back here via ActionBus/LatestValue.
     """
-    from PySide6 import QtCore, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets
 
+    from .ui.logo import build_tray_qicon
     from .ui.overlay import OverlayController
     from .ui.overlay import hide as overlay_hide
     from .ui.overlay import install as install_overlay
     from .ui.overlay import show_for as overlay_show_for
-    from .ui.preferences import open_prefs_window
-    from .ui.prefs_dialog import build_dialog as build_prefs_dialog
+    from .ui.preferences import show as show_preferences
     from .ui.tray import install as install_tray
+    from .ui.tray import workspace_result_text
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    app.setWindowIcon(build_tray_qicon(QtGui))
+    app.setQuitOnLastWindowClosed(False)
     # The tray is the visible-anywhere control surface; on quit it calls
     # QApplication.quit() which unwinds the event loop.
 
     def _open_prefs() -> None:
         try:
-            open_prefs_window(ctx, dialog_factory=build_prefs_dialog)
+            show_preferences(ctx)
         except Exception:  # noqa: BLE001
             _log.exception("preferences dialog failed")
 
     tray = install_tray(ctx, on_open_preferences=_open_prefs)
     _log.info("tray installed")
+    if open_preferences:
+        QtCore.QTimer.singleShot(0, _open_prefs)
+    elif hasattr(ctx, "settings"):
+        # Create the native window handle without painting it. A later
+        # `--open-preferences` process can then find and reveal this window.
+        try:
+            controller = show_preferences(ctx)
+            controller.window.hide()
+        except Exception:  # noqa: BLE001
+            _log.exception("could not prepare hidden preferences window")
+
+    def _on_workspace_result(workspace_id, result, error: str) -> None:
+        summary = ""
+        if error:
+            _show_tray_message(tray, "Layout failed", error)
+            summary = f"Layout failed: {error}"
+        elif result is not None:
+            summary = workspace_result_text(result)
+            _show_tray_message(tray, "Layout ready", summary)
+        dialog = getattr(app, "_windows_rectangle_workspaces", None)
+        if dialog is None or getattr(dialog, "selected_id", None) != workspace_id:
+            return
+        dialog.status.setText(summary)
+        has_problem = bool(error) or (
+            result is not None and any(item.status != "moved" for item in result.placements)
+        )
+        state = "error" if error else "warning" if has_problem else "saved"
+        dialog.status.setProperty("status", state)
+        dialog.status.style().unpolish(dialog.status)
+        dialog.status.style().polish(dialog.status)
+
     # Snap-preview overlay (frameless translucent click-through, brief §3).
     overlay: OverlayController | None = None
     try:
@@ -241,6 +331,7 @@ def _run_qt(ctx) -> int:
 
     def _tick() -> None:
         ctx.drain_actions()
+        ctx.drain_workspace_results(_on_workspace_result)
         if overlay is not None:
             ctx.drain_drag_preview(on_show=_on_show, on_hide=_on_hide)
         ctx.maintenance()  # rate-limited cycle/history prune (brief §5 #9)
@@ -359,14 +450,19 @@ def _run_informational(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     _setup_logging(args.log_level)
+    packaged_default = bool(getattr(sys, "frozen", False) and not args.tray and not args.headless)
+    wants_preferences = bool(args.open_preferences or packaged_default)
 
     info_rc = _run_informational(args)
     if info_rc != -1:
         return info_rc
 
     try:
-        ctx = bind_win32(command_line=args.command_line)
+        ctx = bind_win32(command_line=args.command_line or _default_command_line())
     except SecondInstanceError:
+        if wants_preferences and _activate_existing_preferences():
+            _log.info("activated Preferences in the running instance")
+            return 0
         _log.warning("another instance is already running — exiting")
         return 0
     except RuntimeError as e:
@@ -378,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.headless:
             return _run_headless(ctx)
         try:
-            return _run_qt(ctx)
+            return _run_qt(ctx, open_preferences=wants_preferences)
         except ImportError:
             _log.warning("PySide6 not installed — falling back to --headless")
             return _run_headless(ctx)

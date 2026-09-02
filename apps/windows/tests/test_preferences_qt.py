@@ -130,8 +130,15 @@ def test_qt_preferences_window_has_expected_structure(qt_app, qt_modules):
 
     tabs = window.findChild(qt_widgets.QTabWidget, "preferencesTabs")
     assert tabs is not None
-    assert tabs.count() == 2
-    assert [tabs.tabText(i) for i in range(tabs.count())] == ["Shortcuts", "General"]
+    assert tabs.count() == 3
+    assert [tabs.tabText(i) for i in range(tabs.count())] == [
+        "Shortcuts",
+        "Layouts",
+        "General",
+    ]
+    layout_button = window.findChild(qt_widgets.QPushButton, "openLayoutsButton")
+    assert layout_button is not None
+    assert layout_button.text() == "Open Layout Designer"
 
     search = window.findChild(qt_widgets.QLineEdit, "shortcutSearch")
     assert search is not None
@@ -147,6 +154,21 @@ def test_qt_preferences_window_has_expected_structure(qt_app, qt_modules):
         assert button.minimumHeight() >= 34
 
 
+def test_qt_preferences_exposes_every_supported_action(qt_app, qt_modules):
+    controller = _build_controller(qt_app, qt_modules)
+    assert set(controller.shortcut_widgets) == set(Action)
+
+
+def test_qt_preferences_preserves_saved_workspaces(qt_app, qt_modules):
+    settings = Settings(workspaces=("saved-workspace",), active_workspace_id="workspace-1")
+    controller = _build_controller(qt_app, qt_modules, SpyContext(settings))
+
+    collected = controller.collect_settings()
+
+    assert collected.workspaces == ("saved-workspace",)
+    assert collected.active_workspace_id == "workspace-1"
+
+
 def test_qt_preferences_window_uses_custom_logo(qt_app, qt_modules, tmp_path, monkeypatch):
     _qt_core, qt_gui, qt_widgets, _qt_test = qt_modules
     logo_dir = tmp_path / "logo"
@@ -160,12 +182,14 @@ def test_qt_preferences_window_uses_custom_logo(qt_app, qt_modules, tmp_path, mo
     logo_panel = controller.window.findChild(qt_widgets.QFrame, "brandLogoPanel")
     assert logo_panel is not None
     assert logo_panel.accessibleName() == "Application logo"
-    assert logo_panel.width() >= 196
+    assert logo_panel.width() == 56
     assert logo_panel.height() >= 56
 
     logo_label = controller.window.findChild(qt_widgets.QLabel, "brandLogo")
     assert logo_label is not None
     assert logo_label.accessibleName() == "Application logo image"
+    assert logo_label.size() == logo_panel.size()
+    assert logo_panel.layout().contentsMargins().left() == 0
     assert logo_label.pixmap() is not None
     assert not logo_label.pixmap().isNull()
 
@@ -313,7 +337,7 @@ def test_qt_save_applies_persists_rebinds_and_hides_window(qt_app, qt_modules):
     assert len(config.saved) == 1
     assert config.saved[0].gap == 18
     assert ctx.applied[0].gap == 18
-    assert ctx.rebind_calls == 1
+    assert ctx.rebind_calls == 0
     assert controller.dirty is False
     assert not controller.window.isVisible()
 

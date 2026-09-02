@@ -7,7 +7,8 @@
       1. Verifies the chosen Python interpreter exists.
       2. Auto-installs PySide6 + pywin32 if either is missing (skipped
          with -NoInstall).
-      3. Runs `python -m windows_rectangle` so the tray icon appears.
+      3. Runs the source app and opens Preferences. The app remains in
+         the tray after Preferences closes.
 
     For full setup (editable install + dev tools like pytest/ruff/mypy)
     use `pip install -e ".[dev,win]"` directly. This script is the
@@ -45,6 +46,9 @@ function Step($msg) {
 }
 
 Step "Resolving Python"
+if (Test-Path -LiteralPath $Python) {
+    $Python = (Resolve-Path -LiteralPath $Python).Path
+}
 try {
     $version = & $Python --version 2>&1
 } catch {
@@ -73,7 +77,18 @@ if (-not $NoInstall) {
 
 Step "Launching Windows Rectangle"
 $args = @("-m", "windows_rectangle", "--log-level", $LogLevel)
-if ($Headless) { $args += "--headless" }
+if ($Headless) {
+    $args += "--headless"
+} else {
+    $args += "--open-preferences"
+}
 Write-Host "    $Python $($args -join ' ')"
-& $Python @args
-exit $LASTEXITCODE
+$sourceRoot = Join-Path $here "apps\windows"
+Push-Location $sourceRoot
+try {
+    & $Python @args
+    $exitCode = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+exit $exitCode

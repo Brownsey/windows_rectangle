@@ -158,6 +158,51 @@ def test_create_manual_application_rule_and_change_position():
     assert controller.get(created.id).placements[0].rect == NormalizedRect(5000, 0, 10000, 10000)
 
 
+def test_manual_application_rule_keeps_launch_command():
+    controller = WorkspaceEditorController(Settings())
+    created = controller.create("RuneScape accounts")
+
+    placement = controller.add_placement(
+        created.id,
+        name="Alice",
+        process_name="runelite.exe",
+        title_contains="Alice",
+        launch_command=r"C:\RuneLite\RuneLite.exe --profile Alice",
+    )
+
+    assert placement.launch_command == r"C:\RuneLite\RuneLite.exe --profile Alice"
+
+
+def test_unchanged_application_edit_is_allowed_before_position_change():
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace(),)))
+    original = controller.get("office").placements[0]
+
+    controller.update_placement(
+        "office",
+        original.id,
+        name=original.name,
+        process_name=original.matcher.process_name,
+        title_contains=original.matcher.title_contains,
+        title_regex=original.matcher.title_regex,
+        monitor_index=original.monitor_index,
+    )
+    controller.set_placement_preset("office", original.id, "right_half")
+
+    assert controller.get("office").placements[0].rect == NormalizedRect(5000, 0, 10000, 10000)
+
+
+def test_layout_edits_rebase_onto_newer_general_settings():
+    controller = WorkspaceEditorController(Settings(gap=4, workspaces=(workspace(),)))
+    controller.rename("office", "Updated office")
+    captured = Workspace("captured", "Captured from tray", ())
+
+    controller.rebase_onto(Settings(gap=24, workspaces=(workspace(), captured)))
+
+    assert controller.staged.gap == 24
+    assert controller.get("office").name == "Updated office"
+    assert controller.get("captured").name == "Captured from tray"
+
+
 def test_manual_rule_requires_a_match_signal():
     controller = WorkspaceEditorController(Settings())
     created = controller.create("Empty")

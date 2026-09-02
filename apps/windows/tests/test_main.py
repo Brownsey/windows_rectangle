@@ -11,6 +11,7 @@ from windows_rectangle.__main__ import _parse_args
 def test_parse_args_defaults():
     args = _parse_args([])
     assert args.headless is False
+    assert args.tray is False
     assert args.command_line is None
     assert args.log_level == "INFO"
 
@@ -20,9 +21,152 @@ def test_parse_args_headless_flag():
     assert args.headless is True
 
 
+def test_main_open_preferences_starts_qt_with_preferences(monkeypatch):
+    import windows_rectangle.__main__ as m
+
+    class FakeCtx:
+        def shutdown(self):
+            pass
+
+    ctx = FakeCtx()
+    opened = []
+    monkeypatch.setattr(m, "bind_win32", lambda **_: ctx)
+    monkeypatch.setattr(
+        m,
+        "_run_qt",
+        lambda bound_ctx, *, open_preferences=False: (
+            opened.append((bound_ctx, open_preferences)) or 0
+        ),
+    )
+
+    assert m.main(["--open-preferences"]) == 0
+    assert opened == [(ctx, True)]
+
+
+def test_open_preferences_activates_already_running_instance(monkeypatch):
+    import windows_rectangle.__main__ as m
+    from windows_rectangle.app import SecondInstanceError
+
+    activated = []
+
+    def already_running(**_):
+        raise SecondInstanceError
+
+    monkeypatch.setattr(m, "bind_win32", already_running)
+    monkeypatch.setattr(m, "_activate_existing_preferences", lambda: activated.append(True) or True)
+
+    assert m.main(["--open-preferences"]) == 0
+    assert activated == [True]
+
+
+def test_qt_tray_keeps_running_after_preferences_close(monkeypatch):
+    import windows_rectangle.__main__ as m
+    import windows_rectangle.ui.overlay as overlay_mod
+    import windows_rectangle.ui.tray as tray_mod
+    from PySide6 import QtCore, QtWidgets
+
+    class FakeCtx:
+        def drain_actions(self):
+            return 0
+
+        def drain_drag_preview(self, **_):
+            return False
+
+        def maintenance(self):
+            return 0
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    app.setQuitOnLastWindowClosed(True)
+    monkeypatch.setattr(tray_mod, "install", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(overlay_mod, "install", lambda: None)
+    QtCore.QTimer.singleShot(0, app.quit)
+
+    assert m._run_qt(FakeCtx()) == 0
+    assert app.quitOnLastWindowClosed() is False
+
+
+def test_parse_args_accepts_tray_launcher_alias():
+    args = _parse_args(["--tray"])
+    assert args.headless is False
+    assert args.tray is True
+
+
 def test_parse_args_command_line():
     args = _parse_args(["--command-line", r"C:\app.exe"])
     assert args.command_line == r"C:\app.exe"
+
+
+def test_default_autostart_command_relaunches_tray(monkeypatch):
+    import windows_rectangle.__main__ as m
+
+    monkeypatch.setattr(m.sys, "executable", r"C:\Python\python.exe")
+    monkeypatch.delattr(m.sys, "frozen", raising=False)
+
+    command = m._default_command_line()
+
+    assert "pythonw.exe" in command
+    assert "run_module" in command
+    assert "--tray" in command
+    assert r"apps\\windows" in command
+
+
+def test_frozen_autostart_command_is_explicitly_tray_only(monkeypatch):
+    import windows_rectangle.__main__ as m
+
+    monkeypatch.setattr(m.sys, "executable", r"C:\Apps\WindowsRectangle.exe")
+    monkeypatch.setattr(m.sys, "frozen", True, raising=False)
+
+    assert m._default_command_line() == r"C:\Apps\WindowsRectangle.exe --tray"
+
+
+def test_bare_frozen_launch_opens_preferences(monkeypatch):
+    import windows_rectangle.__main__ as m
+
+    class FakeCtx:
+        def shutdown(self):
+            pass
+
+    opened = []
+    monkeypatch.setattr(m.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(m, "bind_win32", lambda **_: FakeCtx())
+    monkeypatch.setattr(
+        m,
+        "_run_qt",
+        lambda _ctx, *, open_preferences=False: opened.append(open_preferences) or 0,
+    )
+
+    assert m.main([]) == 0
+    assert opened == [True]
+
+
+def test_bare_frozen_launch_activates_resident_preferences(monkeypatch):
+    import windows_rectangle.__main__ as m
+    from windows_rectangle.app import SecondInstanceError
+
+    activated = []
+
+    def already_running(**_):
+        raise SecondInstanceError
+
+    monkeypatch.setattr(m.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(m, "bind_win32", already_running)
+    monkeypatch.setattr(m, "_activate_existing_preferences", lambda: activated.append(True) or True)
+
+    assert m.main([]) == 0
+    assert activated == [True]
+
+
+def test_workspace_result_message_uses_tray_icon():
+    from types import SimpleNamespace
+
+    import windows_rectangle.__main__ as m
+
+    calls = []
+    icon = SimpleNamespace(showMessage=lambda title, body: calls.append((title, body)))
+
+    m._show_tray_message(SimpleNamespace(icon=icon), "Layout ready", "7 moved")
+
+    assert calls == [("Layout ready", "7 moved")]
 
 
 def test_parse_args_log_level():

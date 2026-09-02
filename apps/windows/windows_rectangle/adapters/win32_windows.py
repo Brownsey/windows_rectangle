@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import ntpath
+import subprocess
 import sys
 from typing import TYPE_CHECKING
 
@@ -190,6 +191,10 @@ class Win32WindowManager:
             err = self._ct.get_last_error()
             _log.info("SetWindowPos failed hwnd=%s err=%s", handle, err)
         return bool(ok)
+
+    def launch(self, command: str) -> None:
+        """Start a user-configured workspace application command."""
+        subprocess.Popen(command, close_fds=True)
 
     def is_window_valid(self, handle: WindowHandle) -> bool:
         return bool(self._user32.IsWindow(self._hwnd(handle)))

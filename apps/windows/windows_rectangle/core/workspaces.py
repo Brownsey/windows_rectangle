@@ -110,6 +110,7 @@ class WorkspacePlacement:
     matcher: WindowMatcher
     rect: NormalizedRect
     monitor_index: int = 0
+    launch_command: str = ""
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -166,20 +167,58 @@ def match_workspace_windows(
     placements: tuple[WorkspacePlacement, ...], windows: list[WindowIdentity]
 ) -> WorkspaceMatches:
     """Match rules one-to-one without applying any geometry."""
-    available = list(windows)
-    matches: list[MatchedWindow] = []
-    unmatched: list[str] = []
+    candidates: list[list[tuple[int, int]]] = []
     for placement in placements:
-        ranked = sorted(
-            enumerate(available),
-            key=lambda item: (-placement.matcher.score(item[1]), item[0]),
+        ranked = [
+            (placement.matcher.score(window), window_index)
+            for window_index, window in enumerate(windows)
+            if placement.matcher.score(window) > 0
+        ]
+        candidates.append(sorted(ranked, key=lambda item: (-item[0], item[1])))
+
+    def priority(placement_index: int) -> tuple[int, int, int, int, int]:
+        matcher = placements[placement_index].matcher
+        constraints = sum(
+            bool(value)
+            for value in (matcher.process_name, matcher.title_contains, matcher.title_regex)
         )
-        if not ranked or placement.matcher.score(ranked[0][1]) == 0:
-            unmatched.append(placement.id)
-            continue
-        index, window = ranked[0]
-        available.pop(index)
-        matches.append(MatchedWindow(placement.id, window.handle))
+        has_title = bool(matcher.title_contains or matcher.title_regex)
+        best_score = candidates[placement_index][0][0] if candidates[placement_index] else 0
+        return (
+            len(candidates[placement_index]),
+            -constraints,
+            -int(has_title),
+            -best_score,
+            placement_index,
+        )
+
+    assigned: dict[int, int] = {}
+    window_owner: dict[int, int] = {}
+
+    def assign(placement_index: int, seen_windows: set[int]) -> bool:
+        for _score, window_index in candidates[placement_index]:
+            if window_index in seen_windows:
+                continue
+            seen_windows.add(window_index)
+            owner = window_owner.get(window_index)
+            if owner is not None and not assign(owner, seen_windows):
+                continue
+            assigned[placement_index] = window_index
+            window_owner[window_index] = placement_index
+            return True
+        return False
+
+    for placement_index in sorted(range(len(placements)), key=priority):
+        assign(placement_index, set())
+
+    matches = [
+        MatchedWindow(placement.id, windows[assigned[index]].handle)
+        for index, placement in enumerate(placements)
+        if index in assigned
+    ]
+    unmatched = [
+        placement.id for index, placement in enumerate(placements) if index not in assigned
+    ]
     return WorkspaceMatches(tuple(matches), tuple(unmatched))
 
 

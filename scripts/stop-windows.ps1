@@ -34,7 +34,7 @@ function Test-IsWindowsRectangleProcess {
     $inRepo = (Test-ContainsText $commandLine $ResolvedRepoRoot) -or
         (Test-ContainsText $exePath $ResolvedRepoRoot)
 
-    if ($name -match "^(windows-rectangle|windows_rectangle|WindowsRectangle)(\.exe)?$") {
+    if ($inRepo -and $name -match "^(windows-rectangle|windows_rectangle|WindowsRectangle)(\.exe)?$") {
         return $true
     }
 
@@ -83,8 +83,15 @@ foreach ($target in $targets) {
         Stop-Process -Id $target.ProcessId -Force -ErrorAction Stop
         $stopped += 1
     } catch {
-        $failed += 1
-        Write-Warning "Could not stop process $($target.ProcessId): $($_.Exception.Message)"
+        $stillRunning = Get-Process -Id $target.ProcessId -ErrorAction SilentlyContinue
+        if ($null -eq $stillRunning) {
+            # A parent/child runtime pair may disappear together. That is
+            # already the intended outcome, not a failed stop.
+            $stopped += 1
+        } else {
+            $failed += 1
+            Write-Warning "Could not stop process $($target.ProcessId): $($_.Exception.Message)"
+        }
     }
 }
 

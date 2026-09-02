@@ -1,69 +1,244 @@
-"""Preferences staging + launcher (brief §2 #15).
+"""Preferences window for editable settings and shortcut bindings.
 
-Two layers in this module:
-
-1. `PrefsController` — pure-Python staging service. Owns the working
-   copy of Settings, applies validation, exposes `set_*`/`commit`/
-   `revert`. Fully unit-testable without PySide6.
-
-2. `open_prefs_window(ctx, dialog_factory)` — the integration point
-   between the tray menu and a Qt QDialog. Builds a PrefsController
-   from the AppContext, hands it to the supplied `dialog_factory` (a
-   callable returning an object with `.exec() -> bool`), and on
-   acceptance commits via `ctx.config_store.save` + `ctx.apply_settings`.
-
-Splitting these means we can unit-test every interaction the prefs UI
-cares about — staging a gap change, rebinding a shortcut, seeing a
-duplicate-binding warning — without spinning up Qt; and we can pass a
-fake dialog factory in tests to verify the commit-vs-cancel paths.
-
-`commit` does NOT touch the OS itself — the caller wires the save/apply
-callbacks. This keeps the controller importable without any adapters.
+Qt imports stay inside `show()`/builder helpers so this module remains importable
+in test and headless environments.
 """
 
 from __future__ import annotations
 
-import copy
-from collections.abc import Callable
+import logging
+from contextlib import suppress
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from ..core.actions import Action
-from ..core.shortcuts import (
-    ShortcutParseError,
-    is_reserved,
-)
-from ..core.shortcuts import (
-    conflicts as shortcut_conflicts,
-)
-from ..core.shortcuts import (
-    normalise as normalise_combo,
-)
+from ..core.actions import DEFAULT_SHORTCUTS, Action
+from ..core.keymap import UnsupportedKeyError, translate
+from ..core.shortcuts import ShortcutParseError, is_reserved, is_unregisterable, parse
 from ..ports.config_store import Settings
+from .logo import build_logo_pixmap, build_qicon
+from .prefs_controller import (
+    ALMOST_MAX_MAX,
+    ALMOST_MAX_MIN,
+    CYCLE_TIMEOUT_MAX,
+    CYCLE_TIMEOUT_MIN,
+    GAP_MAX,
+    GAP_MIN,
+    PrefsController,
+    ValidationReport,
+    open_prefs_window,
+)
 
-# Gap is a single int in physical pixels. Negative gaps make no sense;
-# very large gaps just look silly — clamp at 256 (≈¼ of a 1080p height).
-GAP_MIN = 0
-GAP_MAX = 256
+__all__ = (
+    "ALMOST_MAX_MAX",
+    "ALMOST_MAX_MIN",
+    "CYCLE_TIMEOUT_MAX",
+    "CYCLE_TIMEOUT_MIN",
+    "GAP_MAX",
+    "GAP_MIN",
+    "PreferencesController",
+    "PrefsController",
+    "ValidationReport",
+    "open_prefs_window",
+    "show",
+)
 
-# almost_maximize_scale lives in (0, 1]. 0.85 is the brief default.
-ALMOST_MAX_MIN = 0.1
-ALMOST_MAX_MAX = 1.0
+if TYPE_CHECKING:
+    from ..app import AppContext
 
-# cycle_idle_timeout in seconds: 0 disables cycling (every press is a
-# fresh dispatch), small values feel snappy, large values surprise users.
-CYCLE_TIMEOUT_MIN = 0.0
-CYCLE_TIMEOUT_MAX = 10.0
+
+_log = logging.getLogger(__name__)
+
+
+ACTION_GROUPS: tuple[tuple[str, tuple[Action, ...]], ...] = (
+    (
+        "Halves",
+        (
+            Action.LEFT_HALF,
+            Action.RIGHT_HALF,
+            Action.TOP_HALF,
+            Action.BOTTOM_HALF,
+        ),
+    ),
+    (
+        "Quarters",
+        (
+            Action.TOP_LEFT_QUARTER,
+            Action.TOP_RIGHT_QUARTER,
+            Action.BOTTOM_LEFT_QUARTER,
+            Action.BOTTOM_RIGHT_QUARTER,
+        ),
+    ),
+    (
+        "Sixths",
+        (
+            Action.TOP_LEFT_SIXTH,
+            Action.TOP_CENTER_SIXTH,
+            Action.TOP_RIGHT_SIXTH,
+            Action.BOTTOM_LEFT_SIXTH,
+            Action.BOTTOM_CENTER_SIXTH,
+            Action.BOTTOM_RIGHT_SIXTH,
+        ),
+    ),
+    (
+        "Thirds",
+        (
+            Action.FIRST_THIRD,
+            Action.CENTER_THIRD,
+            Action.LAST_THIRD,
+            Action.FIRST_TWO_THIRDS,
+            Action.LAST_TWO_THIRDS,
+            Action.CENTER_HALF,
+            Action.CENTER_TWO_THIRDS,
+            Action.TOP_LEFT_THIRD,
+            Action.TOP_RIGHT_THIRD,
+            Action.BOTTOM_LEFT_THIRD,
+            Action.BOTTOM_RIGHT_THIRD,
+            Action.TOP_VERTICAL_THIRD,
+            Action.MIDDLE_VERTICAL_THIRD,
+            Action.BOTTOM_VERTICAL_THIRD,
+            Action.TOP_VERTICAL_TWO_THIRDS,
+            Action.BOTTOM_VERTICAL_TWO_THIRDS,
+        ),
+    ),
+    (
+        "Fourths",
+        (
+            Action.FIRST_FOURTH,
+            Action.SECOND_FOURTH,
+            Action.THIRD_FOURTH,
+            Action.LAST_FOURTH,
+            Action.FIRST_THREE_FOURTHS,
+            Action.CENTER_THREE_FOURTHS,
+            Action.LAST_THREE_FOURTHS,
+        ),
+    ),
+    (
+        "Window",
+        (
+            Action.MAXIMIZE,
+            Action.MAXIMIZE_HEIGHT,
+            Action.MAXIMIZE_WIDTH,
+            Action.ALMOST_MAXIMIZE,
+            Action.CENTER,
+            Action.CENTER_PROMINENTLY,
+            Action.LARGER,
+            Action.SMALLER,
+            Action.LARGER_WIDTH,
+            Action.SMALLER_WIDTH,
+            Action.LARGER_HEIGHT,
+            Action.SMALLER_HEIGHT,
+            Action.MOVE_LEFT,
+            Action.MOVE_RIGHT,
+            Action.MOVE_UP,
+            Action.MOVE_DOWN,
+            Action.HALVE_HEIGHT_UP,
+            Action.HALVE_HEIGHT_DOWN,
+            Action.HALVE_WIDTH_LEFT,
+            Action.HALVE_WIDTH_RIGHT,
+            Action.DOUBLE_HEIGHT_UP,
+            Action.DOUBLE_HEIGHT_DOWN,
+            Action.DOUBLE_WIDTH_LEFT,
+            Action.DOUBLE_WIDTH_RIGHT,
+            Action.RESTORE,
+            Action.TOGGLE_ALWAYS_ON_TOP,
+        ),
+    ),
+    (
+        "Displays",
+        (
+            Action.NEXT_DISPLAY,
+            Action.PREV_DISPLAY,
+            Action.DISPLAY_1,
+            Action.DISPLAY_2,
+            Action.DISPLAY_3,
+            Action.DISPLAY_4,
+            Action.DISPLAY_5,
+            Action.DISPLAY_6,
+            Action.DISPLAY_7,
+            Action.DISPLAY_8,
+            Action.DISPLAY_9,
+        ),
+    ),
+)
+
+_ACTION_LABELS: dict[Action, str] = {
+    Action.LEFT_HALF: "Left Half",
+    Action.RIGHT_HALF: "Right Half",
+    Action.TOP_HALF: "Top Half",
+    Action.BOTTOM_HALF: "Bottom Half",
+    Action.TOP_LEFT_QUARTER: "Top Left",
+    Action.TOP_RIGHT_QUARTER: "Top Right",
+    Action.BOTTOM_LEFT_QUARTER: "Bottom Left",
+    Action.BOTTOM_RIGHT_QUARTER: "Bottom Right",
+    Action.TOP_LEFT_SIXTH: "Top Left 1/6",
+    Action.TOP_RIGHT_SIXTH: "Top Right 3/6",
+    Action.BOTTOM_LEFT_SIXTH: "Bottom Left 4/6",
+    Action.BOTTOM_RIGHT_SIXTH: "Bottom Right 6/6",
+    Action.FIRST_THIRD: "Left Third",
+    Action.CENTER_THIRD: "Middle Third",
+    Action.LAST_THIRD: "Right Third",
+    Action.FIRST_TWO_THIRDS: "First Two Thirds",
+    Action.LAST_TWO_THIRDS: "Last Two Thirds",
+    Action.MAXIMIZE: "Maximize",
+    Action.MAXIMIZE_HEIGHT: "Maximize Height",
+    Action.MAXIMIZE_WIDTH: "Maximize Width",
+    Action.ALMOST_MAXIMIZE: "Middle Majority",
+    Action.CENTER: "Center",
+    Action.LARGER: "Larger",
+    Action.SMALLER: "Smaller",
+    Action.RESTORE: "Restore",
+    Action.TOGGLE_ALWAYS_ON_TOP: "Always on Top",
+    Action.NEXT_DISPLAY: "Next Display",
+    Action.PREV_DISPLAY: "Previous Display",
+}
+
+_QT_MODIFIERS = {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "win": "Meta",
+}
+
+_QT_KEYS = {
+    "left": "Left",
+    "right": "Right",
+    "up": "Up",
+    "down": "Down",
+    "enter": "Return",
+    "backspace": "Backspace",
+    "delete": "Del",
+    "insert": "Ins",
+    "escape": "Esc",
+    "space": "Space",
+    "pageup": "PgUp",
+    "pagedown": "PgDown",
+}
+
+_DISPLAY_MODIFIERS = {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "win": "Win",
+}
+
+_DISPLAY_KEYS = {
+    "left": "Left",
+    "right": "Right",
+    "up": "Up",
+    "down": "Down",
+    "enter": "Enter",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "insert": "Insert",
+    "escape": "Esc",
+    "space": "Space",
+    "pageup": "Pg Up",
+    "pagedown": "Pg Down",
+}
 
 
 @dataclass(frozen=True, slots=True)
-class ValidationReport:
-    """Result of `PrefsController.validate()`.
-
-    `errors` are blocking — the UI must prevent commit.
-    `warnings` are advisory — the UI shows them but allows commit (e.g.
-    "this combo clashes with Windows Snap").
-    """
-
+class ValidationResult:
     errors: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -73,229 +248,865 @@ class ValidationReport:
 
 
 @dataclass(slots=True)
-class PrefsController:
-    """Staged-edits service over a Settings dataclass.
+class PreferencesController:
+    ctx: AppContext
+    window: object
+    shortcut_widgets: dict[Action, object] = field(default_factory=dict)
+    gap_spin: object | None = None
+    cycle_spin: object | None = None
+    almost_spin: object | None = None
+    drag_checkbox: object | None = None
+    launch_checkbox: object | None = None
+    status_label: object | None = None
+    save_button: object | None = None
+    apply_button: object | None = None
+    dirty: bool = False
+    _loading: bool = False
 
-    Holds two copies: the `baseline` (the committed-on-disk snapshot)
-    and `staged` (the user's in-flight edits). `is_dirty` compares them.
-    """
+    def collect_settings(self) -> Settings:
+        shortcuts = dict(self.ctx.settings.shortcuts)
+        for action, widget in self.shortcut_widgets.items():
+            shortcuts[action] = _sequence_text(widget)
 
-    baseline: Settings
-    staged: Settings = field(init=False)
-
-    def __post_init__(self) -> None:
-        # Snapshot baseline too — otherwise it aliases the caller's
-        # Settings instance, and any later external mutation of that
-        # object (e.g. ctx.apply_settings firing while prefs is open)
-        # would silently change what `is_dirty` compares against.
-        self.baseline = self._snapshot(self.baseline)
-        self.staged = self._snapshot(self.baseline)
-
-    # ----- staging mutators -------------------------------------------
-
-    def set_gap(self, gap: int) -> None:
-        if not isinstance(gap, int) or isinstance(gap, bool):
-            raise TypeError("gap must be int")
-        self.staged.gap = max(GAP_MIN, min(GAP_MAX, gap))
-
-    def set_launch_at_login(self, enabled: bool) -> None:
-        self.staged.launch_at_login = bool(enabled)
-
-    def set_drag_to_edge_enabled(self, enabled: bool) -> None:
-        self.staged.drag_to_edge_enabled = bool(enabled)
-
-    def set_almost_maximize_scale(self, scale: float) -> None:
-        # Clamp instead of raise — the UI slider can land just outside.
-        self.staged.almost_maximize_scale = max(ALMOST_MAX_MIN, min(ALMOST_MAX_MAX, float(scale)))
-
-    def set_cycle_idle_timeout(self, seconds: float) -> None:
-        self.staged.cycle_idle_timeout = max(
-            CYCLE_TIMEOUT_MIN, min(CYCLE_TIMEOUT_MAX, float(seconds))
+        return Settings(
+            shortcuts=shortcuts,
+            gap=int(self.gap_spin.value()) if self.gap_spin is not None else self.ctx.settings.gap,
+            launch_at_login=(
+                bool(self.launch_checkbox.isChecked())
+                if self.launch_checkbox is not None
+                else self.ctx.settings.launch_at_login
+            ),
+            cycle_idle_timeout=(
+                float(self.cycle_spin.value())
+                if self.cycle_spin is not None
+                else self.ctx.settings.cycle_idle_timeout
+            ),
+            drag_to_edge_enabled=(
+                bool(self.drag_checkbox.isChecked())
+                if self.drag_checkbox is not None
+                else self.ctx.settings.drag_to_edge_enabled
+            ),
+            almost_maximize_scale=(
+                float(self.almost_spin.value()) / 100.0
+                if self.almost_spin is not None
+                else self.ctx.settings.almost_maximize_scale
+            ),
+            workspaces=self.ctx.settings.workspaces,
+            active_workspace_id=self.ctx.settings.active_workspace_id,
         )
 
-    def set_shortcut(self, action: Action, combo: str) -> None:
-        """Stage a shortcut rebind. Raises `ShortcutParseError` if the
-        combo is unparseable — UI calls this from a try/except to show
-        an inline error without committing.
-        """
-        # Parse for side-effect (validation); we store the *normalised* form
-        # so duplicate detection later doesn't depend on whitespace/case.
-        canonical = normalise_combo(combo)
-        self.staged.shortcuts[action] = canonical
+    def refresh_from_context(self) -> None:
+        self._loading = True
+        try:
+            _load_settings_into_widgets(self, self.ctx.settings)
+        finally:
+            self._loading = False
+        self.dirty = False
+        self.update_validation()
 
-    def clear_shortcut(self, action: Action) -> None:
-        """Remove a shortcut binding. Cleared shortcuts won't register."""
-        self.staged.shortcuts.pop(action, None)
+    def mark_dirty(self) -> None:
+        if self._loading:
+            return
+        self.dirty = True
+        self.update_validation()
 
-    # ----- inspection -------------------------------------------------
-
-    @property
-    def is_dirty(self) -> bool:
-        return self.staged != self.baseline
-
-    def shortcut_conflicts(self) -> dict[Action, list[Action]]:
-        """Group actions whose canonical combo collides with another.
-
-        Maps `winner_action -> [other_action, ...]` — the first action
-        wins the slot, the rest are flagged duplicates. Used by the UI
-        to render red strikethroughs in the table.
-        """
-        # `core.shortcuts.conflicts` works on a {name: combo} mapping;
-        # we adapt our Action keys to/from strings for that call.
-        as_strings = {a.value: c for a, c in self.staged.shortcuts.items()}
-        raw = shortcut_conflicts(as_strings)
-        out: dict[Action, list[Action]] = {}
-        for winner_str, dupes in raw.items():
-            winner = Action(winner_str)
-            out[winner] = [Action(d) for d in dupes]
-        return out
-
-    def reserved_bindings(self) -> list[tuple[Action, str]]:
-        """List staged shortcuts that step on an OS-reserved combo."""
-        return [
-            (action, combo) for action, combo in self.staged.shortcuts.items() if is_reserved(combo)
-        ]
-
-    def validate(self) -> ValidationReport:
-        """Compute a fresh report against the current `staged` state."""
-        errors: list[str] = []
-        warnings: list[str] = []
-
-        # Range sanity (clamped on set, but a direct .staged mutation
-        # could bypass — guard anyway).
-        if not (GAP_MIN <= self.staged.gap <= GAP_MAX):
-            errors.append(f"gap {self.staged.gap} out of range [{GAP_MIN}, {GAP_MAX}]")
-        if not (ALMOST_MAX_MIN <= self.staged.almost_maximize_scale <= ALMOST_MAX_MAX):
-            errors.append(
-                f"almost_maximize_scale {self.staged.almost_maximize_scale} "
-                f"out of range [{ALMOST_MAX_MIN}, {ALMOST_MAX_MAX}]"
-            )
-        if not (CYCLE_TIMEOUT_MIN <= self.staged.cycle_idle_timeout <= CYCLE_TIMEOUT_MAX):
-            errors.append(
-                f"cycle_idle_timeout {self.staged.cycle_idle_timeout} "
-                f"out of range [{CYCLE_TIMEOUT_MIN}, {CYCLE_TIMEOUT_MAX}]"
-            )
-
-        # Shortcut sanity — parse failures become errors, conflicts/reserved
-        # become warnings (the user might want to keep a power-user combo).
-        for action, combo in self.staged.shortcuts.items():
-            try:
-                normalise_combo(combo)
-            except ShortcutParseError as e:
-                errors.append(f"{action.value}: cannot parse {combo!r}: {e}")
-
-        dupes = self.shortcut_conflicts()
-        for winner, others in dupes.items():
-            for other in others:
-                warnings.append(
-                    f"{other.value} shares combo with {winner.value} — only one will fire"
+    def update_validation(self) -> ValidationResult:
+        result = validate_shortcuts(self.collect_settings().shortcuts)
+        if self.status_label is not None:
+            if result.errors:
+                self.status_label.setText(f"Fix required: {result.errors[0]}")
+                _set_widget_property(self.status_label, "status", "error")
+            elif result.warnings:
+                self.status_label.setText(f"Warning: {result.warnings[0]}")
+                _set_widget_property(self.status_label, "status", "warning")
+            else:
+                self.status_label.setText(
+                    _status_text(self.dirty, self.collect_settings().shortcuts)
                 )
+                _set_widget_property(
+                    self.status_label, "status", "dirty" if self.dirty else "saved"
+                )
+        if self.save_button is not None:
+            self.save_button.setEnabled(result.ok)
+        if self.apply_button is not None:
+            self.apply_button.setEnabled(result.ok and self.dirty)
+        return result
 
-        for action, combo in self.reserved_bindings():
-            warnings.append(f"{action.value}: {combo} clashes with an OS-reserved shortcut")
+    def apply(self, *, close: bool = False) -> bool:
+        from PySide6 import QtWidgets
 
-        return ValidationReport(tuple(errors), tuple(warnings))
+        raw_settings = self.collect_settings()
+        result = validate_shortcuts(raw_settings.shortcuts)
+        if not result.ok:
+            self.update_validation()
+            return False
+        settings = normalise_settings(raw_settings)
 
-    # ----- commit / revert --------------------------------------------
+        if self.ctx.config_store is not None:
+            try:
+                self.ctx.config_store.save(settings)
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("config save failed")
+                QtWidgets.QMessageBox.critical(
+                    self.window,
+                    "Windows Rectangle",
+                    f"Could not save preferences:\n{exc}",
+                )
+                return False
 
-    def commit(
-        self,
-        on_save: Callable[[Settings], None] | None = None,
-        on_apply: Callable[[Settings], None] | None = None,
-    ) -> ValidationReport:
-        """Validate and, if clean, persist + apply the staged settings.
-
-        - `on_save(settings)` typically wraps `ConfigStore.save`.
-        - `on_apply(settings)` typically wraps `AppContext.apply_settings`.
-
-        Returns the ValidationReport. If `report.ok` is False, neither
-        callback fires and the baseline is untouched.
-        """
-        report = self.validate()
-        if not report.ok:
-            return report
-        if on_save is not None:
-            on_save(self.staged)
-        if on_apply is not None:
-            on_apply(self.staged)
-        # Promote staged → baseline; copy so further edits don't mutate
-        # what we just handed to the callbacks.
-        self.baseline = self._snapshot(self.staged)
-        self.staged = self._snapshot(self.baseline)
-        return report
-
-    def revert(self) -> None:
-        """Throw away staged changes and start fresh from baseline."""
-        self.staged = self._snapshot(self.baseline)
-
-    def reset_shortcuts_to_defaults(self) -> None:
-        """Replace staged shortcuts with `DEFAULT_SHORTCUTS`.
-
-        Useful for the dialog's "Reset shortcuts" button: a user who's
-        rebound several actions and now wants the macOS-Rectangle
-        defaults back doesn't have to retype each combo.
-
-        Leaves non-shortcut fields (gap, drag-to-edge, etc.) untouched —
-        users typically want to keep their gap setting even when
-        nuking shortcut customisations.
-        """
-        # Import here so the controller module stays Settings-only at
-        # module-load time (matches the lazy-Qt pattern elsewhere).
-        from ..core.actions import DEFAULT_SHORTCUTS
-
-        # Copy DEFAULT_SHORTCUTS so the user's subsequent edits don't
-        # pollute the module-level constant.
-        self.staged.shortcuts = dict(DEFAULT_SHORTCUTS)
-
-    # ----- internals --------------------------------------------------
-
-    @staticmethod
-    def _snapshot(settings: Settings) -> Settings:
-        """Deep-copy Settings so mutable fields (`shortcuts` dict) are
-        independent between staged and baseline."""
-        return copy.deepcopy(settings)
+        self.ctx.apply_settings(settings)
+        expected = _enabled_shortcut_count(settings.shortcuts)
+        report = getattr(self.ctx, "last_binding_report", None)
+        bound = report.bound_count if report is not None else expected
+        if self.ctx.hotkeys is not None and bound < expected:
+            QtWidgets.QMessageBox.warning(
+                self.window,
+                "Windows Rectangle",
+                f"Saved, but only {bound} of {expected} shortcuts registered.",
+            )
+        self.refresh_from_context()
+        if close:
+            self.window.hide()
+        return True
 
 
-# ----- launcher ----------------------------------------------------------
+def action_label(action: Action) -> str:
+    return _ACTION_LABELS.get(action, action.value.replace("_", " ").title())
 
 
-# A `DialogFactory` takes the PrefsController and returns an object whose
-# `.exec()` returns True on accept, False on cancel. Real Qt dialogs
-# match this contract; tests can pass a fake.
-class _DialogProtocol:
-    def exec(self) -> bool: ...  # pragma: no cover — typing only
+def ordered_actions(shortcuts: dict[Action, str] | None = None) -> list[Action]:
+    grouped = [action for _, actions in ACTION_GROUPS for action in actions]
+    if shortcuts is None:
+        return grouped
+    present_grouped = [action for action in grouped if action in shortcuts]
+    remaining = [action for action in shortcuts if action not in grouped]
+    return present_grouped + sorted(remaining, key=lambda a: a.value)
 
 
-DialogFactory = Callable[["PrefsController"], _DialogProtocol]
+def validate_shortcuts(shortcuts: dict[Action, str]) -> ValidationResult:
+    errors: list[str] = []
+    warnings: list[str] = []
+    seen: dict[str, Action] = {}
+
+    for action in ordered_actions(shortcuts):
+        combo = shortcuts.get(action, "")
+        if not combo.strip():
+            continue
+        try:
+            parsed = parse(combo)
+            translate(parsed)
+        except (ShortcutParseError, UnsupportedKeyError) as exc:
+            errors.append(f"{action_label(action)}: {exc}")
+            continue
+
+        canonical = str(parsed)
+        if is_unregisterable(canonical):
+            errors.append(
+                f"{action_label(action)} uses Windows-only shortcut {canonical}; "
+                "choose a different binding"
+            )
+            continue
+
+        previous = seen.get(canonical)
+        if previous is not None:
+            errors.append(
+                f"{action_label(action)} duplicates {action_label(previous)} ({canonical})"
+            )
+        else:
+            seen[canonical] = action
+
+        if is_reserved(canonical):
+            warnings.append(f"{action_label(action)} uses reserved shortcut {canonical}")
+
+    return ValidationResult(tuple(errors), tuple(warnings))
 
 
-def open_prefs_window(
-    ctx: AppContextLike,
-    *,
-    dialog_factory: DialogFactory,
-) -> ValidationReport | None:
-    """Open the preferences dialog and, on accept, commit through `ctx`.
+def normalise_settings(settings: Settings) -> Settings:
+    shortcuts: dict[Action, str] = {}
+    for action, combo in settings.shortcuts.items():
+        shortcuts[action] = "" if not combo.strip() else str(parse(combo))
+    return Settings(
+        shortcuts=shortcuts,
+        gap=max(0, int(settings.gap)),
+        launch_at_login=bool(settings.launch_at_login),
+        cycle_idle_timeout=max(0.1, float(settings.cycle_idle_timeout)),
+        drag_to_edge_enabled=bool(settings.drag_to_edge_enabled),
+        almost_maximize_scale=max(0.5, min(1.0, float(settings.almost_maximize_scale))),
+        workspaces=settings.workspaces,
+        active_workspace_id=settings.active_workspace_id,
+    )
 
-    Builds a fresh `PrefsController` from `ctx.settings` (so the user
-    edits a snapshot, not the live `ctx`), hands it to `dialog_factory`,
-    and runs the dialog modally. If the user clicks OK, commits via the
-    ctx's `config_store.save` (if present) and `apply_settings`.
 
-    Returns the ValidationReport if a commit happened, or None if the
-    user cancelled. Callers can inspect the report for warnings.
-    """
-    pc = PrefsController(baseline=ctx.settings)
-    dlg = dialog_factory(pc)
-    if not dlg.exec():
+def show(ctx: AppContext) -> PreferencesController:
+    from PySide6 import QtCore, QtWidgets
+
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication([])
+
+    existing = getattr(app, "_windows_rectangle_preferences", None)
+    if isinstance(existing, PreferencesController):
+        if not existing.dirty:
+            existing.refresh_from_context()
+        existing.window.show()
+        existing.window.raise_()
+        existing.window.activateWindow()
+        return existing
+
+    controller = _build_window(ctx, QtCore, QtWidgets)
+    app._windows_rectangle_preferences = controller
+    controller.window.show()
+    controller.window.raise_()
+    controller.window.activateWindow()
+    return controller
+
+
+def _build_window(ctx: AppContext, QtCore, QtWidgets) -> PreferencesController:
+    from PySide6 import QtGui
+
+    class PreferencesDialog(QtWidgets.QDialog):
+        controller: PreferencesController | None = None
+
+        def closeEvent(self, event) -> None:
+            if self.controller is not None:
+                if not _confirm_discard_if_dirty(self.controller, QtWidgets):
+                    event.ignore()
+                    return
+                self.controller.refresh_from_context()
+            super().closeEvent(event)
+
+    window = PreferencesDialog()
+    window.setObjectName("preferencesWindow")
+    window.setWindowTitle("Windows Rectangle")
+    window.setMinimumSize(820, 620)
+    window.resize(900, 720)
+    window.setFont(QtGui.QFont("Segoe UI", 9))
+    icon = build_qicon(QtGui)
+    if not icon.isNull():
+        window.setWindowIcon(icon)
+    window.setWindowFlag(QtCore.Qt.WindowContextHelpButtonHint, False)
+    _apply_window_style(window)
+
+    controller = PreferencesController(ctx=ctx, window=window)
+    window.controller = controller
+
+    root = QtWidgets.QVBoxLayout(window)
+    root.setContentsMargins(20, 18, 20, 16)
+    root.setSpacing(14)
+
+    header = QtWidgets.QHBoxLayout()
+    header.setSpacing(14)
+    logo = _build_brand_logo(QtCore, QtGui, QtWidgets)
+    if logo is not None:
+        header.addWidget(logo, 0, QtCore.Qt.AlignVCenter)
+    title_stack = QtWidgets.QVBoxLayout()
+    title_stack.setSpacing(2)
+    title = QtWidgets.QLabel("Windows Rectangle")
+    title.setObjectName("windowTitle")
+    subtitle = QtWidgets.QLabel("Preferences")
+    subtitle.setObjectName("windowSubtitle")
+    title_stack.addWidget(title)
+    title_stack.addWidget(subtitle)
+    header.addLayout(title_stack, 1)
+    root.addLayout(header)
+
+    tabs = QtWidgets.QTabWidget()
+    tabs.setObjectName("preferencesTabs")
+    tabs.addTab(_build_shortcuts_tab(controller, QtCore, QtGui, QtWidgets), "Shortcuts")
+    tabs.addTab(_build_layouts_tab(controller, QtCore, QtWidgets), "Layouts")
+    tabs.addTab(_build_general_tab(controller, QtWidgets), "General")
+    root.addWidget(tabs)
+
+    controller.status_label = QtWidgets.QLabel()
+    controller.status_label.setObjectName("statusLabel")
+    controller.status_label.setMinimumHeight(22)
+
+    buttons = QtWidgets.QDialogButtonBox()
+    reset = buttons.addButton("Restore Defaults", QtWidgets.QDialogButtonBox.ResetRole)
+    controller.apply_button = buttons.addButton("Apply", QtWidgets.QDialogButtonBox.ApplyRole)
+    controller.save_button = buttons.addButton("Save", QtWidgets.QDialogButtonBox.AcceptRole)
+    close = buttons.addButton("Close", QtWidgets.QDialogButtonBox.RejectRole)
+
+    footer = QtWidgets.QHBoxLayout()
+    footer.addWidget(controller.status_label, 1)
+    footer.addWidget(buttons, 0)
+    root.addLayout(footer)
+
+    reset.clicked.connect(lambda: _reset_defaults(controller))
+    controller.apply_button.clicked.connect(lambda: controller.apply(close=False))
+    controller.save_button.clicked.connect(lambda: controller.apply(close=True))
+
+    def close_without_saving() -> None:
+        if _confirm_discard_if_dirty(controller, QtWidgets):
+            controller.refresh_from_context()
+            window.hide()
+
+    close.clicked.connect(close_without_saving)
+
+    controller.refresh_from_context()
+    return controller
+
+
+def _build_brand_logo(QtCore, QtGui, QtWidgets):
+    pixmap = build_logo_pixmap(QtGui, max_width=56, max_height=56)
+    if pixmap.isNull():
         return None
-    on_save = ctx.config_store.save if ctx.config_store is not None else None
-    return pc.commit(on_save=on_save, on_apply=ctx.apply_settings)
+
+    panel = QtWidgets.QFrame()
+    panel.setObjectName("brandLogoPanel")
+    panel.setAccessibleName("Application logo")
+    panel.setFixedSize(56, 56)
+
+    layout = QtWidgets.QHBoxLayout(panel)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+
+    label = QtWidgets.QLabel()
+    label.setObjectName("brandLogo")
+    label.setAccessibleName("Application logo image")
+    label.setPixmap(pixmap)
+    label.setFixedSize(panel.size())
+    label.setScaledContents(True)
+    layout.addWidget(label, 0, QtCore.Qt.AlignCenter)
+    return panel
 
 
-# Structural alias for AppContext — we only touch four attributes, so
-# we can stay decoupled from the heavyweight app module.
-class AppContextLike:  # pragma: no cover — typing only
-    settings: Settings
-    config_store: object | None
+def _build_shortcuts_tab(controller: PreferencesController, QtCore, QtGui, QtWidgets):
+    tab = QtWidgets.QWidget()
+    outer = QtWidgets.QVBoxLayout(tab)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(10)
 
-    def apply_settings(self, settings: Settings) -> None: ...
+    search = QtWidgets.QLineEdit()
+    search.setObjectName("shortcutSearch")
+    search.setAccessibleName("Search commands")
+    search.setClearButtonEnabled(True)
+    search.setPlaceholderText("Search commands")
+    outer.addWidget(search)
+
+    scroll = QtWidgets.QScrollArea()
+    scroll.setObjectName("shortcutScroll")
+    scroll.setAccessibleName("Shortcut commands")
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+    content = QtWidgets.QWidget()
+    layout = QtWidgets.QVBoxLayout(content)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+    sections = []
+
+    for group_name, actions in ACTION_GROUPS:
+        section_label = QtWidgets.QLabel(group_name)
+        section_label.setObjectName("sectionHeading")
+        section_label.setAccessibleName(f"{group_name} shortcut section")
+        layout.addWidget(section_label)
+        section_rows = []
+        for action in actions:
+            row = QtWidgets.QFrame()
+            row.setObjectName("shortcutRow")
+            row.setProperty("action", action.value)
+            row.setProperty("group", group_name)
+            row.setAccessibleName(f"{action_label(action)} shortcut row")
+            row_layout = QtWidgets.QHBoxLayout(row)
+            row_layout.setContentsMargins(12, 7, 12, 7)
+            row_layout.setSpacing(12)
+
+            label = QtWidgets.QLabel(action_label(action))
+            label.setObjectName("commandLabel")
+            label.setAccessibleName(action_label(action))
+            label.setMinimumWidth(220)
+
+            edit = _build_shortcut_button(controller, action, QtCore, QtGui, QtWidgets)
+            controller.shortcut_widgets[action] = edit
+            row_layout.addWidget(label, 1)
+            row_layout.addWidget(edit, 0)
+            layout.addWidget(row)
+            section_rows.append((row, action_label(action), group_name))
+        sections.append((section_label, section_rows))
+
+    layout.addStretch(1)
+    scroll.setWidget(content)
+    outer.addWidget(scroll, 1)
+    search.textChanged.connect(lambda text: _filter_shortcut_rows(sections, text))
+    return tab
+
+
+def _build_shortcut_button(
+    controller: PreferencesController, action: Action, QtCore, QtGui, QtWidgets
+):
+    action_name = action_label(action)
+
+    class ShortcutButton(QtWidgets.QPushButton):
+        def __init__(self) -> None:
+            super().__init__()
+            self.setObjectName("shortcutButton")
+            self._sequence = QtGui.QKeySequence()
+            self.setCursor(QtCore.Qt.PointingHandCursor)
+            self.setMinimumHeight(34)
+            self.setMinimumWidth(220)
+            self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            self.setToolTip("Record Shortcut")
+            self.setAccessibleName(f"{action_name} shortcut")
+            self.setAutoDefault(False)
+            self.setDefault(False)
+            self.clicked.connect(lambda _checked=False: self._record())
+            self._sync_text()
+
+        def keySequence(self):
+            return self._sequence
+
+        def setKeySequence(self, sequence) -> None:
+            self._sequence = sequence
+            self._sync_text()
+
+        def _record(self) -> None:
+            hotkeys_suspended = _suspend_hotkeys_for_recording(controller)
+            try:
+                sequence = _record_shortcut(self.window(), action_name, QtCore, QtGui, QtWidgets)
+            finally:
+                if hotkeys_suspended:
+                    try:
+                        controller.ctx.rebind_hotkeys()
+                    except Exception:  # noqa: BLE001
+                        _log.exception("could not restore hotkeys after recording shortcut")
+            if sequence is None:
+                return
+            self.setKeySequence(sequence)
+            controller.mark_dirty()
+
+        def _sync_text(self) -> None:
+            text = self._sequence.toString(QtGui.QKeySequence.PortableText).strip()
+            _set_widget_property(self, "shortcutState", "set" if text else "disabled")
+            self.setText(_shortcut_button_text(text))
+
+    return ShortcutButton()
+
+
+def _record_shortcut(parent, action_name: str, QtCore, QtGui, QtWidgets):
+    dialog = QtWidgets.QDialog(parent)
+    dialog.setObjectName("recordShortcutDialog")
+    dialog.setWindowTitle("Record Shortcut")
+    dialog.setModal(True)
+    dialog.resize(360, 140)
+    dialog.setWindowFlag(QtCore.Qt.WindowContextHelpButtonHint, False)
+
+    layout = QtWidgets.QVBoxLayout(dialog)
+    title = QtWidgets.QLabel("Record Shortcut")
+    title.setObjectName("recordShortcutTitle")
+    layout.addWidget(title)
+    action_label_widget = QtWidgets.QLabel(action_name)
+    action_label_widget.setObjectName("recordShortcutAction")
+    layout.addWidget(action_label_widget)
+
+    editor = QtWidgets.QKeySequenceEdit(dialog)
+    editor.setObjectName("recordShortcutEditor")
+    with suppress(AttributeError):
+        editor.setMaximumSequenceLength(1)
+    editor.clear()
+    layout.addWidget(editor)
+
+    buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
+    clear = buttons.addButton("Clear", QtWidgets.QDialogButtonBox.ResetRole)
+    buttons.rejected.connect(dialog.reject)
+    clear.clicked.connect(lambda: _clear_recorded_shortcut(dialog, editor))
+    layout.addWidget(buttons)
+
+    def accept_recorded_shortcut(sequence) -> None:
+        if sequence.toString(QtGui.QKeySequence.PortableText).strip():
+            QtCore.QTimer.singleShot(250, dialog.accept)
+
+    editor.keySequenceChanged.connect(accept_recorded_shortcut)
+    QtCore.QTimer.singleShot(0, lambda: editor.setFocus(QtCore.Qt.ShortcutFocusReason))
+
+    if dialog.exec() != QtWidgets.QDialog.Accepted:
+        return None
+    return editor.keySequence()
+
+
+def _clear_recorded_shortcut(dialog, editor) -> None:
+    editor.clear()
+    dialog.accept()
+
+
+def _suspend_hotkeys_for_recording(controller: PreferencesController) -> bool:
+    if controller.ctx.hotkeys is None:
+        return False
+    try:
+        controller.ctx.hotkeys.unregister_all()
+    except Exception:  # noqa: BLE001
+        _log.exception("could not suspend hotkeys while recording shortcut")
+        return False
+    return True
+
+
+def _filter_shortcut_rows(sections, query: str) -> None:
+    for section_label, rows in sections:
+        visible_count = 0
+        for row, action_name, group_name in rows:
+            visible = _matches_shortcut_filter(action_name, group_name, query)
+            row.setVisible(visible)
+            visible_count += int(visible)
+        section_label.setVisible(visible_count > 0)
+
+
+def _matches_shortcut_filter(action_name: str, group_name: str, query: str) -> bool:
+    terms = query.casefold().split()
+    if not terms:
+        return True
+    haystack = f"{action_name} {group_name}".casefold()
+    return all(term in haystack for term in terms)
+
+
+def _confirm_discard_if_dirty(controller: PreferencesController, QtWidgets) -> bool:
+    if not controller.dirty:
+        return True
+    reply = QtWidgets.QMessageBox.question(
+        controller.window,
+        "Windows Rectangle",
+        "Discard unsaved changes?",
+        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        QtWidgets.QMessageBox.No,
+    )
+    return reply == QtWidgets.QMessageBox.Yes
+
+
+def _status_text(dirty: bool, shortcuts: dict[Action, str]) -> str:
+    enabled_count = _enabled_shortcut_count(shortcuts)
+    prefix = "Unsaved changes" if dirty else "Saved"
+    suffix = "shortcut" if enabled_count == 1 else "shortcuts"
+    return f"{prefix} - {enabled_count} {suffix} enabled"
+
+
+def _set_widget_property(widget, name: str, value: object) -> None:
+    with suppress(AttributeError):
+        widget.setProperty(name, value)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+
+def _apply_window_style(window) -> None:
+    window.setStyleSheet(
+        """
+        QDialog#preferencesWindow {
+            background: #f6f7f9;
+            color: #20242a;
+            font-family: "Segoe UI";
+            font-size: 13px;
+        }
+        QLabel#windowTitle {
+            color: #171a1f;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        QLabel#windowSubtitle {
+            color: #667085;
+        }
+        QFrame#brandLogoPanel {
+            background: transparent;
+            border: none;
+        }
+        QTabWidget#preferencesTabs::pane {
+            background: #ffffff;
+            border: 1px solid #d9dee7;
+            border-radius: 6px;
+            top: -1px;
+        }
+        QTabWidget#preferencesTabs QTabBar::tab {
+            background: transparent;
+            border: 1px solid transparent;
+            color: #475467;
+            padding: 8px 16px;
+            margin-right: 2px;
+        }
+        QTabWidget#preferencesTabs QTabBar::tab:selected {
+            background: #ffffff;
+            border-color: #d9dee7;
+            border-bottom-color: #ffffff;
+            color: #182230;
+            font-weight: 600;
+        }
+        QLineEdit#shortcutSearch {
+            background: #ffffff;
+            border: 1px solid #cfd6e2;
+            border-radius: 6px;
+            min-height: 34px;
+            padding: 0 10px;
+        }
+        QLineEdit#shortcutSearch:focus {
+            border-color: #2f6fed;
+        }
+        QScrollArea#shortcutScroll {
+            background: #ffffff;
+        }
+        QLabel#sectionHeading {
+            color: #344054;
+            font-weight: 600;
+            padding: 16px 12px 7px 12px;
+        }
+        QFrame#shortcutRow {
+            background: #ffffff;
+            border-bottom: 1px solid #eef1f5;
+        }
+        QLabel#commandLabel {
+            color: #20242a;
+            font-weight: 500;
+        }
+        QPushButton#shortcutButton {
+            background: #f8fafc;
+            border: 1px solid #cfd6e2;
+            border-radius: 6px;
+            color: #182230;
+            padding: 6px 12px;
+            text-align: center;
+        }
+        QPushButton#shortcutButton:hover {
+            background: #eef4ff;
+            border-color: #84adff;
+        }
+        QPushButton#shortcutButton:focus {
+            border-color: #2f6fed;
+        }
+        QPushButton#shortcutButton[shortcutState="disabled"] {
+            color: #667085;
+            background: #f2f4f7;
+            border-style: dashed;
+        }
+        QDialog#recordShortcutDialog {
+            background: #ffffff;
+        }
+        QLabel#recordShortcutTitle {
+            color: #171a1f;
+            font-size: 17px;
+            font-weight: 600;
+        }
+        QLabel#recordShortcutAction {
+            color: #475467;
+            padding-bottom: 4px;
+        }
+        QKeySequenceEdit#recordShortcutEditor {
+            background: #ffffff;
+            border: 1px solid #2f6fed;
+            border-radius: 6px;
+            min-height: 36px;
+            padding: 0 10px;
+        }
+        QLabel#statusLabel {
+            color: #475467;
+            padding: 5px 0;
+        }
+        QLabel#statusLabel[status="saved"] {
+            color: #1f6f43;
+        }
+        QLabel#statusLabel[status="dirty"] {
+            color: #8a5a00;
+        }
+        QLabel#statusLabel[status="warning"] {
+            color: #8a5a00;
+        }
+        QLabel#statusLabel[status="error"] {
+            color: #b42318;
+        }
+        QDialogButtonBox QPushButton {
+            min-height: 30px;
+            min-width: 86px;
+            padding: 4px 12px;
+        }
+        QSpinBox, QDoubleSpinBox {
+            background: #ffffff;
+            border: 1px solid #cfd6e2;
+            border-radius: 6px;
+            padding: 0 8px;
+        }
+        QCheckBox {
+            min-height: 30px;
+        }
+        QFrame#layoutIntroCard {
+            background: #f8fafc;
+            border: 1px solid #d9dee7;
+            border-radius: 8px;
+        }
+        QLabel#layoutHeading {
+            color: #171a1f;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        QLabel#layoutStep {
+            color: #344054;
+            font-weight: 600;
+        }
+        QPushButton#openLayoutsButton {
+            background: #175cd3;
+            color: #ffffff;
+            border: 1px solid #175cd3;
+            border-radius: 6px;
+            font-weight: 600;
+            min-height: 34px;
+            padding: 5px 16px;
+        }
+        QPushButton#openLayoutsButton:hover { background: #1849a9; }
+        """
+    )
+
+
+def _build_layouts_tab(controller: PreferencesController, QtCore, QtWidgets):
+    widget = QtWidgets.QWidget()
+    outer = QtWidgets.QVBoxLayout(widget)
+    outer.setContentsMargins(18, 18, 18, 18)
+    outer.setSpacing(14)
+
+    heading = QtWidgets.QLabel("One shortcut. Every app in its place.")
+    heading.setObjectName("layoutHeading")
+    description = QtWidgets.QLabel(
+        "Create reusable layouts for any number of apps, accounts, or displays. "
+        "Windows Rectangle can open missing apps, identify each window by its title, "
+        "and move everything into your saved arrangement."
+    )
+    description.setWordWrap(True)
+    outer.addWidget(heading)
+    outer.addWidget(description)
+
+    card = QtWidgets.QFrame()
+    card.setObjectName("layoutIntroCard")
+    card_layout = QtWidgets.QVBoxLayout(card)
+    card_layout.setContentsMargins(18, 16, 18, 16)
+    card_layout.setSpacing(10)
+    steps = (
+        ("1  Add apps", "Choose a process, optional launch command, and account window title."),
+        ("2  Place windows", "Pick a preset or drag each window on the layout canvas."),
+        ("3  Launch anywhere", "Save a shortcut, then launch and arrange the complete layout."),
+    )
+    for title_text, body_text in steps:
+        title = QtWidgets.QLabel(title_text)
+        title.setObjectName("layoutStep")
+        body = QtWidgets.QLabel(body_text)
+        body.setWordWrap(True)
+        card_layout.addWidget(title)
+        card_layout.addWidget(body)
+    outer.addWidget(card)
+
+    actions = QtWidgets.QHBoxLayout()
+    actions.addStretch(1)
+    open_button = QtWidgets.QPushButton("Open Layout Designer")
+    open_button.setObjectName("openLayoutsButton")
+    open_button.setAccessibleName("Open custom layout designer")
+    open_button.setCursor(QtCore.Qt.PointingHandCursor)
+    open_button.clicked.connect(lambda: _open_layout_designer(controller))
+    actions.addWidget(open_button)
+    outer.addLayout(actions)
+    outer.addStretch(1)
+    return widget
+
+
+def _open_layout_designer(controller: PreferencesController) -> None:
+    from .workspaces_dialog import show
+
+    show(controller.ctx)
+
+
+def _build_general_tab(controller: PreferencesController, QtWidgets):
+    widget = QtWidgets.QWidget()
+    widget.setObjectName("generalTab")
+    form = QtWidgets.QFormLayout(widget)
+    form.setContentsMargins(12, 12, 12, 12)
+    form.setHorizontalSpacing(24)
+    form.setVerticalSpacing(14)
+    form.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
+
+    controller.gap_spin = QtWidgets.QSpinBox()
+    controller.gap_spin.setRange(0, 200)
+    controller.gap_spin.setSuffix(" px")
+    controller.gap_spin.setMinimumHeight(32)
+    controller.gap_spin.valueChanged.connect(lambda _value: controller.mark_dirty())
+    form.addRow("Gap", controller.gap_spin)
+
+    controller.cycle_spin = QtWidgets.QDoubleSpinBox()
+    controller.cycle_spin.setRange(0.1, 10.0)
+    controller.cycle_spin.setSingleStep(0.1)
+    controller.cycle_spin.setDecimals(1)
+    controller.cycle_spin.setSuffix(" s")
+    controller.cycle_spin.setMinimumHeight(32)
+    controller.cycle_spin.valueChanged.connect(lambda _value: controller.mark_dirty())
+    form.addRow("Cycle timeout", controller.cycle_spin)
+
+    controller.almost_spin = QtWidgets.QSpinBox()
+    controller.almost_spin.setRange(50, 100)
+    controller.almost_spin.setSuffix(" %")
+    controller.almost_spin.setMinimumHeight(32)
+    controller.almost_spin.valueChanged.connect(lambda _value: controller.mark_dirty())
+    form.addRow("Middle majority", controller.almost_spin)
+
+    controller.drag_checkbox = QtWidgets.QCheckBox("Drag to edge snapping")
+    controller.drag_checkbox.toggled.connect(lambda _checked: controller.mark_dirty())
+    form.addRow("", controller.drag_checkbox)
+
+    controller.launch_checkbox = QtWidgets.QCheckBox("Launch at login")
+    controller.launch_checkbox.toggled.connect(lambda _checked: controller.mark_dirty())
+    form.addRow("", controller.launch_checkbox)
+
+    return widget
+
+
+def _load_settings_into_widgets(controller: PreferencesController, settings: Settings) -> None:
+    from PySide6 import QtGui
+
+    for action, edit in controller.shortcut_widgets.items():
+        combo = settings.shortcuts.get(action, DEFAULT_SHORTCUTS.get(action, ""))
+        edit.setKeySequence(QtGui.QKeySequence(_qt_sequence_text(combo)))
+
+    if controller.gap_spin is not None:
+        controller.gap_spin.setValue(int(settings.gap))
+    if controller.cycle_spin is not None:
+        controller.cycle_spin.setValue(float(settings.cycle_idle_timeout))
+    if controller.almost_spin is not None:
+        controller.almost_spin.setValue(int(round(float(settings.almost_maximize_scale) * 100)))
+    if controller.drag_checkbox is not None:
+        controller.drag_checkbox.setChecked(bool(settings.drag_to_edge_enabled))
+    if controller.launch_checkbox is not None:
+        controller.launch_checkbox.setChecked(bool(settings.launch_at_login))
+
+
+def _reset_defaults(controller: PreferencesController) -> None:
+    from PySide6 import QtGui
+
+    for action, combo in DEFAULT_SHORTCUTS.items():
+        widget = controller.shortcut_widgets.get(action)
+        if widget is not None:
+            widget.setKeySequence(QtGui.QKeySequence(_qt_sequence_text(combo)))
+    controller.mark_dirty()
+
+
+def _sequence_text(widget) -> str:
+    from PySide6 import QtGui
+
+    return widget.keySequence().toString(QtGui.QKeySequence.PortableText).strip()
+
+
+def _enabled_shortcut_count(shortcuts: dict[Action, str]) -> int:
+    return sum(1 for combo in shortcuts.values() if combo.strip())
+
+
+def _shortcut_button_text(combo: str) -> str:
+    if not combo.strip():
+        return "Disabled"
+    try:
+        parsed = parse(combo)
+    except ShortcutParseError:
+        return combo.strip()
+    parts = [_DISPLAY_MODIFIERS[m] for m in parsed.modifiers]
+    key = _DISPLAY_KEYS.get(parsed.key)
+    if key is None:
+        key = parsed.key.upper() if len(parsed.key) == 1 and parsed.key.isalpha() else parsed.key
+    parts.append(key)
+    return "+".join(parts)
+
+
+def _qt_sequence_text(combo: str) -> str:
+    if not combo.strip():
+        return ""
+    parsed = parse(combo)
+    parts = [_QT_MODIFIERS[m] for m in parsed.modifiers]
+    key = _QT_KEYS.get(parsed.key)
+    if key is None:
+        key = parsed.key.upper() if len(parsed.key) == 1 and parsed.key.isalpha() else parsed.key
+    parts.append(key)
+    return "+".join(parts)

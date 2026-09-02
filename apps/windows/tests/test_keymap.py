@@ -101,6 +101,12 @@ def test_translate_ctrl_alt_left():
     assert vk == 0x25
 
 
+def test_translate_ctrl_windows_left():
+    mask, vk = translate(parse("ctrl+windows+left"), no_repeat=False)
+    assert mask == MOD_CONTROL | MOD_WIN
+    assert vk == 0x25
+
+
 def test_translate_no_repeat_flag():
     mask, _ = translate(parse("ctrl+alt+left"))
     assert mask & MOD_NOREPEAT

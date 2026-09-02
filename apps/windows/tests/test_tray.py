@@ -6,6 +6,9 @@ display + QApplication.
 """
 
 import importlib
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def test_tray_module_imports_without_pyside6():
@@ -28,10 +31,39 @@ def test_tray_controller_defaults():
     assert tc.on_open_preferences is None
 
 
+def test_tray_uses_custom_tray_logo(monkeypatch, tmp_path):
+    from PySide6 import QtGui, QtWidgets
+    from windows_rectangle.ui.tray import _build_icon
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    logo_dir = tmp_path / "logo"
+    logo_dir.mkdir()
+    source = QtGui.QPixmap(32, 32)
+    source.fill(QtGui.QColor("#dc143c"))
+    assert source.save(str(logo_dir / "tray_logo.png"))
+    monkeypatch.setenv("WINDOWS_RECTANGLE_LOGO_DIR", str(logo_dir))
+
+    rendered = _build_icon(QtGui).pixmap(32, 32).toImage()
+
+    assert rendered.pixelColor(16, 16).name() == "#dc143c"
+    app.processEvents()
+
+
+def test_tray_primary_click_opens_preferences():
+    from PySide6 import QtWidgets
+    from windows_rectangle.ui.tray import _handle_activation
+
+    opened = []
+    _handle_activation(QtWidgets.QSystemTrayIcon.Trigger, lambda: opened.append(True))
+    _handle_activation(QtWidgets.QSystemTrayIcon.Context, lambda: opened.append(True))
+
+    assert opened == [True]
+
+
 def test_workspace_result_summary_is_compact():
     from types import SimpleNamespace
 
-    from windows_rectangle.ui.tray import _workspace_result_text
+    from windows_rectangle.ui.tray import workspace_result_text
 
     result = SimpleNamespace(
         placements=(
@@ -41,7 +73,7 @@ def test_workspace_result_summary_is_compact():
             SimpleNamespace(status="blocked"),
         )
     )
-    assert _workspace_result_text(result) == "2 moved · 1 not found · 1 blocked"
+    assert workspace_result_text(result) == "2 moved · 1 not found · 1 blocked"
 
 
 def _make_fake_report(*, bound_count=0, would_bind_count=0, failed_count=0, total=0):

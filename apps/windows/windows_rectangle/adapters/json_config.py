@@ -18,7 +18,7 @@ from ..core.actions import DEFAULT_SHORTCUTS, Action
 from ..core.workspaces import NormalizedRect, WindowMatcher, Workspace, WorkspacePlacement
 from ..ports.config_store import Settings
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _log = logging.getLogger(__name__)
 
@@ -60,6 +60,9 @@ class JsonConfigStore:
                 self.path,
                 e,
             )
+            return Settings()
+        if not isinstance(raw, dict):
+            _log.warning("config at %s is not a JSON object, falling back to defaults", self.path)
             return Settings()
         return _from_dict(raw)
 
@@ -224,6 +227,7 @@ def _workspace_to_dict(workspace: Workspace) -> dict[str, object]:
                 "id": placement.id,
                 "name": placement.name,
                 "monitor_index": placement.monitor_index,
+                "launch_command": placement.launch_command,
                 "matcher": asdict(placement.matcher),
                 "rect": asdict(placement.rect),
             }
@@ -251,6 +255,7 @@ def _workspace_from_dict(raw: dict[str, object]) -> Workspace | None:
                     id=str(item.get("id", "")),
                     name=str(item.get("name", "")),
                     monitor_index=int(item.get("monitor_index", 0)),
+                    launch_command=str(item.get("launch_command", "")),
                     matcher=WindowMatcher(
                         process_name=str(matcher_raw.get("process_name", "")),
                         title_contains=str(matcher_raw.get("title_contains", "")),

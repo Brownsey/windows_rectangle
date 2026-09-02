@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -25,6 +27,7 @@ class WorkspaceWindows(Protocol):
     def is_maximized(self, handle: object) -> bool: ...
     def restore_window(self, handle: object) -> None: ...
     def set_window_rect(self, handle: object, rect: Rect) -> bool: ...
+    def launch(self, command: str) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,4 +102,64 @@ def apply_workspace(manager: WorkspaceWindows, workspace: Workspace) -> Workspac
             status = "moved" if ok else "blocked"
             detail = "" if ok else "Windows refused the move; administrator access may be needed"
             results.append(PlacementResult(placement.id, status, detail))
+    return WorkspaceResult(tuple(results))
+
+
+def launch_and_apply_workspace(
+    manager: WorkspaceWindows,
+    workspace: Workspace,
+    *,
+    timeout: float = 12.0,
+    poll_interval: float = 0.25,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> WorkspaceResult:
+    """Launch missing configured apps, wait for their windows, then arrange all matches."""
+    initial = plan_workspace(workspace, manager.list_windows(), manager.list_work_areas())
+    matched = {move.placement_id for move in initial.moves}
+    launcher = getattr(manager, "launch", None)
+    launched: set[str] = set()
+    launch_errors: dict[str, str] = {}
+    for placement in workspace.placements:
+        command = placement.launch_command.strip()
+        if placement.id in matched or not command:
+            continue
+        if launcher is None:
+            launch_errors[placement.id] = "This window manager cannot launch applications"
+            continue
+        try:
+            launcher(command)
+            launched.add(placement.id)
+        except OSError as exc:
+            launch_errors[placement.id] = str(exc)
+
+    if launched and timeout > 0:
+        deadline = monotonic() + timeout
+        while monotonic() < deadline:
+            current = plan_workspace(workspace, manager.list_windows(), manager.list_work_areas())
+            current_matches = {move.placement_id for move in current.moves}
+            if launched <= current_matches:
+                break
+            sleep(min(poll_interval, max(0.0, deadline - monotonic())))
+
+    applied = apply_workspace(manager, workspace)
+    results: list[PlacementResult] = []
+    for result in applied.placements:
+        if result.placement_id in launch_errors:
+            results.append(
+                PlacementResult(
+                    result.placement_id, "launch_failed", launch_errors[result.placement_id]
+                )
+            )
+        elif result.placement_id in launched and result.status == "not_found":
+            results.append(
+                PlacementResult(
+                    result.placement_id,
+                    "not_found",
+                    "Application launched but no matching window appeared within "
+                    f"{timeout:g} seconds",
+                )
+            )
+        else:
+            results.append(result)
     return WorkspaceResult(tuple(results))

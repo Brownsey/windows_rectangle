@@ -1,8 +1,7 @@
 """Tests for windows_rectangle.core.monitors."""
 
-from windows_rectangle.core.geometry import Rect
-
 from windows_rectangle.core import monitors
+from windows_rectangle.core.geometry import Rect
 
 from .conftest import make_monitor
 

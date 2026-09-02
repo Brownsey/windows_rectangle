@@ -57,6 +57,7 @@ def test_workspace_round_trips_with_active_selection(store):
                 name="Slack top left",
                 matcher=WindowMatcher(process_name="slack.exe", title_contains="Slack"),
                 rect=NormalizedRect(0, 0, 5000, 5000),
+                launch_command=r"C:\Apps\Slack.exe",
             ),
         ),
     )
@@ -93,6 +94,15 @@ def test_malformed_workspaces_are_skipped_and_invalid_active_id_is_cleared(store
     loaded = store.load()
     assert loaded.workspaces == ()
     assert loaded.active_workspace_id == ""
+
+
+def test_non_object_config_falls_back_to_defaults(store):
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text("[]", encoding="utf-8")
+
+    loaded = store.load()
+
+    assert loaded == Settings()
 
 
 def test_save_creates_parent_dir(tmp_path):

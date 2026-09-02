@@ -131,7 +131,10 @@ def test_conflicts_ignores_unparseable():
 # ----- is_reserved() -------------------------------------------------
 
 
-@pytest.mark.parametrize("combo", ["win+left", "Win+Right", "WIN+UP", "alt+f4"])
+@pytest.mark.parametrize(
+    "combo",
+    ["win+left", "Win+Right", "WIN+UP", "ctrl+win+left", "ctrl+win+right", "alt+f4"],
+)
 def test_is_reserved_known_os_combos(combo):
     assert is_reserved(combo)
 

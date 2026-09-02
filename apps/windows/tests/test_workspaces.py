@@ -67,6 +67,51 @@ def test_match_workspace_windows_is_geometry_independent_and_one_to_one():
     assert result.unmatched_placements == ("bob",)
 
 
+def test_specific_workspace_rule_wins_before_broad_rule():
+    rect = NormalizedRect(0, 0, 5000, 10000)
+    placements = (
+        WorkspacePlacement("broad", "Any Chrome", WindowMatcher(process_name="chrome"), rect),
+        WorkspacePlacement(
+            "mail",
+            "Mail",
+            WindowMatcher(process_name="chrome", title_contains="Mail"),
+            rect,
+        ),
+    )
+    windows = [
+        WindowIdentity(1, "Mail - Chrome", "chrome.exe"),
+        WindowIdentity(2, "Docs - Chrome", "chrome.exe"),
+    ]
+
+    result = match_workspace_windows(placements, windows)
+
+    assert [(match.placement_id, match.handle) for match in result.matches] == [
+        ("broad", 2),
+        ("mail", 1),
+    ]
+
+
+def test_broad_rule_does_not_take_only_window_matching_specific_rule():
+    rect = NormalizedRect(0, 0, 5000, 10000)
+    placements = (
+        WorkspacePlacement("broad", "Any Chrome", WindowMatcher(process_name="chrome"), rect),
+        WorkspacePlacement(
+            "mail",
+            "Mail",
+            WindowMatcher(title_contains="Mail"),
+            rect,
+        ),
+    )
+
+    result = match_workspace_windows(
+        placements,
+        [WindowIdentity(1, "Mail - Chrome", "chrome.exe")],
+    )
+
+    assert [(match.placement_id, match.handle) for match in result.matches] == [("mail", 1)]
+    assert result.unmatched_placements == ("broad",)
+
+
 def test_invalid_regex_and_empty_matcher_are_rejected():
     with pytest.raises(ValueError):
         WindowMatcher()
