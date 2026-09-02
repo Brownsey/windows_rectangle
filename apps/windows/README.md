@@ -130,8 +130,15 @@ Each rule can match an executable name, stable text in the window title, or a ti
 regular expression. Combining the process and title is recommended when several
 windows use the same application—for example, multiple RuneLite accounts. Choose a
 monitor and position preset, or drag the labeled application card on the visual
-monitor canvas. Assigning a workspace shortcut restores every matched window later,
-including after the applications have been restarted.
+monitor canvas. Drag inside a card to move it, or drag an edge/corner to create any
+custom size—layouts are not limited to halves, thirds, or presets. Alternatively,
+arrange the real application windows on your desktop and select **Record current
+positions** to learn their exact sizes, positions, and monitors.
+
+Valid changes save and apply automatically. If a shortcut, matcher, or storage error
+prevents saving, the editor keeps the change available for correction or retry instead
+of silently discarding it. Assigning a workspace shortcut restores every matched
+window later, including after the applications have been restarted.
 
 Use **Test matches** before saving to see which rules currently match without moving
 any windows. The match-status column identifies missing applications or titles.

@@ -39,6 +39,8 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [x] Add per-rule match status, workspace duplication, unsaved-change Save/Discard/Cancel handling, clearer workspace guidance, and end-user documentation.
 - [x] Make the visual editor genuinely freeform: basis-point-precision movement, draggable edge/corner resizing, visible handles, minimum sizes, and monitor-bound clamping.
 - [x] Add “Record current positions” to learn exact live window rectangles and monitor assignments while preserving saved geometry for unmatched applications.
+- [x] Autosave and immediately apply every valid workspace edit; retain dirty state and surface errors when validation, persistence, or runtime application fails.
+- [x] Replace the redundant Apply/Save workflow with automatic saving, a manual retry action, and a single Done action.
 - [x] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
 - [x] Generate `research/Windows-Rectangle-UX-Research.docx` with first-party citations and a prioritized roadmap.
 
@@ -65,10 +67,11 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - After templates and workspace UX polish: 609 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed. Optional Qt installation was attempted but the package mirror did not complete, so rendered Qt tests remain skipped.
 - After freeform canvas resizing: 612 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - After exact live-position recording: 615 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
+- After reliable workspace autosave: 618 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - Research DOCX structural QA: valid archive, 89 paragraphs, 20 headings, one table, and 10 external hyperlinks. Visual rendering was unavailable.
 - Updated subprocess and PyInstaller-spec tests for the new `apps/windows` package location.
 - Updated the PyInstaller entry point and search path for the monorepo layout.
 
 ## Next iteration
 
-Add canvas resizing handles and per-monitor canvas filtering, then integrate Workspaces into the primary Preferences navigation before continuing dense-grid parity.
+Add per-monitor canvas filtering and integrate Workspaces into the primary Preferences navigation before continuing dense-grid parity.

@@ -43,6 +43,13 @@ class PositionRecordResult:
     not_found: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceSaveOutcome:
+    saved: bool
+    validation: WorkspaceValidation
+    error: str = ""
+
+
 class WorkspaceEditorController:
     def __init__(self, settings: Settings) -> None:
         self.baseline = deepcopy(settings)
@@ -296,6 +303,22 @@ class WorkspaceEditorController:
         self.baseline = deepcopy(self.staged)
         self.staged = deepcopy(self.baseline)
         return report
+
+    def autosave(self, on_save=None, on_apply=None) -> WorkspaceSaveOutcome:
+        """Persist a valid staged snapshot while retaining dirty state on failure."""
+        report = self.validate()
+        if not report.ok:
+            return WorkspaceSaveOutcome(False, report)
+        try:
+            if on_save is not None:
+                on_save(self.staged)
+            if on_apply is not None:
+                on_apply(self.staged)
+        except Exception as exc:  # noqa: BLE001 - adapters surface errors in the UI
+            return WorkspaceSaveOutcome(False, report, str(exc))
+        self.baseline = deepcopy(self.staged)
+        self.staged = deepcopy(self.baseline)
+        return WorkspaceSaveOutcome(True, report)
 
     def _replace_workspace(self, workspace_id: str, **changes) -> None:
         found = False

@@ -117,7 +117,7 @@ class WorkspaceDialog:
         elif self.editor.is_dirty:
             text, state = "Unsaved workspace changes", "dirty"
         else:
-            text, state = "Workspace settings saved", "saved"
+            text, state = "All changes saved automatically", "saved"
         self.status.setText(text)
         self.status.setProperty("status", state)
         self.status.style().unpolish(self.status)
@@ -133,7 +133,7 @@ class WorkspaceDialog:
         except ValueError as exc:
             self.update_validation(str(exc))
             return
-        self.update_validation()
+        self.autosave()
 
     def edit_placement(self, item) -> None:
         if self.loading or not self.selected_id or item.column() == 5:
@@ -153,16 +153,27 @@ class WorkspaceDialog:
         except (TypeError, ValueError) as exc:
             self.update_validation(str(exc))
             return
-        self.update_validation()
+        self.autosave()
 
-    def commit(self, close: bool = False) -> bool:
+    def autosave(self, success_text: str = "Saved automatically") -> bool:
         store = getattr(self.ctx, "config_store", None)
-        report = self.editor.commit(
+        outcome = self.editor.autosave(
             getattr(store, "save", None),
             self.ctx.apply_settings,
         )
+        if outcome.error:
+            self.update_validation(f"Autosave failed: {outcome.error}")
+            return False
+        if not outcome.saved:
+            self.update_validation()
+            return False
         self.update_validation()
-        if not report.ok:
+        self.status.setText(success_text)
+        self.status.setProperty("status", "saved")
+        return True
+
+    def commit(self, close: bool = False) -> bool:
+        if not self.autosave("Saved"):
             return False
         if close:
             self.window.hide()
@@ -296,9 +307,8 @@ def _build(ctx) -> WorkspaceDialog:
     status = QtWidgets.QLabel()
     status.setObjectName("workspaceStatus")
     buttons = QtWidgets.QDialogButtonBox()
-    apply_button = buttons.addButton("Apply", QtWidgets.QDialogButtonBox.ApplyRole)
-    save_button = buttons.addButton("Save", QtWidgets.QDialogButtonBox.AcceptRole)
-    close_button = buttons.addButton("Close", QtWidgets.QDialogButtonBox.RejectRole)
+    apply_button = buttons.addButton("Save now", QtWidgets.QDialogButtonBox.ApplyRole)
+    close_button = buttons.addButton("Done", QtWidgets.QDialogButtonBox.AcceptRole)
     footer = QtWidgets.QHBoxLayout()
     footer.addWidget(status, 1)
     footer.addWidget(buttons)
@@ -335,7 +345,6 @@ def _build(ctx) -> WorkspaceDialog:
     test_matches.clicked.connect(lambda: _test_matches(controller, QtWidgets))
     restore.clicked.connect(lambda: _restore(controller, QtWidgets))
     apply_button.clicked.connect(lambda: controller.commit(False))
-    save_button.clicked.connect(lambda: controller.commit(True))
     close_button.clicked.connect(lambda: _close(controller, QtWidgets))
     _apply_style(window)
     controller.refresh()
@@ -365,6 +374,7 @@ def _canvas_moved(controller: WorkspaceDialog, placement_id: str, rect) -> None:
     controller.editor.set_placement_rect(controller.selected_id, placement_id, rect)
     controller.load_selected()
     _canvas_selected(controller, placement_id)
+    controller.autosave("Custom position saved automatically")
 
 
 def _create_from_template(controller: WorkspaceDialog, QtWidgets) -> None:
@@ -392,6 +402,7 @@ def _create_from_template(controller: WorkspaceDialog, QtWidgets) -> None:
     controller.selected_id = workspace.id
     controller.match_results.clear()
     controller.refresh()
+    controller.autosave("Template saved automatically")
 
 
 def _duplicate_workspace(controller: WorkspaceDialog) -> None:
@@ -402,6 +413,7 @@ def _duplicate_workspace(controller: WorkspaceDialog) -> None:
     controller.selected_id = workspace.id
     controller.match_results.clear()
     controller.refresh()
+    controller.autosave("Duplicate saved automatically")
 
 
 def _close(controller: WorkspaceDialog, QtWidgets) -> None:
@@ -435,6 +447,7 @@ def _create_empty(controller: WorkspaceDialog, QtWidgets) -> None:
         return
     controller.selected_id = workspace.id
     controller.refresh()
+    controller.autosave("Workspace saved automatically")
 
 
 def _add_application(controller: WorkspaceDialog, QtWidgets) -> None:
@@ -481,6 +494,7 @@ def _add_application(controller: WorkspaceDialog, QtWidgets) -> None:
         controller.update_validation(str(exc))
         return
     controller.load_selected()
+    controller.autosave("Application rule saved automatically")
 
 
 def _choose_position(controller: WorkspaceDialog, row: int, QtWidgets) -> None:
@@ -500,6 +514,7 @@ def _choose_position(controller: WorkspaceDialog, row: int, QtWidgets) -> None:
         controller.selected_id, str(item.data(0x0100)), preset.id
     )
     controller.load_selected()
+    controller.autosave("Position saved automatically")
 
 
 def _capture(controller: WorkspaceDialog, QtWidgets) -> None:
@@ -517,6 +532,7 @@ def _capture(controller: WorkspaceDialog, QtWidgets) -> None:
         return
     controller.selected_id = workspace.id
     controller.refresh()
+    controller.autosave("Captured workspace saved automatically")
 
 
 def _delete_workspace(controller: WorkspaceDialog, QtWidgets) -> None:
@@ -534,6 +550,7 @@ def _delete_workspace(controller: WorkspaceDialog, QtWidgets) -> None:
         controller.editor.delete_workspace(workspace.id)
         controller.selected_id = ""
         controller.refresh()
+        controller.autosave("Workspace deleted")
 
 
 def _delete_rule(controller: WorkspaceDialog) -> None:
@@ -545,6 +562,7 @@ def _delete_rule(controller: WorkspaceDialog) -> None:
         return
     controller.editor.delete_placement(controller.selected_id, str(item.data(0x0100)))
     controller.load_selected()
+    controller.autosave("Application rule removed")
 
 
 def _test_matches(controller: WorkspaceDialog, QtWidgets) -> None:
@@ -573,6 +591,7 @@ def _record_positions(controller: WorkspaceDialog) -> None:
         message += f" · {len(result.not_found)} not found and left unchanged"
     controller.status.setText(message)
     controller.status.setProperty("status", "warning" if result.not_found else "dirty")
+    controller.autosave(message + " · saved automatically")
 
 
 def _restore(controller: WorkspaceDialog, QtWidgets) -> None:

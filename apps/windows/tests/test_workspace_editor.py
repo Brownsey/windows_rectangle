@@ -216,3 +216,39 @@ def test_record_current_positions_preserves_missing_rules():
     assert result.updated == 0
     assert result.not_found == ("slack",)
     assert controller.get("office") == workspace()
+
+
+def test_autosave_persists_applies_and_clears_dirty_state():
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace(),)))
+    controller.rename("office", "Saved automatically")
+    saved = []
+    applied = []
+    outcome = controller.autosave(saved.append, applied.append)
+    assert outcome.saved
+    assert saved[0].workspaces[0].name == "Saved automatically"
+    assert applied[0].workspaces[0].name == "Saved automatically"
+    assert not controller.is_dirty
+
+
+def test_autosave_failure_is_visible_and_keeps_retryable_state():
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace(),)))
+    controller.rename("office", "Still dirty")
+
+    def fail(_settings):
+        raise OSError("disk full")
+
+    outcome = controller.autosave(fail)
+    assert not outcome.saved
+    assert outcome.error == "disk full"
+    assert controller.is_dirty
+
+
+def test_autosave_does_not_write_invalid_settings():
+    controller = WorkspaceEditorController(
+        Settings(workspaces=(workspace("ctrl+alt+1"), Workspace("two", "Office", ())))
+    )
+    saved = []
+    outcome = controller.autosave(saved.append)
+    assert not outcome.saved
+    assert outcome.validation.errors
+    assert saved == []
