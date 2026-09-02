@@ -34,6 +34,7 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [x] Add a reusable integer-grid tile primitive and use it for complete sixths, orientation-aware quadrant thirds, and vertical thirds/two-thirds.
 - [x] Allow custom setups to be authored while applications are closed: empty workspaces, manual process/title rules, monitor selection, and reusable named position presets.
 - [x] Add workspace UI actions for creating an empty setup, adding an application, and changing a rule's position without recapturing.
+- [x] Add a visual monitor canvas with labeled application cards, synchronized table selection, drag-to-position, edge clamping, and normalized grid snapping.
 - [x] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
 - [x] Generate `research/Windows-Rectangle-UX-Research.docx` with first-party citations and a prioritized roadmap.
 
@@ -56,6 +57,7 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - After completing the P0 action catalogue: 585 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - After the first reusable dense-grid pass: 596 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - After manual custom-setup authoring: 602 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
+- After visual workspace editing: 605 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - Research DOCX structural QA: valid archive, 89 paragraphs, 20 headings, one table, and 10 external hyperlinks. Visual rendering was unavailable.
 - Updated subprocess and PyInstaller-spec tests for the new `apps/windows` package location.
 - Updated the PyInstaller entry point and search path for the monorepo layout.

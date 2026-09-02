@@ -8,6 +8,7 @@ from typing import cast
 
 from ..core.workspace_presets import POSITION_PRESETS, preset_label
 from ..core.workspace_service import WorkspaceWindows, apply_workspace
+from .workspace_canvas import create_layout_canvas
 from .workspace_editor import WorkspaceEditorController
 
 _log = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ class WorkspaceDialog:
     name_edit: object
     shortcut_edit: object
     placements: object
+    canvas: object
     status: object
     apply_button: object
     selected_id: str = ""
@@ -51,6 +53,7 @@ class WorkspaceDialog:
                 self.name_edit.clear()
                 self.shortcut_edit.clear()
                 self.placements.setRowCount(0)
+                self.canvas.set_placements(())
         finally:
             self.loading = False
         self.update_validation()
@@ -84,6 +87,7 @@ class WorkspaceDialog:
                         cell.setFlags(cell.flags() & ~QtCore.Qt.ItemIsEditable)
                     self.placements.setItem(row, column, cell)
             self.placements.resizeRowsToContents()
+            self.canvas.set_placements(workspace.placements)
         finally:
             self.loading = False
         self.update_validation()
@@ -223,6 +227,11 @@ def _build(ctx) -> WorkspaceDialog:
     )
     hint.setWordWrap(True)
     detail_layout.addWidget(hint)
+    canvas = create_layout_canvas(
+        lambda placement_id, rect: _canvas_moved(controller, placement_id, rect),
+        lambda placement_id: _canvas_selected(controller, placement_id),
+    )
+    detail_layout.addWidget(canvas)
     placements = QtWidgets.QTableWidget()
     placements.setObjectName("workspacePlacements")
     placements.setAccessibleName("Window matching and placement rules")
@@ -269,6 +278,7 @@ def _build(ctx) -> WorkspaceDialog:
         name_edit,
         shortcut_edit,
         placements,
+        canvas,
         status,
         apply_button,
     )
@@ -276,6 +286,7 @@ def _build(ctx) -> WorkspaceDialog:
     name_edit.editingFinished.connect(controller.edit_workspace_fields)
     shortcut_edit.editingFinished.connect(controller.edit_workspace_fields)
     placements.itemChanged.connect(controller.edit_placement)
+    placements.itemSelectionChanged.connect(lambda: _table_selected(controller))
     placements.cellDoubleClicked.connect(
         lambda row, column: _choose_position(controller, row, QtWidgets) if column == 5 else None
     )
@@ -292,6 +303,31 @@ def _build(ctx) -> WorkspaceDialog:
     _apply_style(window)
     controller.refresh()
     return controller
+
+
+def _table_selected(controller: WorkspaceDialog) -> None:
+    row = controller.placements.currentRow()
+    if row < 0:
+        return
+    item = controller.placements.item(row, 0)
+    if item is not None:
+        controller.canvas.select(str(item.data(0x0100)))
+
+
+def _canvas_selected(controller: WorkspaceDialog, placement_id: str) -> None:
+    for row in range(controller.placements.rowCount()):
+        item = controller.placements.item(row, 0)
+        if item is not None and str(item.data(0x0100)) == placement_id:
+            controller.placements.selectRow(row)
+            return
+
+
+def _canvas_moved(controller: WorkspaceDialog, placement_id: str, rect) -> None:
+    if not controller.selected_id:
+        return
+    controller.editor.set_placement_rect(controller.selected_id, placement_id, rect)
+    controller.load_selected()
+    _canvas_selected(controller, placement_id)
 
 
 def _create_empty(controller: WorkspaceDialog, QtWidgets) -> None:
