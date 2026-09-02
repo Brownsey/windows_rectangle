@@ -76,3 +76,19 @@ def test_len_tracks_stack_size():
     assert len(r) == 2
     r.run()
     assert len(r) == 0
+
+
+def test_iter_yields_handlers():
+    """__iter__ exposes the queued handlers in registration order — used
+    by debug/introspection (e.g. asserting a cleanup is wired)."""
+
+    def a():
+        pass
+
+    def b():
+        pass
+
+    r = CleanupRegistry()
+    r.register(a)
+    r.register(b)
+    assert list(r) == [a, b]

@@ -12,17 +12,23 @@ from dataclasses import dataclass
 
 from ..ports.window_manager import WindowManager
 from . import monitors as monitors_mod
-from .actions import (
-    ALMOST_MAXIMIZE_SCALE,
-    Action,
-    apply,
-    clamp_almost_maximize_scale,
-    is_geometry_action,
-)
+from .actions import Action, apply, is_geometry_action
 from .cycle import CycleState
 from .eligibility import Capability, classify
 from .geometry import Rect
 from .history import History
+
+_DISPLAY_ACTION_INDEX = {
+    Action.DISPLAY_1: 0,
+    Action.DISPLAY_2: 1,
+    Action.DISPLAY_3: 2,
+    Action.DISPLAY_4: 3,
+    Action.DISPLAY_5: 4,
+    Action.DISPLAY_6: 5,
+    Action.DISPLAY_7: 6,
+    Action.DISPLAY_8: 7,
+    Action.DISPLAY_9: 8,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,14 +54,17 @@ class Dispatcher:
         cycle: CycleState | None = None,
         history: History | None = None,
         record_history: bool = True,
-        almost_maximize_scale: float = ALMOST_MAXIMIZE_SCALE,
+        almost_maximize_scale: float | None = None,
     ) -> None:
         self._windows = windows
         self._gap = gap
-        self._almost_maximize_scale = clamp_almost_maximize_scale(almost_maximize_scale)
         self._cycle = cycle if cycle is not None else CycleState()
         self._history = history if history is not None else History()
         self._record = record_history
+        # None → use the module-level default. Settings-driven callers
+        # pass settings.almost_maximize_scale explicitly so the prefs
+        # slider takes effect at runtime.
+        self.almost_maximize_scale = almost_maximize_scale
 
     # ----- public API -----
 
@@ -66,22 +75,6 @@ class Dispatcher:
     @gap.setter
     def gap(self, value: int) -> None:
         self._gap = max(0, value)
-
-    @property
-    def cycle_idle_timeout(self) -> float:
-        return self._cycle.idle_timeout
-
-    @cycle_idle_timeout.setter
-    def cycle_idle_timeout(self, value: float) -> None:
-        self._cycle.idle_timeout = max(0.1, value)
-
-    @property
-    def almost_maximize_scale(self) -> float:
-        return self._almost_maximize_scale
-
-    @almost_maximize_scale.setter
-    def almost_maximize_scale(self, value: float) -> None:
-        self._almost_maximize_scale = clamp_almost_maximize_scale(value)
 
     def dispatch(self, action: Action) -> DispatchResult:
         handle = self._windows.get_active_window()
@@ -94,13 +87,22 @@ class Dispatcher:
         if action in (Action.NEXT_DISPLAY, Action.PREV_DISPLAY):
             return self._move_to_neighbor_display(handle, action)
 
+        if action in _DISPLAY_ACTION_INDEX:
+            return self._move_to_display(handle, action, _DISPLAY_ACTION_INDEX[action])
+
         if action == Action.TOGGLE_ALWAYS_ON_TOP:
             return self._toggle_always_on_top(handle)
 
         if is_geometry_action(action):
             return self._apply_geometry(handle, action)
 
-        return DispatchResult(action, handle, None, None, False, "unsupported")
+        # Defensive: every defined Action is currently RESTORE,
+        # NEXT/PREV_DISPLAY, or geometry, so this branch is unreachable
+        # until someone adds a new Action without wiring it. The structured
+        # result is safer than a KeyError.
+        return DispatchResult(  # pragma: no cover
+            action, handle, None, None, False, "unsupported"
+        )
 
     # ----- internals -----
 
@@ -120,7 +122,7 @@ class Dispatcher:
             before,
             monitor.work_area,
             self._gap,
-            almost_maximize_scale=self._almost_maximize_scale,
+            almost_maximize_scale=self.almost_maximize_scale,
         )
 
         if Capability.RESIZE not in cap:
@@ -151,18 +153,18 @@ class Dispatcher:
         target = monitors_mod.move_to_monitor(before, current, destination)
         return self._move(handle, action, before, target)
 
-    def _toggle_always_on_top(self, handle: object) -> DispatchResult:
+    def _move_to_display(
+        self, handle: object, action: Action, display_index: int
+    ) -> DispatchResult:
+        monitors = self._windows.list_monitors()
+        if display_index >= len(monitors):
+            return DispatchResult(action, handle, None, None, False, "display_unavailable")
+        current = self._windows.monitor_for_window(handle)
+        if current is None:
+            return DispatchResult(action, handle, None, None, False, "no_monitor")
         before = self._windows.get_window_rect(handle)
-        enabled = not self._windows.is_always_on_top(handle)
-        ok = self._windows.set_always_on_top(handle, enabled)
-        return DispatchResult(
-            Action.TOGGLE_ALWAYS_ON_TOP,
-            handle,
-            before,
-            before if ok else None,
-            ok,
-            "ok" if ok else "blocked",
-        )
+        target = monitors_mod.move_to_monitor(before, current, monitors[display_index])
+        return self._move(handle, action, before, target)
 
     def _restore(self, handle: object) -> DispatchResult:
         previous = self._history.pop(handle)
@@ -176,6 +178,19 @@ class Dispatcher:
             handle,
             before,
             previous if ok else None,
+            ok,
+            "ok" if ok else "blocked",
+        )
+
+    def _toggle_always_on_top(self, handle: object) -> DispatchResult:
+        before = self._windows.get_window_rect(handle)
+        enabled = not self._windows.is_always_on_top(handle)
+        ok = self._windows.set_always_on_top(handle, enabled)
+        return DispatchResult(
+            Action.TOGGLE_ALWAYS_ON_TOP,
+            handle,
+            before,
+            before if ok else None,
             ok,
             "ok" if ok else "blocked",
         )
@@ -205,6 +220,17 @@ class Dispatcher:
 
         If `is_alive` not supplied, falls back to the WindowManager port.
         Returns total entries dropped.
+
+        Memoizes is_alive across the cycle + history sweeps so a HWND
+        that appears in both data structures (the common case after the
+        user has dispatched anything) only costs one IsWindow syscall.
         """
-        check = is_alive if is_alive is not None else self._windows.is_window_valid
+        raw = is_alive if is_alive is not None else self._windows.is_window_valid
+        cache: dict[object, bool] = {}
+
+        def check(wid: object) -> bool:
+            if wid not in cache:
+                cache[wid] = raw(wid)
+            return cache[wid]
+
         return self._cycle.prune_stale(check) + self._history.prune_stale(check)

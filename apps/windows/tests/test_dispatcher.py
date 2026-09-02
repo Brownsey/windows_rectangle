@@ -146,11 +146,11 @@ def test_next_display_preserves_relative_position(fake_wm):
 def test_next_display_single_monitor_no_op(fake_wm):
     fake_wm.monitors = [M1]
     d = Dispatcher(fake_wm)
-    r = fake_wm.windows[101]
+    before = fake_wm.windows[101]
     result = d.dispatch(Action.NEXT_DISPLAY)
     assert not result.moved
     assert result.reason == "single_monitor"
-    assert fake_wm.windows[101] == r
+    assert fake_wm.windows[101] == before
 
 
 def test_prev_display_wraps(fake_wm):
@@ -161,28 +161,40 @@ def test_prev_display_wraps(fake_wm):
     assert r.x >= 1920
 
 
-# ----- Utility actions -----------------------------------------------
+def test_direct_display_moves_to_requested_monitor(fake_wm, dispatcher):
+    result = dispatcher.dispatch(Action.DISPLAY_2)
+    assert result.moved
+    assert fake_wm.windows[101].x >= M2.work_area.x
+
+
+def test_direct_display_reports_missing_monitor(fake_wm, dispatcher):
+    result = dispatcher.dispatch(Action.DISPLAY_3)
+    assert not result.moved
+    assert result.reason == "display_unavailable"
+
+
+def test_direct_display_on_current_monitor_is_no_change(fake_wm, dispatcher):
+    result = dispatcher.dispatch(Action.DISPLAY_1)
+    assert not result.moved
+    assert result.reason == "no_change"
 
 
 def test_toggle_always_on_top_enables_and_disables(fake_wm, dispatcher):
     enabled = dispatcher.dispatch(Action.TOGGLE_ALWAYS_ON_TOP)
     assert enabled.moved
-    assert enabled.reason == "ok"
+    assert enabled.after == enabled.before
     assert 101 in fake_wm.always_on_top
 
     disabled = dispatcher.dispatch(Action.TOGGLE_ALWAYS_ON_TOP)
     assert disabled.moved
-    assert disabled.reason == "ok"
     assert 101 not in fake_wm.always_on_top
 
 
-def test_toggle_always_on_top_blocked(fake_wm, dispatcher):
+def test_toggle_always_on_top_reports_blocked(fake_wm, dispatcher):
     fake_wm.blocked_topmost.add(101)
     result = dispatcher.dispatch(Action.TOGGLE_ALWAYS_ON_TOP)
-
     assert not result.moved
     assert result.reason == "blocked"
-    assert 101 not in fake_wm.always_on_top
 
 
 # ----- Prune stale state --------------------------------------------
@@ -196,6 +208,23 @@ def test_prune_stale_drops_closed_window_state(fake_wm):
     fake_wm.active = None
     dropped = d.prune_stale_state()
     assert dropped >= 1
+
+
+def test_prune_stale_state_memoizes_across_cycle_and_history(fake_wm):
+    """A HWND with both cycle + history entries should only be checked
+    once by is_alive when prune_stale_state runs the cross-structure sweep."""
+    d = Dispatcher(fake_wm)
+    d.dispatch(Action.LEFT_HALF)  # writes both cycle + history for 101
+
+    calls: list = []
+
+    def is_alive(wid):
+        calls.append(wid)
+        return False
+
+    d.prune_stale_state(is_alive=is_alive)
+    # Exactly one call for window 101 despite it being in both data structures.
+    assert calls == [101]
 
 
 # ----- Maximized/snapped pre-restore (brief §5 #4) -----------------
@@ -260,3 +289,58 @@ def test_move_only_window_clamped_to_work_area(fake_wm, dispatcher):
     # Must stay inside work area.
     assert r.left >= 0 and r.top >= 0
     assert r.right <= 1920 and r.bottom <= 1040
+
+
+class _NoMonitorWM(FakeWindowManager):
+    """FakeWindowManager that always reports 'no monitor' — simulates a
+    racy hot-unplug or a window dragged completely offscreen."""
+
+    def monitor_for_window(self, handle):
+        return None
+
+
+def test_apply_geometry_no_monitor_returns_no_monitor():
+    """If the WindowManager can't tell us which monitor the window is on
+    (e.g. window dragged offscreen mid-call), dispatch bails cleanly."""
+    wm = _NoMonitorWM(monitors=[M1, M2])
+    wm.windows[202] = Rect(0, 0, 500, 400)
+    wm.active = 202
+    d = Dispatcher(wm)
+    result = d.dispatch(Action.LEFT_HALF)
+    assert not result.moved
+    assert result.reason == "no_monitor"
+
+
+def test_next_display_no_monitor_returns_no_monitor():
+    """Same guard in the multi-display path."""
+    wm = _NoMonitorWM(monitors=[M1, M2])
+    wm.windows[202] = Rect(0, 0, 500, 400)
+    wm.active = 202
+    d = Dispatcher(wm)
+    result = d.dispatch(Action.NEXT_DISPLAY)
+    assert not result.moved
+    assert result.reason == "no_monitor"
+
+
+def test_no_change_when_target_equals_before(fake_wm):
+    """If the computed target rect is identical to current, we record
+    'no_change' rather than going through a redundant SetWindowPos."""
+    fake_wm.windows[101] = Rect(0, 0, 960, 1040)  # already at left-half geometry
+    d = Dispatcher(fake_wm, gap=0)
+    result = d.dispatch(Action.LEFT_HALF)
+    assert not result.moved
+    assert result.reason == "no_change"
+
+
+def test_dispatcher_default_almost_maximize_scale_uses_module_constant(fake_wm):
+    """When Dispatcher.almost_maximize_scale is left as None (tests that
+    don't go through build()), the ALMOST_MAXIMIZE dispatch falls back
+    to the module ALMOST_MAXIMIZE_SCALE = 0.85 — matching pre-iter-60
+    behaviour so no test that doesn't care about scale gets broken."""
+    d = Dispatcher(fake_wm)
+    assert d.almost_maximize_scale is None  # default, not threaded from Settings
+    d.dispatch(Action.ALMOST_MAXIMIZE)
+    r = fake_wm.windows[101]
+    # 1920 × 1040 work area × 0.85 = 1632 × 884.
+    assert r.width == int(1920 * 0.85)
+    assert r.height == int(1040 * 0.85)

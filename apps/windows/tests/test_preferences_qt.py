@@ -13,6 +13,7 @@ import pytest
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.core.shortcuts import normalise
 from windows_rectangle.ports.config_store import Settings
+
 from windows_rectangle.ui import preferences
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

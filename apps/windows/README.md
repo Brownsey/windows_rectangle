@@ -120,6 +120,29 @@ the row. Use `Clear` in the popup to disable that command. Changes are saved to
 `%APPDATA%\windows_rectangle\config.json` and applied to the running hotkey
 registrations when you click `Apply` or `Save`.
 
+## Custom Application Workspaces
+
+Open **Workspaces** from the tray menu to create a reusable multi-application setup.
+You can capture windows that are currently open, start from the Office or RuneScape
+templates, or create an empty workspace and add application rules manually.
+
+Each rule can match an executable name, stable text in the window title, or a title
+regular expression. Combining the process and title is recommended when several
+windows use the same application—for example, multiple RuneLite accounts. Choose a
+monitor and position preset, or drag the labeled application card on the visual
+monitor canvas. Drag inside a card to move it, or drag an edge/corner to create any
+custom size—layouts are not limited to halves, thirds, or presets. Alternatively,
+arrange the real application windows on your desktop and select **Record current
+positions** to learn their exact sizes, positions, and monitors.
+
+Valid changes save and apply automatically. If a shortcut, matcher, or storage error
+prevents saving, the editor keeps the change available for correction or retry instead
+of silently discarding it. Assigning a workspace shortcut restores every matched
+window later, including after the applications have been restarted.
+
+Use **Test matches** before saving to see which rules currently match without moving
+any windows. The match-status column identifies missing applications or titles.
+
 ## Custom Logo
 
 Place custom logo files in the repository root `logo` folder before running the

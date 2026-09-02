@@ -46,7 +46,11 @@ def neighbor(
     seq = ordered(monitors)
     if not seq:
         return current
-    idx = index_of(seq, current)
+    # Index lookup inline — calling index_of() would re-sort the list.
+    idx = next(
+        (i for i, m in enumerate(seq) if m.handle == current.handle),
+        0,
+    )
     return seq[(idx + direction) % len(seq)]
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 
 from ..ports.window_manager import MonitorInfo
 from . import monitors as monitors_mod
@@ -25,7 +25,7 @@ EDGE_THICKNESS = 24
 CORNER_SIZE = 60  # square corner zone — wins over edge if cursor is in both
 
 
-class SnapZone(StrEnum):
+class SnapZone(str, Enum):
     NONE = "none"
     LEFT = "left"
     RIGHT = "right"

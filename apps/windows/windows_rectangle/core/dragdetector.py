@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 
 # Squared-distance threshold. 5 pixels² ≈ a click-and-release-with-jitter
 # noise floor on a 1080p display. Tuned conservatively — Rectangle uses a
@@ -36,7 +36,7 @@ from enum import StrEnum
 DEFAULT_DRAG_THRESHOLD_PX = 5
 
 
-class _State(StrEnum):
+class _State(str, Enum):
     IDLE = "idle"
     ARMED = "armed"
     DRAGGING = "dragging"

@@ -15,6 +15,8 @@ from windows_rectangle.core.keymap import (
 )
 from windows_rectangle.core.shortcuts import parse
 
+# ----- vkey_for -------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "key,expected",
@@ -26,10 +28,6 @@ from windows_rectangle.core.shortcuts import parse
         ("enter", 0x0D),
         ("backspace", 0x08),
         ("escape", 0x1B),
-        ("insert", 0x2D),
-        ("delete", 0x2E),
-        ("pageup", 0x21),
-        ("pagedown", 0x22),
         ("=", 0xBB),
         ("-", 0xBD),
         (",", 0xBC),
@@ -66,6 +64,9 @@ def test_vkey_for_unsupported_raises():
         vkey_for("longname")
 
 
+# ----- modifier_mask --------------------------------------------------
+
+
 def test_modifier_mask_ctrl_alt():
     mask = modifier_mask(("ctrl", "alt"), no_repeat=False)
     assert mask == MOD_CONTROL | MOD_ALT
@@ -91,6 +92,9 @@ def test_modifier_mask_empty_with_norepeat():
     assert modifier_mask((), no_repeat=False) == 0
 
 
+# ----- translate -----------------------------------------------------
+
+
 def test_translate_ctrl_alt_left():
     mask, vk = translate(parse("ctrl+alt+left"), no_repeat=False)
     assert mask == MOD_CONTROL | MOD_ALT
@@ -102,10 +106,9 @@ def test_translate_no_repeat_flag():
     assert mask & MOD_NOREPEAT
 
 
-def test_every_enabled_default_shortcut_translates():
+def test_every_default_shortcut_translates():
+    """Critical: every brief §2 default must produce a usable (mask, vk) pair."""
     for action, combo in DEFAULT_SHORTCUTS.items():
-        if not combo:
-            continue
         mask, vk = translate(parse(combo))
         assert isinstance(mask, int)
         assert 0 < vk <= 0xFF, f"vkey out of range for {action}: {vk:#x}"

@@ -82,10 +82,11 @@ class Win32Hotkeys:
         ack.get(timeout=5.0)
 
     def unregister_all(self) -> None:
-        ack: queue.Queue = queue.Queue(maxsize=1)
-        self._commands.put(("unregister_all", ack))
-        self._wake_pump()
-        ack.get(timeout=5.0)
+        for hid in list(self._callbacks.keys()):
+            try:
+                self.unregister(hid)
+            except Exception:  # noqa: BLE001
+                _log.warning("unregister_all: failed to unregister %s", hid, exc_info=True)
 
     def shutdown(self) -> None:
         """Stop the pump thread and release every registered hotkey."""
@@ -166,12 +167,6 @@ class Win32Hotkeys:
                 _, hid, ack = cmd
                 user32.UnregisterHotKey(0, hid)
                 self._callbacks.pop(hid, None)
-                ack.put((True, 0))
-            elif kind == "unregister_all":
-                _, ack = cmd
-                for hid in list(self._callbacks.keys()):
-                    user32.UnregisterHotKey(0, hid)
-                self._callbacks.clear()
                 ack.put((True, 0))
             elif kind == "quit":
                 self._stopped.set()

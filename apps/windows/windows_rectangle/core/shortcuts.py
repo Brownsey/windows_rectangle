@@ -49,13 +49,6 @@ _KEY_ALIASES = {
     "ins": "insert",
     "bksp": "backspace",
     "backsp": "backspace",
-    "pgup": "pageup",
-    "pgdown": "pagedown",
-    "pgdn": "pagedown",
-    "pg up": "pageup",
-    "pg down": "pagedown",
-    "page up": "pageup",
-    "page down": "pagedown",
     "plus": "=",
     "minus": "-",
     "equals": "=",
@@ -133,39 +126,17 @@ def conflicts(combos: dict[str, str]) -> dict[str, list[str]]:
     return {names[0]: names[1:] for names in by_canonical.values() if len(names) > 1}
 
 
-# Combos the user is allowed to *bind* but should be warned about because they
-# clash with Windows itself or common system navigation shortcuts.
+# Combos the user is allowed to *bind* but should be warned about — they
+# clash with the OS or other well-known shortcuts. Brief §2 calls out
+# Win+arrow as reserved by Windows Snap.
 RESERVED_COMBOS: frozenset[str] = frozenset(
     {
         "win+left",
         "win+right",
         "win+up",
         "win+down",
-        "ctrl+win+left",
-        "ctrl+win+right",
-        "ctrl+win+up",
-        "ctrl+win+down",
-        "ctrl+win+d",
-        "ctrl+win+f4",
-        "ctrl+win+enter",
-        "win+tab",
-        "win+d",
-        "win+e",
-        "win+i",
-        "win+l",
-        "win+r",
-        "win+s",
-        "win+v",
-        "ctrl+shift+left",
-        "ctrl+shift+right",
         "alt+f4",
         "alt+tab",
-        "ctrl+alt+delete",
-    }
-)
-
-UNREGISTERABLE_COMBOS: frozenset[str] = frozenset(
-    {
         "ctrl+alt+delete",
     }
 )
@@ -178,12 +149,3 @@ def is_reserved(combo: str) -> bool:
     except ShortcutParseError:
         return False
     return canon in RESERVED_COMBOS
-
-
-def is_unregisterable(combo: str) -> bool:
-    """True if Windows will not let a normal application register `combo`."""
-    try:
-        canon = normalise(combo)
-    except ShortcutParseError:
-        return False
-    return canon in UNREGISTERABLE_COMBOS

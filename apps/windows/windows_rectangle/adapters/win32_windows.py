@@ -16,12 +16,14 @@ border — brief §5 #2) and our internal visible rect using
 from __future__ import annotations
 
 import logging
+import ntpath
 import sys
 from typing import TYPE_CHECKING
 
 from ..core.borders import BorderInsets, measure, to_outer_rect, to_visible_rect
 from ..core.eligibility import WindowFlags
 from ..core.geometry import Rect
+from ..core.workspaces import WindowIdentity
 from ..ports.window_manager import MonitorInfo, WindowHandle
 
 if TYPE_CHECKING:
@@ -43,6 +45,7 @@ _WS_EX_TOOLWINDOW = 0x00000080
 
 _SW_RESTORE = 9
 _SW_SHOWMAXIMIZED = 3
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 _DWMWA_EXTENDED_FRAME_BOUNDS = 9
 _DWMWA_CLOAKED = 14
@@ -74,6 +77,7 @@ class Win32WindowManager:
 
         self._user32 = ctypes.WinDLL("user32", use_last_error=True)
         self._dwm = ctypes.WinDLL("dwmapi", use_last_error=True)
+        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
         # Signatures we care about (typed for safety where it matters).
         self._user32.GetForegroundWindow.restype = wintypes.HWND
@@ -96,6 +100,28 @@ class Win32WindowManager:
         self._user32.SetWindowPos.restype = wintypes.BOOL
         self._user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
         self._user32.ShowWindow.restype = wintypes.BOOL
+        self._user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        self._user32.IsWindowVisible.restype = wintypes.BOOL
+        self._user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        self._user32.GetWindowTextLengthW.restype = ctypes.c_int
+        self._user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        self._user32.GetWindowTextW.restype = ctypes.c_int
+        self._user32.GetWindowThreadProcessId.argtypes = [
+            wintypes.HWND,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        self._user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        self._kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self._kernel32.OpenProcess.restype = wintypes.HANDLE
+        self._kernel32.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPWSTR,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        self._kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self._kernel32.CloseHandle.restype = wintypes.BOOL
 
     # ----- helpers ---------------------------------------------------
 
@@ -211,18 +237,13 @@ class Win32WindowManager:
     def set_always_on_top(self, handle: WindowHandle, enabled: bool) -> bool:
         insert_after = self._wt.HWND(_HWND_TOPMOST if enabled else _HWND_NOTOPMOST)
         flags = _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE
-        ok = self._user32.SetWindowPos(
-            self._hwnd(handle),
-            insert_after,
-            0,
-            0,
-            0,
-            0,
-            flags,
-        )
+        ok = self._user32.SetWindowPos(self._hwnd(handle), insert_after, 0, 0, 0, 0, flags)
         if not ok:
-            err = self._ct.get_last_error()
-            _log.info("SetWindowPos topmost failed hwnd=%s err=%s", handle, err)
+            _log.info(
+                "SetWindowPos topmost failed hwnd=%s err=%s",
+                handle,
+                self._ct.get_last_error(),
+            )
         return bool(ok)
 
     def list_monitors(self) -> list[MonitorInfo]:
@@ -273,6 +294,69 @@ class Win32WindowManager:
             bounds=Rect.from_ltrb(mb.left, mb.top, mb.right, mb.bottom),
             work_area=Rect.from_ltrb(wb.left, wb.top, wb.right, wb.bottom),
             is_primary=bool(info.dwFlags & _MONITORINFOF_PRIMARY),
+        )
+
+    # ----- workspace capture support --------------------------------
+
+    def list_windows(self) -> list[WindowIdentity]:
+        """Enumerate visible, user-manageable top-level windows in z-order."""
+        ct = self._ct
+        wt = self._wt
+        windows: list[WindowIdentity] = []
+        enum_proc = ct.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+
+        def callback(hwnd, _lparam):
+            handle = int(hwnd)
+            if not self._user32.IsWindowVisible(hwnd):
+                return True
+            length = self._user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buffer = ct.create_unicode_buffer(length + 1)
+            self._user32.GetWindowTextW(hwnd, buffer, length + 1)
+            title = buffer.value.strip()
+            flags = self.get_window_flags(handle)
+            if not title or flags.is_shell_window or flags.is_tool_window or flags.is_cloaked:
+                return True
+            windows.append(WindowIdentity(handle, title, self._process_name(hwnd)))
+            return True
+
+        self._user32.EnumWindows(enum_proc(callback), 0)
+        return windows
+
+    def _process_name(self, hwnd: int) -> str:
+        ct = self._ct
+        wt = self._wt
+        pid = wt.DWORD(0)
+        self._user32.GetWindowThreadProcessId(hwnd, ct.byref(pid))
+        process = self._kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+        if not process:
+            return ""
+        try:
+            capacity = wt.DWORD(32_768)
+            buffer = ct.create_unicode_buffer(capacity.value)
+            if not self._kernel32.QueryFullProcessImageNameW(
+                process, 0, buffer, ct.byref(capacity)
+            ):
+                return ""
+            return ntpath.basename(buffer.value)
+        finally:
+            self._kernel32.CloseHandle(process)
+
+    def list_work_areas(self) -> list[Rect]:
+        return [monitor.work_area for monitor in self.list_monitors()]
+
+    def monitor_index_for_window(self, handle: WindowHandle) -> int | None:
+        target = self.monitor_for_window(handle)
+        if target is None:
+            return None
+        return next(
+            (
+                index
+                for index, monitor in enumerate(self.list_monitors())
+                if monitor.handle == target.handle
+            ),
+            None,
         )
 
 

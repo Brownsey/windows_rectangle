@@ -81,3 +81,34 @@ def test_prune_stale_drops_dead_windows():
     assert dropped == 1
     # Window 1 retained.
     assert (1, (Action.LEFT_HALF, Action.FIRST_THIRD, Action.FIRST_TWO_THIRDS)) in state._entries
+
+
+def test_prune_stale_memoizes_is_alive_calls():
+    """A window with multiple cycle entries must only be checked ONCE
+    per prune sweep — IsWindow on Windows is a syscall and we don't
+    want N× the overhead per HWND."""
+    state, _ = make_state()
+    # Populate cycle entries in two different groups for the same window.
+    state.next_action(1, Action.LEFT_HALF)
+    state.next_action(1, Action.RIGHT_HALF)
+    assert len(state._entries) == 2
+
+    calls: list = []
+
+    def is_alive(wid):
+        calls.append(wid)
+        return False
+
+    state.prune_stale(is_alive)
+    # Only one IsWindow call despite two entries keyed off window 1.
+    assert calls == [1]
+
+
+def test_evict_uses_targeted_group_pops():
+    """evict() must not scan or rebuild the whole dict — just remove the
+    (window_id, group) keys that could exist for this window."""
+    state, _ = make_state()
+    state.next_action(1, Action.LEFT_HALF)
+    state.next_action(2, Action.RIGHT_HALF)
+    state.evict(1)
+    assert all(k[0] == 2 for k in state._entries)

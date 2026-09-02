@@ -204,5 +204,5 @@ def apply_relative_position(
     new_monitor: Rect,
 ) -> Rect:
     """Inverse of `relative_position` against a new monitor."""
-    left, top, right, bottom = fractions
-    return fraction_rect(new_monitor, left=left, top=top, right=right, bottom=bottom)
+    l, t, r, b = fractions
+    return fraction_rect(new_monitor, left=l, top=t, right=r, bottom=b)

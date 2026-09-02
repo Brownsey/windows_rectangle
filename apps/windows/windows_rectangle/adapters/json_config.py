@@ -8,115 +8,19 @@ is a single helper so tests can inject any path.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
-from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
 
 from ..core.actions import DEFAULT_SHORTCUTS, Action
-from ..core.shortcuts import ShortcutParseError, normalise
+from ..core.workspaces import NormalizedRect, WindowMatcher, Workspace, WorkspacePlacement
 from ..ports.config_store import Settings
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 2
 
-_FORMERLY_DISABLED_DEFAULT_ACTIONS: frozenset[Action] = frozenset(
-    {
-        Action.TOP_HALF,
-        Action.BOTTOM_HALF,
-        Action.CENTER_THIRD,
-        Action.FIRST_TWO_THIRDS,
-        Action.LAST_TWO_THIRDS,
-        Action.MAXIMIZE,
-        Action.MAXIMIZE_HEIGHT,
-        Action.CENTER,
-        Action.LARGER,
-        Action.SMALLER,
-        Action.RESTORE,
-        Action.NEXT_DISPLAY,
-        Action.PREV_DISPLAY,
-    }
-)
-
-_LEGACY_DEFAULT_SHORTCUTS_V1: dict[Action, str] = {
-    Action.LEFT_HALF: "ctrl+alt+left",
-    Action.RIGHT_HALF: "ctrl+alt+right",
-    Action.TOP_HALF: "ctrl+alt+up",
-    Action.BOTTOM_HALF: "ctrl+alt+down",
-    Action.TOP_LEFT_QUARTER: "ctrl+alt+u",
-    Action.TOP_RIGHT_QUARTER: "ctrl+alt+i",
-    Action.BOTTOM_LEFT_QUARTER: "ctrl+alt+j",
-    Action.BOTTOM_RIGHT_QUARTER: "ctrl+alt+k",
-    Action.FIRST_THIRD: "ctrl+alt+d",
-    Action.CENTER_THIRD: "ctrl+alt+f",
-    Action.LAST_THIRD: "ctrl+alt+g",
-    Action.FIRST_TWO_THIRDS: "ctrl+alt+e",
-    Action.LAST_TWO_THIRDS: "ctrl+alt+t",
-    Action.MAXIMIZE: "ctrl+alt+enter",
-    Action.MAXIMIZE_HEIGHT: "ctrl+alt+shift+up",
-    Action.MAXIMIZE_WIDTH: "ctrl+alt+shift+right",
-    Action.ALMOST_MAXIMIZE: "ctrl+alt+shift+enter",
-    Action.CENTER: "ctrl+alt+c",
-    Action.LARGER: "ctrl+alt+=",
-    Action.SMALLER: "ctrl+alt+-",
-    Action.RESTORE: "ctrl+alt+backspace",
-    Action.NEXT_DISPLAY: "ctrl+alt+.",
-    Action.PREV_DISPLAY: "ctrl+alt+,",
-    Action.TOGGLE_ALWAYS_ON_TOP: "ctrl+alt+shift+space",
-}
-
-_RESERVED_DEFAULT_SHORTCUTS_V3: dict[Action, str] = {
-    Action.LEFT_HALF: "ctrl+win+left",
-    Action.RIGHT_HALF: "ctrl+win+right",
-    Action.TOP_HALF: "ctrl+win+up",
-    Action.BOTTOM_HALF: "ctrl+win+down",
-    Action.TOP_LEFT_QUARTER: "ctrl+win+insert",
-    Action.TOP_RIGHT_QUARTER: "ctrl+win+pageup",
-    Action.BOTTOM_LEFT_QUARTER: "ctrl+win+delete",
-    Action.BOTTOM_RIGHT_QUARTER: "ctrl+win+pagedown",
-    Action.TOP_LEFT_SIXTH: "ctrl+shift+insert",
-    Action.TOP_RIGHT_SIXTH: "ctrl+shift+pageup",
-    Action.BOTTOM_LEFT_SIXTH: "ctrl+shift+delete",
-    Action.BOTTOM_RIGHT_SIXTH: "ctrl+shift+pagedown",
-    Action.FIRST_THIRD: "ctrl+shift+left",
-    Action.CENTER_THIRD: "ctrl+shift+enter",
-    Action.LAST_THIRD: "ctrl+shift+right",
-    Action.FIRST_TWO_THIRDS: "ctrl+shift+home",
-    Action.LAST_TWO_THIRDS: "ctrl+shift+end",
-    Action.MAXIMIZE: "ctrl+alt+enter",
-    Action.MAXIMIZE_HEIGHT: "ctrl+alt+shift+up",
-    Action.MAXIMIZE_WIDTH: "ctrl+alt+shift+right",
-    Action.ALMOST_MAXIMIZE: "ctrl+win+enter",
-    Action.CENTER: "ctrl+alt+c",
-    Action.LARGER: "ctrl+alt+=",
-    Action.SMALLER: "ctrl+alt+-",
-    Action.RESTORE: "ctrl+alt+backspace",
-    Action.NEXT_DISPLAY: "ctrl+alt+.",
-    Action.PREV_DISPLAY: "ctrl+alt+,",
-    Action.TOGGLE_ALWAYS_ON_TOP: "ctrl+alt+shift+space",
-}
-
-_PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V4: dict[Action, str] = {
-    Action.TOP_LEFT_SIXTH: "ctrl+alt+shift+u",
-    Action.TOP_RIGHT_SIXTH: "ctrl+alt+shift+i",
-    Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+j",
-    Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+shift+k",
-}
-
-_PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V5: dict[Action, str] = {
-    Action.TOP_LEFT_SIXTH: "ctrl+alt+shift+insert",
-    Action.TOP_RIGHT_SIXTH: "ctrl+alt+shift+pageup",
-    Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+delete",
-    Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+shift+pagedown",
-}
-
-_PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V6: dict[Action, str] = {
-    Action.TOP_LEFT_SIXTH: "ctrl+alt+insert",
-    Action.TOP_RIGHT_SIXTH: "ctrl+alt+pageup",
-    Action.BOTTOM_LEFT_SIXTH: "ctrl+alt+shift+delete",
-    Action.BOTTOM_RIGHT_SIXTH: "ctrl+alt+pagedown",
-}
+_log = logging.getLogger(__name__)
 
 
 def default_config_path() -> Path:
@@ -134,7 +38,7 @@ def default_config_path() -> Path:
 class JsonConfigStore:
     """File-backed `ConfigStore`. Atomic on save (write+rename)."""
 
-    def __init__(self, path: str | Path | None = None) -> None:
+    def __init__(self, path: Path | None = None) -> None:
         self.path = Path(path) if path is not None else default_config_path()
 
     # ----- ConfigStore protocol -----
@@ -144,83 +48,157 @@ class JsonConfigStore:
             return Settings()
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            # Corrupt or unreadable — fall back to defaults rather than crash.
-            # The composition root will log; we just return clean state.
-            return Settings()
-        if not isinstance(raw, dict):
+        except (OSError, json.JSONDecodeError) as e:
+            # Corrupt or unreadable: fall back to defaults rather than
+            # crash, but log a warning so the user sees *something*
+            # (otherwise a partially-zapped config silently reverts to
+            # defaults and the user is left wondering why their custom
+            # shortcuts didn't load). Hand-edit bugs are the most common
+            # cause; the log line gives the path to look at.
+            _log.warning(
+                "config at %s is unreadable, falling back to defaults: %s",
+                self.path,
+                e,
+            )
             return Settings()
         return _from_dict(raw)
 
     def save(self, settings: Settings) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = _to_dict(settings)
-        # Atomic write: temp file in the same directory, then rename.
-        # Same-directory rename is atomic on Windows + POSIX.
-        tmp_name: str | None = None
+        self._atomic_write(self.path, _to_dict(settings))
+
+    # ----- backup / migration helpers --------------------------------
+
+    def export_to(self, destination: str | Path, settings: Settings | None = None) -> Path:
+        """Write `settings` (or the currently-loaded settings) to `destination`.
+
+        Used by `--export-config` for backup + cross-machine migration.
+        Writes via the same atomic temp-file path as `save`, so a half-
+        written export from a power cut can't corrupt the destination.
+        Returns the resolved destination path.
+        """
+        dest = Path(destination).expanduser().resolve()
+        if settings is None:
+            settings = self.load()
+        self._atomic_write(dest, _to_dict(settings))
+        return dest
+
+    def import_from(self, source: str | Path) -> Settings:
+        """Read settings from `source` and persist them to `self.path`.
+
+        Used by `--import-config` for cross-machine migration; the caller
+        can then `apply_settings(...)` to take effect without restart.
+        Equivalent to `parse_path(source)` + `save(...)`.
+        """
+        settings = self.parse_path(source)
+        self.save(settings)
+        return settings
+
+    @staticmethod
+    def parse_path(source: str | Path) -> Settings:
+        """Parse `source` into a Settings without persisting.
+
+        Public counterpart to the private `_from_dict` — used by
+        `--import-config --dry-run` to preview without writing, and
+        by `import_from` itself.
+
+        Raises FileNotFoundError if the source is missing, JSONDecodeError
+        if it's not valid JSON. Unknown fields / keys are tolerated by
+        the lenient `_from_dict` decode — a file produced by a newer
+        version mostly works, and an older file picks up any new fields
+        as their dataclass defaults.
+        """
+        src = Path(source).expanduser().resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"import source does not exist: {src}")
+        raw = json.loads(src.read_text(encoding="utf-8"))
+        return _from_dict(raw)
+
+    # ----- internals --------------------------------------------------
+
+    @staticmethod
+    def _atomic_write(target: Path, payload: dict) -> None:
+        """Write JSON to `target` atomically via temp file + rename.
+
+        Cleanup on error must close the handle BEFORE unlinking — on
+        Windows `os.unlink` fails (PermissionError, an OSError) while
+        any process holds an open handle to the file, and our
+        `contextlib.suppress(OSError)` would then silently leak the
+        .tmp into the target directory.
+        """
+        import contextlib
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 -- delete=False is correct here
+            mode="w",
+            encoding="utf-8",
+            dir=str(target.parent),
+            prefix=target.name + ".",
+            suffix=".tmp",
+            delete=False,
+        )
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=str(self.path.parent),
-                prefix=self.path.name + ".",
-                suffix=".tmp",
-                delete=False,
-            ) as tmp:
-                tmp_name = tmp.name
-                json.dump(payload, tmp, indent=2, sort_keys=True)
-                tmp.flush()
-                os.fsync(tmp.fileno())
-            os.replace(tmp_name, self.path)
+            json.dump(payload, tmp, indent=2, sort_keys=True)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp.close()
+            os.replace(tmp.name, target)
         except Exception:
-            if tmp_name is not None:
-                with suppress(OSError):
-                    os.unlink(tmp_name)
+            with contextlib.suppress(Exception):
+                tmp.close()  # idempotent; safe on already-closed file
+            with contextlib.suppress(OSError):
+                os.unlink(tmp.name)
             raise
 
 
 # ----- (de)serialisation ---------------------------------------------
 
 
-def _to_dict(settings: Settings) -> dict[str, Any]:
+def _to_dict(settings: Settings) -> dict:
     data = asdict(settings)
-    # Action enum keys are not JSON-serialisable by default.
-    data["shortcuts"] = {a.value: combo for a, combo in settings.shortcuts.items()}
+    # Serialise EVERY known Action — explicit empty string for actions
+    # the user deliberately unbound (via clear_shortcut), missing-from-
+    # dict for actions that just never got a default. This ensures a
+    # cleared shortcut survives a save+load round-trip; otherwise the
+    # loader would re-populate it from DEFAULT_SHORTCUTS on next start.
+    data["shortcuts"] = {a.value: settings.shortcuts.get(a, "") for a in Action}
+    data["workspaces"] = [_workspace_to_dict(workspace) for workspace in settings.workspaces]
     data["schema_version"] = SCHEMA_VERSION
     return data
 
 
-def _from_dict(raw: dict[str, Any]) -> Settings:
-    """Tolerant decode — unknown shortcut keys are dropped, missing fields default."""
+def _from_dict(raw: dict) -> Settings:
+    """Tolerant decode.
+
+    - Unknown shortcut keys: silently dropped (forward-compat with older
+      versions that wrote actions we no longer recognise).
+    - Empty-string combo: explicit "unbound" marker — the action is
+      kept OUT of the resulting shortcuts dict (so rebind_hotkeys won't
+      register anything for it).
+    - Action missing entirely from the saved dict: fall back to the
+      DEFAULT_SHORTCUTS binding (forward-compat with future Actions
+      added after the user's last save).
+    - Other missing fields: dataclass defaults.
+    """
     defaults = Settings()
-    schema_version = _schema_version(raw.get("schema_version"))
-    shortcuts_raw = raw.get("shortcuts")
-    if not isinstance(shortcuts_raw, dict):
-        shortcuts_raw = {}
-    shortcuts: dict[Action, str] = dict(DEFAULT_SHORTCUTS)
-    for key, combo in shortcuts_raw.items():
-        if not isinstance(key, str):
-            continue
-        try:
-            action = Action(key)
-        except ValueError:
-            continue
-        if isinstance(combo, str):
-            if schema_version < 2 and _matches_legacy_default(action, combo):
-                continue
-            if schema_version < 3 and _matches_former_disabled_default(action, combo):
-                continue
-            if schema_version < 4 and _matches_reserved_default(action, combo):
-                continue
-            if schema_version < 5 and _matches_previous_sixth_default(action, combo):
-                continue
-            if schema_version < 6 and _matches_previous_insert_sixth_default(action, combo):
-                continue
-            if schema_version < 7 and _matches_previous_ctrl_alt_insert_sixth_default(
-                action, combo
-            ):
-                continue
-            shortcuts[action] = combo
+    shortcuts_raw = raw.get("shortcuts") or {}
+    shortcuts: dict[Action, str] = {}
+    for action in Action:
+        if action.value in shortcuts_raw:
+            combo = shortcuts_raw[action.value]
+            if isinstance(combo, str) and combo:
+                shortcuts[action] = combo
+            # else: empty string or non-str → leave unbound.
+        elif action in DEFAULT_SHORTCUTS:
+            shortcuts[action] = DEFAULT_SHORTCUTS[action]
+
+    workspaces = tuple(
+        workspace
+        for item in raw.get("workspaces", [])
+        if isinstance(item, dict) and (workspace := _workspace_from_dict(item)) is not None
+    )
+    active_workspace_id = str(raw.get("active_workspace_id", ""))
+    if active_workspace_id and all(w.id != active_workspace_id for w in workspaces):
+        active_workspace_id = ""
 
     return Settings(
         shortcuts=shortcuts,
@@ -231,65 +209,66 @@ def _from_dict(raw: dict[str, Any]) -> Settings:
         almost_maximize_scale=float(
             raw.get("almost_maximize_scale", defaults.almost_maximize_scale)
         ),
+        workspaces=workspaces,
+        active_workspace_id=active_workspace_id,
     )
 
 
-def _schema_version(value: Any) -> int:
+def _workspace_to_dict(workspace: Workspace) -> dict[str, object]:
+    return {
+        "id": workspace.id,
+        "name": workspace.name,
+        "shortcut": workspace.shortcut,
+        "placements": [
+            {
+                "id": placement.id,
+                "name": placement.name,
+                "monitor_index": placement.monitor_index,
+                "matcher": asdict(placement.matcher),
+                "rect": asdict(placement.rect),
+            }
+            for placement in workspace.placements
+        ],
+    }
+
+
+def _workspace_from_dict(raw: dict[str, object]) -> Workspace | None:
+    """Decode one workspace; malformed user entries are skipped safely."""
     try:
-        return int(value)
+        placements_raw = raw.get("placements", [])
+        if not isinstance(placements_raw, list):
+            return None
+        placements: list[WorkspacePlacement] = []
+        for item in placements_raw:
+            if not isinstance(item, dict):
+                return None
+            matcher_raw = item.get("matcher")
+            rect_raw = item.get("rect")
+            if not isinstance(matcher_raw, dict) or not isinstance(rect_raw, dict):
+                return None
+            placements.append(
+                WorkspacePlacement(
+                    id=str(item.get("id", "")),
+                    name=str(item.get("name", "")),
+                    monitor_index=int(item.get("monitor_index", 0)),
+                    matcher=WindowMatcher(
+                        process_name=str(matcher_raw.get("process_name", "")),
+                        title_contains=str(matcher_raw.get("title_contains", "")),
+                        title_regex=str(matcher_raw.get("title_regex", "")),
+                    ),
+                    rect=NormalizedRect(
+                        left=int(rect_raw.get("left", -1)),
+                        top=int(rect_raw.get("top", -1)),
+                        right=int(rect_raw.get("right", -1)),
+                        bottom=int(rect_raw.get("bottom", -1)),
+                    ),
+                )
+            )
+        return Workspace(
+            id=str(raw.get("id", "")),
+            name=str(raw.get("name", "")),
+            shortcut=str(raw.get("shortcut", "")),
+            placements=tuple(placements),
+        )
     except (TypeError, ValueError):
-        return 0
-
-
-def _matches_legacy_default(action: Action, combo: str) -> bool:
-    legacy = _LEGACY_DEFAULT_SHORTCUTS_V1.get(action)
-    if not legacy:
-        return False
-    try:
-        return normalise(combo) == normalise(legacy)
-    except ShortcutParseError:
-        return combo.strip().lower() == legacy
-
-
-def _matches_former_disabled_default(action: Action, combo: str) -> bool:
-    return action in _FORMERLY_DISABLED_DEFAULT_ACTIONS and combo.strip() == ""
-
-
-def _matches_reserved_default(action: Action, combo: str) -> bool:
-    reserved_default = _RESERVED_DEFAULT_SHORTCUTS_V3.get(action)
-    if not reserved_default:
-        return False
-    try:
-        return normalise(combo) == normalise(reserved_default)
-    except ShortcutParseError:
-        return combo.strip().lower() == reserved_default
-
-
-def _matches_previous_sixth_default(action: Action, combo: str) -> bool:
-    previous_default = _PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V4.get(action)
-    if not previous_default:
-        return False
-    try:
-        return normalise(combo) == normalise(previous_default)
-    except ShortcutParseError:
-        return combo.strip().lower() == previous_default
-
-
-def _matches_previous_insert_sixth_default(action: Action, combo: str) -> bool:
-    previous_default = _PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V5.get(action)
-    if not previous_default:
-        return False
-    try:
-        return normalise(combo) == normalise(previous_default)
-    except ShortcutParseError:
-        return combo.strip().lower() == previous_default
-
-
-def _matches_previous_ctrl_alt_insert_sixth_default(action: Action, combo: str) -> bool:
-    previous_default = _PREVIOUS_SIXTH_DEFAULT_SHORTCUTS_V6.get(action)
-    if not previous_default:
-        return False
-    try:
-        return normalise(combo) == normalise(previous_default)
-    except ShortcutParseError:
-        return combo.strip().lower() == previous_default
+        return None
