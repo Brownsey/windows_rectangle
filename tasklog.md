@@ -31,6 +31,7 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [x] Add 17 advanced P0 actions using reusable orientation-aware band, edge-move, and dimension-resize primitives: fourths, three-fourths, centered spans, directional moves, and width/height-only resizing.
 - [x] Keep advanced actions discoverable but unbound by default to avoid shortcut overload.
 - [x] Finish P0 parity with anchored halve/double sizing, prominent centering, and direct display 1–9 commands with unavailable-display feedback.
+- [x] Add a reusable integer-grid tile primitive and use it for complete sixths, orientation-aware quadrant thirds, and vertical thirds/two-thirds.
 - [x] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
 - [x] Generate `research/Windows-Rectangle-UX-Research.docx` with first-party citations and a prioritized roadmap.
 
@@ -51,10 +52,11 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - After the first parity restoration pass: 554 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - After reusable P0 layouts and movement: 573 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - After completing the P0 action catalogue: 585 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
+- After the first reusable dense-grid pass: 596 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - Research DOCX structural QA: valid archive, 89 paragraphs, 20 headings, one table, and 10 external hyperlinks. Visual rendering was unavailable.
 - Updated subprocess and PyInstaller-spec tests for the new `apps/windows` package location.
 - Updated the PyInstaller entry point and search path for the monorepo layout.
 
 ## Next iteration
 
-Add reusable dense-grid generation for the remaining sixth, eighth, ninth, twelfth, and sixteenth actions.
+Extend the dense-grid catalogue through eighths, ninths, twelfths, and sixteenths, then add the user-specified rectangle action.

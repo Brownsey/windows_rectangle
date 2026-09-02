@@ -71,6 +71,35 @@ def test_corner_sixths(action, expected):
     assert apply(action, WIN, WORK) == expected
 
 
+def test_center_sixths_complete_the_three_by_two_grid():
+    assert apply(Action.TOP_CENTER_SIXTH, WIN, WORK) == Rect(640, 0, 640, 540)
+    assert apply(Action.BOTTOM_CENTER_SIXTH, WIN, WORK) == Rect(640, 540, 640, 540)
+
+
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.TOP_LEFT_THIRD, Rect(0, 0, 1280, 540)),
+        (Action.TOP_RIGHT_THIRD, Rect(640, 0, 1280, 540)),
+        (Action.BOTTOM_LEFT_THIRD, Rect(0, 540, 1280, 540)),
+        (Action.BOTTOM_RIGHT_THIRD, Rect(640, 540, 1280, 540)),
+        (Action.TOP_VERTICAL_THIRD, Rect(0, 0, 1920, 360)),
+        (Action.MIDDLE_VERTICAL_THIRD, Rect(0, 360, 1920, 360)),
+        (Action.BOTTOM_VERTICAL_THIRD, Rect(0, 720, 1920, 360)),
+        (Action.TOP_VERTICAL_TWO_THIRDS, Rect(0, 0, 1920, 720)),
+        (Action.BOTTOM_VERTICAL_TWO_THIRDS, Rect(0, 360, 1920, 720)),
+    ],
+)
+def test_dense_thirds(action, expected):
+    assert apply(action, WIN, WORK) == expected
+
+
+def test_quadrant_thirds_are_orientation_aware():
+    portrait = Rect(0, 0, 900, 1600)
+    assert apply(Action.TOP_RIGHT_THIRD, WIN, portrait) == Rect(450, 0, 450, 1067)
+    assert apply(Action.BOTTOM_LEFT_THIRD, WIN, portrait) == Rect(0, 533, 450, 1067)
+
+
 @pytest.mark.parametrize(
     "action, expected",
     [
@@ -308,6 +337,8 @@ def test_advanced_actions_are_discoverable_but_unbound_by_default():
     advanced = set(Action) - set(DEFAULT_SHORTCUTS)
     assert advanced == {
         Action.CENTER_HALF,
+        Action.TOP_CENTER_SIXTH,
+        Action.BOTTOM_CENTER_SIXTH,
         Action.CENTER_TWO_THIRDS,
         Action.FIRST_FOURTH,
         Action.SECOND_FOURTH,
@@ -316,6 +347,15 @@ def test_advanced_actions_are_discoverable_but_unbound_by_default():
         Action.FIRST_THREE_FOURTHS,
         Action.CENTER_THREE_FOURTHS,
         Action.LAST_THREE_FOURTHS,
+        Action.TOP_LEFT_THIRD,
+        Action.TOP_RIGHT_THIRD,
+        Action.BOTTOM_LEFT_THIRD,
+        Action.BOTTOM_RIGHT_THIRD,
+        Action.TOP_VERTICAL_THIRD,
+        Action.MIDDLE_VERTICAL_THIRD,
+        Action.BOTTOM_VERTICAL_THIRD,
+        Action.TOP_VERTICAL_TWO_THIRDS,
+        Action.BOTTOM_VERTICAL_TWO_THIRDS,
         Action.LARGER_WIDTH,
         Action.SMALLER_WIDTH,
         Action.LARGER_HEIGHT,

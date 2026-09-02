@@ -38,8 +38,10 @@ class Action(str, Enum):
     BOTTOM_RIGHT_QUARTER = "bottom_right_quarter"
 
     TOP_LEFT_SIXTH = "top_left_sixth"
+    TOP_CENTER_SIXTH = "top_center_sixth"
     TOP_RIGHT_SIXTH = "top_right_sixth"
     BOTTOM_LEFT_SIXTH = "bottom_left_sixth"
+    BOTTOM_CENTER_SIXTH = "bottom_center_sixth"
     BOTTOM_RIGHT_SIXTH = "bottom_right_sixth"
 
     FIRST_THIRD = "first_third"
@@ -56,6 +58,15 @@ class Action(str, Enum):
     FIRST_THREE_FOURTHS = "first_three_fourths"
     CENTER_THREE_FOURTHS = "center_three_fourths"
     LAST_THREE_FOURTHS = "last_three_fourths"
+    TOP_LEFT_THIRD = "top_left_third"
+    TOP_RIGHT_THIRD = "top_right_third"
+    BOTTOM_LEFT_THIRD = "bottom_left_third"
+    BOTTOM_RIGHT_THIRD = "bottom_right_third"
+    TOP_VERTICAL_THIRD = "top_vertical_third"
+    MIDDLE_VERTICAL_THIRD = "middle_vertical_third"
+    BOTTOM_VERTICAL_THIRD = "bottom_vertical_third"
+    TOP_VERTICAL_TWO_THIRDS = "top_vertical_two_thirds"
+    BOTTOM_VERTICAL_TWO_THIRDS = "bottom_vertical_two_thirds"
 
     MAXIMIZE = "maximize"
     MAXIMIZE_HEIGHT = "maximize_height"
@@ -151,6 +162,23 @@ class TileSpec:
     bottom: Fraction
 
 
+def _grid_tile(
+    columns: int,
+    rows: int,
+    column: int,
+    row: int,
+    column_span: int = 1,
+    row_span: int = 1,
+) -> TileSpec:
+    """Build a normalized tile from integer grid coordinates."""
+    return TileSpec(
+        _F(column, columns),
+        _F(row, rows),
+        _F(column + column_span, columns),
+        _F(row + row_span, rows),
+    )
+
+
 _TILES: dict[Action, TileSpec] = {
     Action.LEFT_HALF: TileSpec(_F(0), _F(0), _F(1, 2), _F(1)),
     Action.RIGHT_HALF: TileSpec(_F(1, 2), _F(0), _F(1), _F(1)),
@@ -160,15 +188,22 @@ _TILES: dict[Action, TileSpec] = {
     Action.TOP_RIGHT_QUARTER: TileSpec(_F(1, 2), _F(0), _F(1), _F(1, 2)),
     Action.BOTTOM_LEFT_QUARTER: TileSpec(_F(0), _F(1, 2), _F(1, 2), _F(1)),
     Action.BOTTOM_RIGHT_QUARTER: TileSpec(_F(1, 2), _F(1, 2), _F(1), _F(1)),
-    Action.TOP_LEFT_SIXTH: TileSpec(_F(0), _F(0), _F(1, 3), _F(1, 2)),
-    Action.TOP_RIGHT_SIXTH: TileSpec(_F(2, 3), _F(0), _F(1), _F(1, 2)),
-    Action.BOTTOM_LEFT_SIXTH: TileSpec(_F(0), _F(1, 2), _F(1, 3), _F(1)),
-    Action.BOTTOM_RIGHT_SIXTH: TileSpec(_F(2, 3), _F(1, 2), _F(1), _F(1)),
+    Action.TOP_LEFT_SIXTH: _grid_tile(3, 2, 0, 0),
+    Action.TOP_CENTER_SIXTH: _grid_tile(3, 2, 1, 0),
+    Action.TOP_RIGHT_SIXTH: _grid_tile(3, 2, 2, 0),
+    Action.BOTTOM_LEFT_SIXTH: _grid_tile(3, 2, 0, 1),
+    Action.BOTTOM_CENTER_SIXTH: _grid_tile(3, 2, 1, 1),
+    Action.BOTTOM_RIGHT_SIXTH: _grid_tile(3, 2, 2, 1),
     Action.FIRST_THIRD: TileSpec(_F(0), _F(0), _F(1, 3), _F(1)),
     Action.CENTER_THIRD: TileSpec(_F(1, 3), _F(0), _F(2, 3), _F(1)),
     Action.LAST_THIRD: TileSpec(_F(2, 3), _F(0), _F(1), _F(1)),
     Action.FIRST_TWO_THIRDS: TileSpec(_F(0), _F(0), _F(2, 3), _F(1)),
     Action.LAST_TWO_THIRDS: TileSpec(_F(1, 3), _F(0), _F(1), _F(1)),
+    Action.TOP_VERTICAL_THIRD: _grid_tile(1, 3, 0, 0),
+    Action.MIDDLE_VERTICAL_THIRD: _grid_tile(1, 3, 0, 1),
+    Action.BOTTOM_VERTICAL_THIRD: _grid_tile(1, 3, 0, 2),
+    Action.TOP_VERTICAL_TWO_THIRDS: _grid_tile(1, 3, 0, 0, row_span=2),
+    Action.BOTTOM_VERTICAL_TWO_THIRDS: _grid_tile(1, 3, 0, 1, row_span=2),
     Action.MAXIMIZE: TileSpec(_F(0), _F(0), _F(1), _F(1)),
 }
 
@@ -186,6 +221,28 @@ _ORIENTED_BANDS: dict[Action, tuple[Fraction, Fraction]] = {
     Action.FIRST_THREE_FOURTHS: (_F(0), _F(3, 4)),
     Action.CENTER_THREE_FOURTHS: (_F(1, 8), _F(7, 8)),
     Action.LAST_THREE_FOURTHS: (_F(1, 4), _F(1)),
+}
+
+
+_ORIENTED_TILES: dict[Action, tuple[TileSpec, TileSpec]] = {
+    # Landscape uses a 3x2 conceptual grid with two-column spans; portrait
+    # rotates that idea to a 2x3 grid with two-row spans.
+    Action.TOP_LEFT_THIRD: (
+        _grid_tile(3, 2, 0, 0, column_span=2),
+        _grid_tile(2, 3, 0, 0, row_span=2),
+    ),
+    Action.TOP_RIGHT_THIRD: (
+        _grid_tile(3, 2, 1, 0, column_span=2),
+        _grid_tile(2, 3, 1, 0, row_span=2),
+    ),
+    Action.BOTTOM_LEFT_THIRD: (
+        _grid_tile(3, 2, 0, 1, column_span=2),
+        _grid_tile(2, 3, 0, 1, row_span=2),
+    ),
+    Action.BOTTOM_RIGHT_THIRD: (
+        _grid_tile(3, 2, 1, 1, column_span=2),
+        _grid_tile(2, 3, 1, 1, row_span=2),
+    ),
 }
 
 
@@ -224,6 +281,28 @@ def _oriented_band_handler(action: Action) -> ActionFn:
             tile = fraction_rect(work_area, top=start, bottom=end)
             edges = tile_edges(0, start, 1, end)
         return apply_gap(work_area, tile, edges, gap)
+
+    return handler
+
+
+def _oriented_tile_handler(action: Action) -> ActionFn:
+    landscape, portrait = _ORIENTED_TILES[action]
+
+    def handler(window: Rect, work_area: Rect, gap: int) -> Rect:
+        spec = landscape if work_area.width >= work_area.height else portrait
+        tile = fraction_rect(
+            work_area,
+            left=spec.left,
+            top=spec.top,
+            right=spec.right,
+            bottom=spec.bottom,
+        )
+        return apply_gap(
+            work_area,
+            tile,
+            tile_edges(spec.left, spec.top, spec.right, spec.bottom),
+            gap,
+        )
 
     return handler
 
@@ -371,6 +450,7 @@ def _resize_step(window: Rect, work_area: Rect, delta: int) -> Rect:
 _HANDLERS: dict[Action, ActionFn] = {
     **{a: _tile_handler(a) for a in _TILES},
     **{a: _oriented_band_handler(a) for a in _ORIENTED_BANDS},
+    **{a: _oriented_tile_handler(a) for a in _ORIENTED_TILES},
     Action.MAXIMIZE_HEIGHT: maximize_height,
     Action.MAXIMIZE_WIDTH: maximize_width,
     Action.ALMOST_MAXIMIZE: almost_maximize,
