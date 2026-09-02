@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import cast
 
+from ..core.workspace_presets import POSITION_PRESETS, preset_label
 from ..core.workspace_service import WorkspaceWindows, apply_workspace
 from .workspace_editor import WorkspaceEditorController
 
@@ -74,7 +75,7 @@ class WorkspaceDialog:
                     placement.matcher.title_contains,
                     placement.matcher.title_regex,
                     str(placement.monitor_index + 1),
-                    _position_text(placement.rect),
+                    preset_label(placement.rect),
                 )
                 for column, value in enumerate(values):
                     cell = QtWidgets.QTableWidgetItem(value)
@@ -196,9 +197,12 @@ def _build(ctx) -> WorkspaceDialog:
     workspace_list.setObjectName("workspaceList")
     workspace_list.setAccessibleName("Saved workspaces")
     left_layout.addWidget(workspace_list, 1)
+    create = QtWidgets.QPushButton("New empty workspace")
+    create.setAccessibleName("Create an empty workspace")
     capture = QtWidgets.QPushButton("Capture current windows…")
     capture.setAccessibleName("Capture current windows as a workspace")
     remove = QtWidgets.QPushButton("Delete workspace")
+    left_layout.addWidget(create)
     left_layout.addWidget(capture)
     left_layout.addWidget(remove)
 
@@ -230,9 +234,11 @@ def _build(ctx) -> WorkspaceDialog:
     placements.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     detail_layout.addWidget(placements, 1)
     tools = QtWidgets.QHBoxLayout()
+    add_rule = QtWidgets.QPushButton("Add application…")
     remove_rule = QtWidgets.QPushButton("Remove selected rule")
     test_matches = QtWidgets.QPushButton("Test matches")
     restore = QtWidgets.QPushButton("Restore now")
+    tools.addWidget(add_rule)
     tools.addWidget(remove_rule)
     tools.addStretch(1)
     tools.addWidget(test_matches)
@@ -270,8 +276,13 @@ def _build(ctx) -> WorkspaceDialog:
     name_edit.editingFinished.connect(controller.edit_workspace_fields)
     shortcut_edit.editingFinished.connect(controller.edit_workspace_fields)
     placements.itemChanged.connect(controller.edit_placement)
+    placements.cellDoubleClicked.connect(
+        lambda row, column: _choose_position(controller, row, QtWidgets) if column == 5 else None
+    )
+    create.clicked.connect(lambda: _create_empty(controller, QtWidgets))
     capture.clicked.connect(lambda: _capture(controller, QtWidgets))
     remove.clicked.connect(lambda: _delete_workspace(controller, QtWidgets))
+    add_rule.clicked.connect(lambda: _add_application(controller, QtWidgets))
     remove_rule.clicked.connect(lambda: _delete_rule(controller))
     test_matches.clicked.connect(lambda: _test_matches(controller, QtWidgets))
     restore.clicked.connect(lambda: _restore(controller, QtWidgets))
@@ -281,6 +292,86 @@ def _build(ctx) -> WorkspaceDialog:
     _apply_style(window)
     controller.refresh()
     return controller
+
+
+def _create_empty(controller: WorkspaceDialog, QtWidgets) -> None:
+    name, accepted = QtWidgets.QInputDialog.getText(
+        controller.window, "New Workspace", "Workspace name:"
+    )
+    if not accepted or not name.strip():
+        return
+    try:
+        workspace = controller.editor.create(name)
+    except ValueError as exc:
+        controller.update_validation(str(exc))
+        return
+    controller.selected_id = workspace.id
+    controller.refresh()
+
+
+def _add_application(controller: WorkspaceDialog, QtWidgets) -> None:
+    if not controller.selected_id:
+        controller.update_validation("Create or select a workspace first")
+        return
+    dialog = QtWidgets.QDialog(controller.window)
+    dialog.setWindowTitle("Add application rule")
+    form = QtWidgets.QFormLayout(dialog)
+    name = QtWidgets.QLineEdit()
+    process = QtWidgets.QLineEdit()
+    process.setPlaceholderText("For example RuneLite.exe or chrome.exe")
+    title = QtWidgets.QLineEdit()
+    title.setPlaceholderText("Optional account, document, or window name")
+    monitor = QtWidgets.QSpinBox()
+    monitor.setRange(1, 32)
+    position = QtWidgets.QComboBox()
+    for preset in POSITION_PRESETS:
+        position.addItem(preset.label, preset.id)
+    form.addRow("Rule name", name)
+    form.addRow("Application process", process)
+    form.addRow("Window title contains", title)
+    form.addRow("Monitor", monitor)
+    form.addRow("Position", position)
+    buttons = QtWidgets.QDialogButtonBox(
+        QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel
+    )
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    form.addRow(buttons)
+    name.setFocus()
+    if dialog.exec() != QtWidgets.QDialog.Accepted:
+        return
+    try:
+        controller.editor.add_placement(
+            controller.selected_id,
+            name=name.text(),
+            process_name=process.text(),
+            title_contains=title.text(),
+            monitor_index=monitor.value() - 1,
+            preset_id=str(position.currentData()),
+        )
+    except ValueError as exc:
+        controller.update_validation(str(exc))
+        return
+    controller.load_selected()
+
+
+def _choose_position(controller: WorkspaceDialog, row: int, QtWidgets) -> None:
+    if not controller.selected_id:
+        return
+    item = controller.placements.item(row, 0)
+    if item is None:
+        return
+    labels = [preset.label for preset in POSITION_PRESETS]
+    selected, accepted = QtWidgets.QInputDialog.getItem(
+        controller.window, "Choose position", "Position preset:", labels, 0, False
+    )
+    if not accepted:
+        return
+    preset = POSITION_PRESETS[labels.index(selected)]
+    controller.editor.set_placement_preset(
+        controller.selected_id, str(item.data(0x0100)), preset.id
+    )
+    controller.load_selected()
 
 
 def _capture(controller: WorkspaceDialog, QtWidgets) -> None:
@@ -353,13 +444,6 @@ def _restore(controller: WorkspaceDialog, QtWidgets) -> None:
         controller.window,
         "Workspace restored",
         f"{moved} moved · {missing} not found · {blocked} blocked.",
-    )
-
-
-def _position_text(rect) -> str:
-    return (
-        f"{rect.left / 100:.0f}%, {rect.top / 100:.0f}% — "
-        f"{rect.right / 100:.0f}%, {rect.bottom / 100:.0f}%"
     )
 
 

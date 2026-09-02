@@ -41,6 +41,7 @@ HIDDEN = [
     "windows_rectangle.ui.binding_status_view",
     "windows_rectangle.ui.workspace_editor",
     "windows_rectangle.ui.workspaces_dialog",
+    "windows_rectangle.core.workspace_presets",
     # --check-install subcommand lazy-imports the diagnostics module.
     "windows_rectangle.diagnostics",
     # __main__'s _setup_logging lazy-imports this for the rotating file handler.

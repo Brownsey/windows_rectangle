@@ -139,3 +139,34 @@ def test_delete_active_workspace_selects_next():
     )
     controller.delete_workspace("office")
     assert controller.staged.active_workspace_id == "gaming"
+
+
+def test_create_manual_application_rule_and_change_position():
+    controller = WorkspaceEditorController(Settings())
+    created = controller.create("RuneScape accounts")
+    placement = controller.add_placement(
+        created.id,
+        name="Account - Stephen",
+        process_name="RuneLite.exe",
+        title_contains="Stephen",
+        preset_id="top_left",
+    )
+    assert placement.rect == NormalizedRect(0, 0, 5000, 5000)
+    assert placement.matcher.score(WindowIdentity(1, "Stephen", "runelite.exe")) > 0
+
+    controller.set_placement_preset(created.id, placement.id, "right_half")
+    assert controller.get(created.id).placements[0].rect == NormalizedRect(5000, 0, 10000, 10000)
+
+
+def test_manual_rule_requires_a_match_signal():
+    controller = WorkspaceEditorController(Settings())
+    created = controller.create("Empty")
+    with pytest.raises(ValueError, match="matcher"):
+        controller.add_placement(created.id, name="Unknown")
+
+
+def test_custom_normalized_rect_can_be_staged():
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace(),)))
+    custom = NormalizedRect(1250, 2500, 8750, 9000)
+    controller.set_placement_rect("office", "slack", custom)
+    assert controller.get("office").placements[0].rect == custom

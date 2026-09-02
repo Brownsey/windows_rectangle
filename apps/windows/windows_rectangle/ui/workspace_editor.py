@@ -12,8 +12,16 @@ from ..core.shortcuts import (
     normalise,
     parse,
 )
+from ..core.workspace_presets import preset_rect
 from ..core.workspace_service import WorkspaceWindows, capture_workspace
-from ..core.workspaces import WindowMatcher, Workspace, plan_workspace
+from ..core.workspaces import (
+    NormalizedRect,
+    WindowMatcher,
+    Workspace,
+    WorkspacePlacement,
+    new_id,
+    plan_workspace,
+)
 from ..ports.config_store import Settings
 
 
@@ -47,6 +55,52 @@ class WorkspaceEditorController:
         self.staged.workspaces = (*self.staged.workspaces, workspace)
         self.staged.active_workspace_id = workspace.id
         return workspace
+
+    def create(self, name: str) -> Workspace:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("workspace name cannot be empty")
+        workspace = Workspace(new_id(), clean_name, ())
+        self.staged.workspaces = (*self.staged.workspaces, workspace)
+        self.staged.active_workspace_id = workspace.id
+        return workspace
+
+    def add_placement(
+        self,
+        workspace_id: str,
+        *,
+        name: str,
+        process_name: str = "",
+        title_contains: str = "",
+        title_regex: str = "",
+        monitor_index: int = 0,
+        preset_id: str = "full",
+    ) -> WorkspacePlacement:
+        workspace = self.get(workspace_id)
+        placement = WorkspacePlacement(
+            new_id(),
+            name.strip(),
+            WindowMatcher(process_name.strip(), title_contains.strip(), title_regex.strip()),
+            preset_rect(preset_id),
+            monitor_index,
+        )
+        self._replace_workspace(workspace_id, placements=(*workspace.placements, placement))
+        return placement
+
+    def set_placement_rect(
+        self, workspace_id: str, placement_id: str, rect: NormalizedRect
+    ) -> None:
+        workspace = self.get(workspace_id)
+        placements = tuple(
+            replace(placement, rect=rect) if placement.id == placement_id else placement
+            for placement in workspace.placements
+        )
+        if placements == workspace.placements:
+            raise KeyError(placement_id)
+        self._replace_workspace(workspace_id, placements=placements)
+
+    def set_placement_preset(self, workspace_id: str, placement_id: str, preset_id: str) -> None:
+        self.set_placement_rect(workspace_id, placement_id, preset_rect(preset_id))
 
     def rename(self, workspace_id: str, name: str) -> None:
         if not name.strip():
