@@ -87,11 +87,62 @@ def test_duplicate_name_and_shortcut_conflicts_block_commit():
     assert any("shortcut already used" in error for error in report.errors)
 
 
+def test_create_capture_and_rename_reject_duplicate_layout_names():
+    controller = WorkspaceEditorController(
+        Settings(workspaces=(workspace(), Workspace("gaming", "Gaming", ())))
+    )
+
+    with pytest.raises(ValueError, match="already exists"):
+        controller.create(" OFFICE ")
+    with pytest.raises(ValueError, match="already exists"):
+        controller.capture(Manager(), "office")
+    with pytest.raises(ValueError, match="already exists"):
+        controller.rename("gaming", "Office")
+
+    assert [item.name for item in controller.staged.workspaces] == ["Office", "Gaming"]
+
+
+def test_default_templates_and_duplicates_receive_unique_names():
+    controller = WorkspaceEditorController(Settings())
+
+    first_office = controller.add_office_template()
+    second_office = controller.add_office_template()
+    first_copy = controller.duplicate(first_office.id)
+    second_copy = controller.duplicate(first_office.id)
+    first_game = controller.add_runescape_template(["Alice"])
+    second_game = controller.add_runescape_template(["Bob"])
+
+    assert [
+        first_office.name,
+        second_office.name,
+        first_copy.name,
+        second_copy.name,
+        first_game.name,
+        second_game.name,
+    ] == [
+        "Office focus",
+        "Office focus 2",
+        "Office focus copy",
+        "Office focus copy 2",
+        "RuneScape accounts",
+        "RuneScape accounts 2",
+    ]
+
+
 def test_action_shortcut_conflict_is_reported():
     settings = Settings(workspaces=(workspace("ctrl+alt+left"),))
     settings.shortcuts[Action.LEFT_HALF] = "ctrl+alt+left"
     report = WorkspaceEditorController(settings).validate()
     assert any("left_half" in error for error in report.errors)
+
+
+def test_unregisterable_workspace_shortcut_is_rejected():
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace("ctrl+alt+delete"),)))
+
+    report = controller.validate()
+
+    assert not report.ok
+    assert any("cannot be registered by Windows" in error for error in report.errors)
 
 
 def test_broad_and_duplicate_rules_warn():

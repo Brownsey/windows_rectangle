@@ -1,7 +1,13 @@
 """Tests for import-safe visual workspace canvas geometry."""
 
-from windows_rectangle.core.workspaces import NormalizedRect
+from windows_rectangle.core.workspaces import (
+    NormalizedRect,
+    WindowMatcher,
+    WorkspacePlacement,
+)
 from windows_rectangle.ui.workspace_canvas import canvas_rect, resize_rect, translate_rect
+
+from windows_rectangle.ui import workspace_canvas
 
 
 def test_canvas_rect_maps_basis_points_inside_padding():
@@ -46,3 +52,74 @@ def test_resize_rect_enforces_minimum_and_monitor_bounds():
     bounded = resize_rect(original, frozenset({"right"}), 9999, 0, 1000, 500)
     assert shrunk.left == 7700
     assert bounded.right == 10000
+
+
+def test_multi_display_canvas_keeps_equal_positions_separate():
+    first_display = workspace_canvas.display_canvas_rect(0, 2, 1000, 500)
+    second_display = workspace_canvas.display_canvas_rect(1, 2, 1000, 500)
+    same_position = NormalizedRect(0, 0, 10000, 10000)
+
+    first = workspace_canvas.placement_canvas_rect(same_position, first_display)
+    second = workspace_canvas.placement_canvas_rect(same_position, second_display)
+
+    assert first_display[0] + first_display[2] < second_display[0]
+    assert first[0] + first[2] < second[0]
+
+
+def test_canvas_keyboard_moves_selected_placement_and_exposes_geometry():
+    from PySide6 import QtCore, QtTest, QtWidgets
+    from windows_rectangle.ui.workspace_canvas import create_layout_canvas
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    moved = []
+    canvas = create_layout_canvas(lambda _placement_id, rect: moved.append(rect), lambda _id: None)
+    placement = WorkspacePlacement(
+        "client",
+        "RuneLite",
+        WindowMatcher(process_name="RuneLite.exe"),
+        NormalizedRect(0, 0, 5000, 5000),
+    )
+    canvas.resize(800, 400)
+    canvas.set_placements((placement,))
+    canvas.select(placement.id)
+    canvas.show()
+    canvas.setFocus()
+    app.processEvents()
+
+    QtTest.QTest.keyClick(canvas, QtCore.Qt.Key_Right)
+    app.processEvents()
+
+    assert canvas.focusPolicy() == QtCore.Qt.StrongFocus
+    assert moved[-1] == NormalizedRect(100, 0, 5100, 5000)
+    assert "RuneLite" in canvas.accessibleDescription()
+    assert "Display 1" in canvas.accessibleDescription()
+    canvas.deleteLater()
+    app.processEvents()
+
+
+def test_canvas_paints_visible_keyboard_focus_outline():
+    from PySide6 import QtGui, QtWidgets
+    from windows_rectangle.ui.workspace_canvas import create_layout_canvas
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = QtWidgets.QWidget()
+    layout = QtWidgets.QVBoxLayout(window)
+    other = QtWidgets.QLineEdit()
+    canvas = create_layout_canvas(lambda *_: None, lambda *_: None)
+    canvas.resize(600, 300)
+    layout.addWidget(other)
+    layout.addWidget(canvas)
+    window.resize(640, 380)
+    window.show()
+    other.setFocus()
+    app.processEvents()
+    unfocused = canvas.grab().toImage().pixelColor(canvas.width() // 2, 1)
+
+    canvas.setFocus()
+    app.processEvents()
+    focused = canvas.grab().toImage().pixelColor(canvas.width() // 2, 1)
+
+    assert focused == QtGui.QColor("#175cd3")
+    assert focused != unfocused
+    window.deleteLater()
+    app.processEvents()

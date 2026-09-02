@@ -220,7 +220,11 @@ class AppContext:
         self.dispatcher._cycle.idle_timeout = settings.cycle_idle_timeout
         self.dispatcher.almost_maximize_scale = settings.almost_maximize_scale
         self.drag.gap = settings.gap
-        if (shortcuts_changed or workspace_shortcuts_changed) and self.hotkeys is not None:
+        if (
+            (shortcuts_changed or workspace_shortcuts_changed)
+            and self.hotkeys is not None
+            and not self.paused
+        ):
             self.rebind_hotkeys()
         # Mirror the drag-to-edge toggle into the WH_MOUSE_LL lifecycle.
         # Lifts the restart restriction that bind_mousehook used to
@@ -492,7 +496,13 @@ class AppContext:
 
     def capture_named_workspace(self, name: str):
         """Capture visible windows, persist the workspace, and make it active."""
-        workspace = capture_workspace(cast(WorkspaceWindows, self.windows), name)
+        clean_name = name.strip()
+        if any(
+            workspace.name.casefold() == clean_name.casefold()
+            for workspace in self.settings.workspaces
+        ):
+            raise ValueError(f"A layout named ‘{clean_name}’ already exists")
+        workspace = capture_workspace(cast(WorkspaceWindows, self.windows), clean_name)
         updated = deepcopy(self.settings)
         updated.workspaces = (*updated.workspaces, workspace)
         updated.active_workspace_id = workspace.id

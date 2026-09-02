@@ -323,28 +323,29 @@ class Win32WindowManager:
             flags = self.get_window_flags(handle)
             if not title or flags.is_shell_window or flags.is_tool_window or flags.is_cloaked:
                 return True
-            windows.append(WindowIdentity(handle, title, self._process_name(hwnd)))
+            process_name, process_id = self._process_identity(hwnd)
+            windows.append(WindowIdentity(handle, title, process_name, process_id))
             return True
 
         self._user32.EnumWindows(enum_proc(callback), 0)
         return windows
 
-    def _process_name(self, hwnd: int) -> str:
+    def _process_identity(self, hwnd: int) -> tuple[str, int | None]:
         ct = self._ct
         wt = self._wt
         pid = wt.DWORD(0)
         self._user32.GetWindowThreadProcessId(hwnd, ct.byref(pid))
         process = self._kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
         if not process:
-            return ""
+            return "", pid.value or None
         try:
             capacity = wt.DWORD(32_768)
             buffer = ct.create_unicode_buffer(capacity.value)
             if not self._kernel32.QueryFullProcessImageNameW(
                 process, 0, buffer, ct.byref(capacity)
             ):
-                return ""
-            return ntpath.basename(buffer.value)
+                return "", pid.value or None
+            return ntpath.basename(buffer.value), pid.value or None
         finally:
             self._kernel32.CloseHandle(process)
 

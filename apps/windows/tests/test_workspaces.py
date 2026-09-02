@@ -91,6 +91,53 @@ def test_specific_workspace_rule_wins_before_broad_rule():
     ]
 
 
+def test_missing_title_falls_back_to_first_unassigned_window_from_same_process():
+    rect = NormalizedRect(0, 0, 5000, 10000)
+    placements = (
+        WorkspacePlacement(
+            "mail",
+            "Mail",
+            WindowMatcher(process_name="chrome.exe", title_contains="Outlook"),
+            rect,
+        ),
+        WorkspacePlacement(
+            "chat",
+            "ChatGPT",
+            WindowMatcher(process_name="chrome.exe", title_contains="ChatGPT"),
+            rect,
+        ),
+    )
+    windows = [
+        WindowIdentity(1, "New tab - Chrome", "chrome.exe"),
+        WindowIdentity(2, "Downloads - Chrome", "chrome.exe"),
+    ]
+
+    result = match_workspace_windows(placements, windows)
+
+    assert [(match.placement_id, match.handle) for match in result.matches] == [
+        ("mail", 1),
+        ("chat", 2),
+    ]
+
+
+def test_missing_title_does_not_fall_back_when_a_launch_command_can_open_exact_window():
+    placement = WorkspacePlacement(
+        "chat",
+        "ChatGPT",
+        WindowMatcher(process_name="chrome.exe", title_contains="ChatGPT"),
+        NormalizedRect(0, 0, 10000, 10000),
+        launch_command='"C:/Program Files/Google/Chrome/Application/chrome.exe" --app=chatgpt.com',
+    )
+
+    result = match_workspace_windows(
+        (placement,),
+        [WindowIdentity(1, "Gmail - Chrome", "chrome.exe")],
+    )
+
+    assert result.matches == ()
+    assert result.unmatched_placements == ("chat",)
+
+
 def test_broad_rule_does_not_take_only_window_matching_specific_rule():
     rect = NormalizedRect(0, 0, 5000, 10000)
     placements = (

@@ -417,6 +417,16 @@ def test_workspace_shortcut_queues_restore_for_main_thread(windows):
     assert len(hot.registered) == len(DEFAULT_SHORTCUTS) + 1
 
 
+def test_capture_named_workspace_rejects_duplicate_name_before_capture(windows):
+    existing = Workspace("office", "Office", ())
+    ctx = build(Settings(workspaces=(existing,)), windows)
+
+    with pytest.raises(ValueError, match="already exists"):
+        ctx.capture_named_workspace(" office ")
+
+    assert ctx.settings.workspaces == (existing,)
+
+
 def test_workspace_restore_runs_off_main_thread(windows, monkeypatch):
     import threading
 

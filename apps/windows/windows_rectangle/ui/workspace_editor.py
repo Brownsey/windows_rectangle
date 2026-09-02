@@ -9,6 +9,7 @@ from ..core.keymap import UnsupportedKeyError, translate
 from ..core.shortcuts import (
     ShortcutParseError,
     is_reserved,
+    is_unregisterable,
     normalise,
     parse,
 )
@@ -87,22 +88,21 @@ class WorkspaceEditorController:
         self.staged = merged
 
     def capture(self, manager: WorkspaceWindows, name: str) -> Workspace:
-        workspace = capture_workspace(manager, name)
+        clean_name = self._require_unique_name(name)
+        workspace = capture_workspace(manager, clean_name)
         self.staged.workspaces = (*self.staged.workspaces, workspace)
         self.staged.active_workspace_id = workspace.id
         return workspace
 
     def create(self, name: str) -> Workspace:
-        clean_name = name.strip()
-        if not clean_name:
-            raise ValueError("workspace name cannot be empty")
+        clean_name = self._require_unique_name(name)
         workspace = Workspace(new_id(), clean_name, ())
         self.staged.workspaces = (*self.staged.workspaces, workspace)
         self.staged.active_workspace_id = workspace.id
         return workspace
 
     def add_office_template(self, name: str = "Office focus") -> Workspace:
-        workspace = office_workspace(name)
+        workspace = office_workspace(self._next_available_name(name.strip() or "Office focus"))
         self.staged.workspaces = (*self.staged.workspaces, workspace)
         self.staged.active_workspace_id = workspace.id
         return workspace
@@ -110,7 +110,10 @@ class WorkspaceEditorController:
     def add_runescape_template(
         self, accounts: list[str], name: str = "RuneScape accounts"
     ) -> Workspace:
-        workspace = runescape_workspace(accounts, name)
+        workspace = runescape_workspace(
+            accounts,
+            self._next_available_name(name.strip() or "RuneScape accounts"),
+        )
         self.staged.workspaces = (*self.staged.workspaces, workspace)
         self.staged.active_workspace_id = workspace.id
         return workspace
@@ -119,7 +122,7 @@ class WorkspaceEditorController:
         source = self.get(workspace_id)
         duplicate = Workspace(
             new_id(),
-            f"{source.name} copy",
+            self._next_available_name(f"{source.name} copy"),
             tuple(replace(placement, id=new_id()) for placement in source.placements),
         )
         self.staged.workspaces = (*self.staged.workspaces, duplicate)
@@ -154,21 +157,24 @@ class WorkspaceEditorController:
         self, workspace_id: str, placement_id: str, rect: NormalizedRect
     ) -> None:
         workspace = self.get(workspace_id)
+        if not any(placement.id == placement_id for placement in workspace.placements):
+            raise KeyError(placement_id)
         placements = tuple(
             replace(placement, rect=rect) if placement.id == placement_id else placement
             for placement in workspace.placements
         )
         if placements == workspace.placements:
-            raise KeyError(placement_id)
+            return
         self._replace_workspace(workspace_id, placements=placements)
 
     def set_placement_preset(self, workspace_id: str, placement_id: str, preset_id: str) -> None:
         self.set_placement_rect(workspace_id, placement_id, preset_rect(preset_id))
 
     def rename(self, workspace_id: str, name: str) -> None:
-        if not name.strip():
-            raise ValueError("workspace name cannot be empty")
-        self._replace_workspace(workspace_id, name=name.strip())
+        self._replace_workspace(
+            workspace_id,
+            name=self._require_unique_name(name, excluding_id=workspace_id),
+        )
 
     def set_shortcut(self, workspace_id: str, shortcut: str) -> None:
         canonical = normalise(shortcut) if shortcut.strip() else ""
@@ -298,7 +304,9 @@ class WorkspaceEditorController:
                     if owner is not None:
                         errors.append(f"{workspace.name}: shortcut already used by {owner}")
                     shortcut_owners[combo] = workspace.name
-                    if is_reserved(combo):
+                    if is_unregisterable(combo):
+                        errors.append(f"{workspace.name}: shortcut cannot be registered by Windows")
+                    elif is_reserved(combo):
                         warnings.append(f"{workspace.name}: shortcut is reserved by Windows")
             seen_rules: set[tuple[str, str, str]] = set()
             for placement in workspace.placements:
@@ -358,3 +366,25 @@ class WorkspaceEditorController:
         if not found:
             raise KeyError(workspace_id)
         self.staged.workspaces = tuple(workspaces)
+
+    def _require_unique_name(self, name: str, *, excluding_id: str = "") -> str:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("layout name cannot be empty")
+        folded = clean_name.casefold()
+        if any(
+            workspace.id != excluding_id and workspace.name.casefold() == folded
+            for workspace in self.staged.workspaces
+        ):
+            raise ValueError(f"A layout named ‘{clean_name}’ already exists")
+        return clean_name
+
+    def _next_available_name(self, name: str) -> str:
+        base = name.strip()
+        existing = {workspace.name.casefold() for workspace in self.staged.workspaces}
+        if base.casefold() not in existing:
+            return base
+        suffix = 2
+        while f"{base} {suffix}".casefold() in existing:
+            suffix += 1
+        return f"{base} {suffix}"

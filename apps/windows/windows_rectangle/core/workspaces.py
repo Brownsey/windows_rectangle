@@ -61,6 +61,7 @@ class WindowIdentity:
     handle: object
     title: str
     process_name: str
+    process_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +175,19 @@ def match_workspace_windows(
             for window_index, window in enumerate(windows)
             if placement.matcher.score(window) > 0
         ]
+        matcher = placement.matcher
+        if (
+            not ranked
+            and matcher.process_name
+            and (matcher.title_contains or matcher.title_regex)
+            and not placement.launch_command.strip()
+        ):
+            expected_process = matcher.process_name.casefold().removesuffix(".exe")
+            ranked = [
+                (1, window_index)
+                for window_index, window in enumerate(windows)
+                if window.process_name.casefold().removesuffix(".exe") == expected_process
+            ]
         candidates.append(sorted(ranked, key=lambda item: (-item[0], item[1])))
 
     def priority(placement_index: int) -> tuple[int, int, int, int, int]:
@@ -197,11 +211,17 @@ def match_workspace_windows(
 
     def assign(placement_index: int, seen_windows: set[int]) -> bool:
         for _score, window_index in candidates[placement_index]:
+            if window_index in seen_windows or window_index in window_owner:
+                continue
+            assigned[placement_index] = window_index
+            window_owner[window_index] = placement_index
+            return True
+        for _score, window_index in candidates[placement_index]:
             if window_index in seen_windows:
                 continue
             seen_windows.add(window_index)
             owner = window_owner.get(window_index)
-            if owner is not None and not assign(owner, seen_windows):
+            if owner is None or not assign(owner, seen_windows):
                 continue
             assigned[placement_index] = window_index
             window_owner[window_index] = placement_index

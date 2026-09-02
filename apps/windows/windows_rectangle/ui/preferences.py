@@ -332,7 +332,7 @@ class PreferencesController:
             self.apply_button.setEnabled(result.ok and self.dirty)
         return result
 
-    def apply(self, *, close: bool = False) -> bool:
+    def apply(self) -> bool:
         from PySide6 import QtWidgets
 
         raw_settings = self.collect_settings()
@@ -365,8 +365,6 @@ class PreferencesController:
                 f"Saved, but only {bound} of {expected} shortcuts registered.",
             )
         self.refresh_from_context()
-        if close:
-            self.window.hide()
         return True
 
 
@@ -467,13 +465,26 @@ def _build_window(ctx: AppContext, QtCore, QtWidgets) -> PreferencesController:
     class PreferencesDialog(QtWidgets.QDialog):
         controller: PreferencesController | None = None
 
+        def _request_minimise(self) -> None:
+            if self.controller is None:
+                return
+            if not _confirm_discard_if_dirty(self.controller, QtWidgets):
+                return
+            self.controller.refresh_from_context()
+            _minimise_to_tray(self.controller)
+
         def closeEvent(self, event) -> None:
             if self.controller is not None:
-                if not _confirm_discard_if_dirty(self.controller, QtWidgets):
-                    event.ignore()
-                    return
-                self.controller.refresh_from_context()
+                event.ignore()
+                self._request_minimise()
+                return
             super().closeEvent(event)
+
+        def reject(self) -> None:
+            if self.controller is not None:
+                self._request_minimise()
+                return
+            super().reject()
 
     window = PreferencesDialog()
     window.setObjectName("preferencesWindow")
@@ -485,6 +496,7 @@ def _build_window(ctx: AppContext, QtCore, QtWidgets) -> PreferencesController:
     if not icon.isNull():
         window.setWindowIcon(icon)
     window.setWindowFlag(QtCore.Qt.WindowContextHelpButtonHint, False)
+    window.setWindowFlag(QtCore.Qt.WindowMinimizeButtonHint, True)
     _apply_window_style(window)
 
     controller = PreferencesController(ctx=ctx, window=window)
@@ -523,9 +535,7 @@ def _build_window(ctx: AppContext, QtCore, QtWidgets) -> PreferencesController:
 
     buttons = QtWidgets.QDialogButtonBox()
     reset = buttons.addButton("Restore Defaults", QtWidgets.QDialogButtonBox.ResetRole)
-    controller.apply_button = buttons.addButton("Apply", QtWidgets.QDialogButtonBox.ApplyRole)
     controller.save_button = buttons.addButton("Save", QtWidgets.QDialogButtonBox.AcceptRole)
-    close = buttons.addButton("Close", QtWidgets.QDialogButtonBox.RejectRole)
 
     footer = QtWidgets.QHBoxLayout()
     footer.addWidget(controller.status_label, 1)
@@ -533,18 +543,24 @@ def _build_window(ctx: AppContext, QtCore, QtWidgets) -> PreferencesController:
     root.addLayout(footer)
 
     reset.clicked.connect(lambda: _reset_defaults(controller))
-    controller.apply_button.clicked.connect(lambda: controller.apply(close=False))
-    controller.save_button.clicked.connect(lambda: controller.apply(close=True))
-
-    def close_without_saving() -> None:
-        if _confirm_discard_if_dirty(controller, QtWidgets):
-            controller.refresh_from_context()
-            window.hide()
-
-    close.clicked.connect(close_without_saving)
+    controller.save_button.clicked.connect(lambda: controller.apply())
 
     controller.refresh_from_context()
     return controller
+
+
+def _minimise_to_tray(controller: PreferencesController) -> None:
+    from PySide6 import QtWidgets
+
+    controller.window.hide()
+    app = QtWidgets.QApplication.instance()
+    tray_controller = getattr(app, "_tray", None) if app is not None else None
+    tray_icon = getattr(tray_controller, "icon", None)
+    if tray_icon is not None:
+        tray_icon.showMessage(
+            "Windows Rectangle is still running",
+            "Shortcuts and layouts remain active. Click the squirrel tray icon to reopen it.",
+        )
 
 
 def _build_brand_logo(QtCore, QtGui, QtWidgets):
@@ -660,7 +676,7 @@ def _build_shortcut_button(
             self._sync_text()
 
         def _record(self) -> None:
-            hotkeys_suspended = _suspend_hotkeys_for_recording(controller)
+            hotkeys_suspended = _suspend_hotkeys_for_recording(controller.ctx)
             try:
                 sequence = _record_shortcut(self.window(), action_name, QtCore, QtGui, QtWidgets)
             finally:
@@ -728,11 +744,11 @@ def _clear_recorded_shortcut(dialog, editor) -> None:
     dialog.accept()
 
 
-def _suspend_hotkeys_for_recording(controller: PreferencesController) -> bool:
-    if controller.ctx.hotkeys is None:
+def _suspend_hotkeys_for_recording(ctx) -> bool:
+    if ctx.hotkeys is None or getattr(ctx, "paused", False):
         return False
     try:
-        controller.ctx.hotkeys.unregister_all()
+        ctx.hotkeys.unregister_all()
     except Exception:  # noqa: BLE001
         _log.exception("could not suspend hotkeys while recording shortcut")
         return False

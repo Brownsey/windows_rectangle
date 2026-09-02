@@ -8,6 +8,7 @@ from typing import cast
 
 from ..core.workspace_presets import POSITION_PRESETS, preset_label
 from ..core.workspace_service import WorkspaceWindows
+from ..core.workspaces import WindowMatcher
 from .workspace_canvas import create_layout_canvas
 from .workspace_editor import WorkspaceEditorController
 
@@ -25,7 +26,8 @@ class WorkspaceDialog:
     placements: object
     canvas: object
     status: object
-    apply_button: object
+    layout_controls: tuple[object, ...]
+    placement_controls: tuple[object, ...]
     selected_id: str = ""
     loading: bool = False
     match_results: dict[str, bool] = field(default_factory=dict)
@@ -52,16 +54,21 @@ class WorkspaceDialog:
             else:
                 self.selected_id = ""
                 self.name_edit.clear()
-                self.shortcut_edit.clear()
+                _set_shortcut_value(self.shortcut_edit, "")
                 self.placements.setRowCount(0)
                 self.canvas.set_placements(())
         finally:
             self.loading = False
-        self.update_validation()
+        if self.editor.staged.workspaces:
+            self.load_selected()
+        else:
+            self.update_validation()
 
     def load_selected(self) -> None:
         from PySide6 import QtCore, QtWidgets
 
+        if self.loading:
+            return
         item = self.workspace_list.currentItem()
         if item is None:
             return
@@ -70,7 +77,7 @@ class WorkspaceDialog:
         self.loading = True
         try:
             self.name_edit.setText(workspace.name)
-            self.shortcut_edit.setText(workspace.shortcut)
+            _set_shortcut_value(self.shortcut_edit, workspace.shortcut)
             self.placements.setRowCount(len(workspace.placements))
             for row, placement in enumerate(workspace.placements):
                 matcher = placement.matcher
@@ -105,17 +112,32 @@ class WorkspaceDialog:
                         )
                     self.placements.setItem(row, column, cell)
             self.placements.resizeRowsToContents()
+            manager = getattr(self.ctx, "windows", None)
+            try:
+                display_count = len(manager.list_work_areas()) if manager is not None else 1
+            except Exception:  # noqa: BLE001
+                _log.exception("could not enumerate displays for layout canvas")
+                display_count = 1
+            display_count = max(
+                display_count,
+                max((placement.monitor_index + 1 for placement in workspace.placements), default=1),
+            )
+            self.canvas.set_display_count(display_count)
             self.canvas.set_placements(workspace.placements)
         finally:
             self.loading = False
         self.update_validation()
 
     def update_validation(self, transient_error: str = "") -> None:
+        self.update_control_states()
         report = self.editor.validate()
+        binding_failure = self._binding_failure()
         if transient_error:
             text, state = transient_error, "error"
         elif report.errors:
             text, state = report.errors[0], "error"
+        elif binding_failure:
+            text, state = binding_failure, "error"
         elif report.warnings:
             text, state = report.warnings[0], "warning"
         elif not self.editor.staged.workspaces:
@@ -128,18 +150,44 @@ class WorkspaceDialog:
         self.status.setProperty("status", state)
         self.status.style().unpolish(self.status)
         self.status.style().polish(self.status)
-        self.apply_button.setEnabled(report.ok and self.editor.is_dirty)
+
+    def update_control_states(self) -> None:
+        has_layout = bool(self.selected_id) and any(
+            workspace.id == self.selected_id for workspace in self.editor.staged.workspaces
+        )
+        for control in self.layout_controls:
+            control.setEnabled(has_layout)
+        has_placement = has_layout and self.placements.currentRow() >= 0
+        for control in self.placement_controls:
+            control.setEnabled(has_placement)
+
+    def _binding_failure(self) -> str:
+        report = getattr(self.ctx, "last_binding_report", None)
+        failures = getattr(report, "workspace_failed", ())
+        for workspace_id, name, _combo, error in failures:
+            if workspace_id == self.selected_id:
+                return (
+                    f"{name}: shortcut could not be registered ({error}). Choose another shortcut."
+                )
+        return ""
 
     def edit_workspace_fields(self) -> None:
         if self.loading or not self.selected_id:
             return
+        previous = self.editor.get(self.selected_id)
         try:
             self.editor.rename(self.selected_id, self.name_edit.text())
-            self.editor.set_shortcut(self.selected_id, self.shortcut_edit.text())
+            self.editor.set_shortcut(self.selected_id, _shortcut_value(self.shortcut_edit))
         except ValueError as exc:
+            workspace = self.editor.get(self.selected_id)
+            self.name_edit.setText(workspace.name)
+            _set_shortcut_value(self.shortcut_edit, workspace.shortcut)
             self.update_validation(str(exc))
             return
-        self.autosave()
+        if self.editor.get(self.selected_id) == previous:
+            return
+        if self.autosave():
+            self.refresh()
 
     def edit_placement(self, item) -> None:
         if self.loading or not self.selected_id or item.column() == 5:
@@ -175,6 +223,8 @@ class WorkspaceDialog:
             self.update_validation()
             return False
         self.update_validation()
+        if self._binding_failure():
+            return True
         self.status.setText(success_text)
         self.status.setProperty("status", "saved")
         return True
@@ -207,11 +257,29 @@ def show(ctx) -> WorkspaceDialog:
 
 
 def _build(ctx) -> WorkspaceDialog:
-    from PySide6 import QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets
 
-    window = QtWidgets.QDialog()
+    class WorkspaceEditorWindow(QtWidgets.QDialog):
+        controller: WorkspaceDialog | None = None
+
+        def closeEvent(self, event) -> None:
+            if self.controller is not None:
+                event.ignore()
+                _close(self.controller, QtWidgets)
+                return
+            super().closeEvent(event)
+
+        def reject(self) -> None:
+            if self.controller is not None:
+                _close(self.controller, QtWidgets)
+                return
+            super().reject()
+
+    window = WorkspaceEditorWindow()
     window.setObjectName("workspaceEditor")
     window.setWindowTitle("Windows Rectangle — Layouts")
+    window.setWindowFlag(QtCore.Qt.WindowContextHelpButtonHint, False)
+    window.setWindowFlag(QtCore.Qt.WindowMinimizeButtonHint, True)
     window.setMinimumSize(960, 640)
     window.resize(1180, 780)
     root = QtWidgets.QVBoxLayout(window)
@@ -240,6 +308,7 @@ def _build(ctx) -> WorkspaceDialog:
     create.setAccessibleName("Create an empty layout")
     capture = QtWidgets.QPushButton("Capture Open Apps…")
     capture.setAccessibleName("Capture open apps as a layout")
+    capture.setToolTip("Windows Rectangle windows are excluded automatically")
     duplicate = QtWidgets.QPushButton("Duplicate Layout")
     remove = QtWidgets.QPushButton("Delete Layout")
     left_layout.addWidget(template)
@@ -253,9 +322,11 @@ def _build(ctx) -> WorkspaceDialog:
     form = QtWidgets.QFormLayout()
     name_edit = QtWidgets.QLineEdit()
     name_edit.setObjectName("workspaceName")
-    shortcut_edit = QtWidgets.QLineEdit()
+    shortcut_edit = QtWidgets.QPushButton("Record Shortcut…")
     shortcut_edit.setObjectName("workspaceShortcut")
-    shortcut_edit.setPlaceholderText("For example Ctrl+Alt+1")
+    shortcut_edit.setAccessibleName("Launch shortcut")
+    shortcut_edit.setToolTip("Record one key combination, for example Ctrl+Alt+1")
+    shortcut_edit.setMinimumHeight(32)
     form.addRow("Layout name", name_edit)
     form.addRow("Launch shortcut", shortcut_edit)
     detail_layout.addLayout(form)
@@ -328,9 +399,11 @@ def _build(ctx) -> WorkspaceDialog:
 
     status = QtWidgets.QLabel()
     status.setObjectName("workspaceStatus")
+    status.setAccessibleName("Layout status")
     buttons = QtWidgets.QDialogButtonBox()
-    apply_button = buttons.addButton("Save Changes", QtWidgets.QDialogButtonBox.ApplyRole)
-    close_button = buttons.addButton("Done", QtWidgets.QDialogButtonBox.AcceptRole)
+    close_button = buttons.addButton("Done", QtWidgets.QDialogButtonBox.ActionRole)
+    close_button.setAutoDefault(False)
+    close_button.setDefault(False)
     footer = QtWidgets.QHBoxLayout()
     footer.addWidget(status, 1)
     footer.addWidget(buttons)
@@ -346,11 +419,26 @@ def _build(ctx) -> WorkspaceDialog:
         placements,
         canvas,
         status,
-        apply_button,
+        (
+            name_edit,
+            shortcut_edit,
+            canvas,
+            placements,
+            duplicate,
+            remove,
+            add_rule,
+            record_positions,
+            test_matches,
+            restore,
+        ),
+        (edit_rule, remove_rule, choose_position),
     )
+    window.controller = controller
     workspace_list.currentItemChanged.connect(lambda *_: controller.load_selected())
     name_edit.editingFinished.connect(controller.edit_workspace_fields)
-    shortcut_edit.editingFinished.connect(controller.edit_workspace_fields)
+    shortcut_edit.clicked.connect(
+        lambda: _record_layout_shortcut(controller, QtCore, QtGui, QtWidgets)
+    )
     placements.itemSelectionChanged.connect(lambda: _table_selected(controller))
     placements.cellDoubleClicked.connect(lambda *_: _edit_application(controller, QtWidgets))
     template.clicked.connect(lambda: _create_from_template(controller, QtWidgets))
@@ -367,14 +455,53 @@ def _build(ctx) -> WorkspaceDialog:
     record_positions.clicked.connect(lambda: _record_positions(controller, QtWidgets))
     test_matches.clicked.connect(lambda: _test_matches(controller, QtWidgets))
     restore.clicked.connect(lambda: _restore(controller, QtWidgets))
-    apply_button.clicked.connect(lambda: controller.commit(False))
     close_button.clicked.connect(lambda: _close(controller, QtWidgets))
+    for button in window.findChildren(QtWidgets.QPushButton):
+        button.setAutoDefault(False)
+        button.setDefault(False)
     _apply_style(window)
     controller.refresh()
     return controller
 
 
+def _shortcut_value(button) -> str:
+    return str(button.property("shortcutValue") or "")
+
+
+def _set_shortcut_value(button, value: str) -> None:
+    from PySide6 import QtGui
+
+    button.setProperty("shortcutValue", value)
+    display = QtGui.QKeySequence(value).toString(QtGui.QKeySequence.PortableText).strip()
+    button.setText(display or "Record Shortcut…")
+
+
+def _record_layout_shortcut(controller: WorkspaceDialog, QtCore, QtGui, QtWidgets) -> None:
+    from .preferences import _record_shortcut, _suspend_hotkeys_for_recording
+
+    hotkeys_suspended = _suspend_hotkeys_for_recording(controller.ctx)
+    try:
+        sequence = _record_shortcut(
+            controller.window,
+            "Launch this layout",
+            QtCore,
+            QtGui,
+            QtWidgets,
+        )
+    finally:
+        if hotkeys_suspended:
+            controller.ctx.rebind_hotkeys()
+    if sequence is None:
+        return
+    _set_shortcut_value(
+        controller.shortcut_edit,
+        sequence.toString(QtGui.QKeySequence.PortableText).strip(),
+    )
+    controller.edit_workspace_fields()
+
+
 def _table_selected(controller: WorkspaceDialog) -> None:
+    controller.update_control_states()
     row = controller.placements.currentRow()
     if row < 0:
         return
@@ -513,6 +640,7 @@ def _edit_application(controller: WorkspaceDialog, QtWidgets) -> None:
     except ValueError as exc:
         controller.update_validation(str(exc))
         return
+    controller.match_results.pop(placement_id, None)
     controller.load_selected()
     controller.autosave("App changes saved")
 
@@ -554,7 +682,18 @@ def _application_rule_dialog(controller: WorkspaceDialog, QtWidgets, placement=N
     launch_layout.addWidget(launch, 1)
     launch_layout.addWidget(browse)
     monitor = QtWidgets.QSpinBox()
-    monitor.setRange(1, 32)
+    manager = getattr(controller.ctx, "windows", None)
+    try:
+        display_count = len(manager.list_work_areas()) if manager is not None else 1
+    except Exception:  # noqa: BLE001
+        _log.exception("could not enumerate displays for application rule")
+        display_count = 1
+    connected_display_count = max(1, display_count)
+    if placement is not None:
+        display_count = max(display_count, placement.monitor_index + 1)
+    monitor.setRange(1, max(1, display_count))
+    if placement is not None and placement.monitor_index >= connected_display_count:
+        monitor.setToolTip("This saved display is not currently connected")
     position = QtWidgets.QComboBox()
     if placement is not None and all(placement.rect != preset.rect for preset in POSITION_PRESETS):
         position.addItem("Custom — keep canvas position", "")
@@ -584,10 +723,33 @@ def _application_rule_dialog(controller: WorkspaceDialog, QtWidgets, placement=N
     )
     help_text.setWordWrap(True)
     form.addRow(help_text)
+    error = QtWidgets.QLabel()
+    error.setObjectName("appRuleError")
+    error.setAccessibleName("App rule error")
+    error.setWordWrap(True)
+    form.addRow(error)
     buttons = QtWidgets.QDialogButtonBox(
         QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel
     )
-    buttons.accepted.connect(dialog.accept)
+
+    def accept_if_valid() -> None:
+        if not name.text().strip():
+            error.setText("Enter an app or account name")
+            name.setFocus()
+            return
+        try:
+            WindowMatcher(
+                process.text().strip(),
+                title.text().strip(),
+                title_regex.text().strip(),
+            )
+        except ValueError as exc:
+            error.setText(str(exc))
+            (title_regex if title_regex.text().strip() else process).setFocus()
+            return
+        dialog.accept()
+
+    buttons.accepted.connect(accept_if_valid)
     buttons.rejected.connect(dialog.reject)
     form.addRow(buttons)
     name.setFocus()
@@ -742,9 +904,11 @@ def _apply_style(window) -> None:
         """
         QDialog#workspaceEditor { background: #f6f7f9; color: #20242a; }
         QLabel#workspaceTitle { font-size: 22px; font-weight: 600; color: #171a1f; }
-        QListWidget, QTableWidget, QLineEdit {
+        QListWidget, QTableWidget, QLineEdit, QPushButton#workspaceShortcut {
             background: white; border: 1px solid #d0d5dd; border-radius: 6px;
         }
+        QPushButton#workspaceShortcut { text-align: left; padding-left: 8px; }
+        QPushButton#workspaceShortcut:hover { border-color: #175cd3; }
         QListWidget::item { padding: 9px; }
         QListWidget::item:selected { background: #e8f0ff; color: #1849a9; }
         QHeaderView::section { background: #f2f4f7; padding: 7px; border: 0; }
@@ -752,6 +916,7 @@ def _apply_style(window) -> None:
         QLabel#workspaceStatus[status="warning"] { color: #8a5a00; }
         QLabel#workspaceStatus[status="saved"] { color: #1f6f43; }
         QLabel#workspaceStatus[status="dirty"] { color: #8a5a00; }
+        QLabel#appRuleError { color: #b42318; }
         QPushButton { min-height: 30px; padding: 4px 10px; }
         QPushButton#primaryAction {
             background: #175cd3; color: white; border: 1px solid #175cd3;

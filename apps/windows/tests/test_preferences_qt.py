@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from contextlib import suppress
+from types import SimpleNamespace
 
 import pytest
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
@@ -154,6 +155,22 @@ def test_qt_preferences_window_has_expected_structure(qt_app, qt_modules):
         assert button.minimumHeight() >= 34
 
 
+def test_qt_preferences_window_has_native_minimise_button(qt_app, qt_modules):
+    qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+    controller = _build_controller(qt_app, qt_modules)
+
+    assert controller.window.windowFlags() & qt_core.Qt.WindowMinimizeButtonHint
+    button_box = controller.window.findChild(qt_widgets.QDialogButtonBox)
+    assert button_box is not None
+    labels = {button.text() for button in button_box.buttons()}
+    assert "Save" in labels
+    assert "Apply" not in labels
+    assert "Close" not in labels
+    assert "Save & Minimise" not in labels
+    assert "Minimise to Tray" not in labels
+    assert controller.apply_button is None
+
+
 def test_qt_preferences_exposes_every_supported_action(qt_app, qt_modules):
     controller = _build_controller(qt_app, qt_modules)
     assert set(controller.shortcut_widgets) == set(Action)
@@ -281,6 +298,25 @@ def test_qt_record_button_updates_shortcut_and_restores_hotkeys(qt_app, qt_modul
     assert ctx.rebind_calls == 1
 
 
+def test_qt_record_button_preserves_paused_hotkeys(qt_app, qt_modules, monkeypatch):
+    _qt_core, qt_gui, _qt_widgets, _qt_test = qt_modules
+    hotkeys = SpyHotkeys()
+    ctx = SpyContext(hotkeys=hotkeys)
+    ctx.paused = True
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    monkeypatch.setattr(
+        preferences,
+        "_record_shortcut",
+        lambda *_args: qt_gui.QKeySequence("Ctrl+Alt+L"),
+    )
+
+    controller.shortcut_widgets[Action.LEFT_HALF].click()
+    qt_app.processEvents()
+
+    assert hotkeys.unregister_all_calls == 0
+    assert ctx.rebind_calls == 0
+
+
 def test_qt_record_cancel_preserves_shortcut_and_clean_state(qt_app, qt_modules, monkeypatch):
     ctx = SpyContext()
     controller = _build_controller(qt_app, qt_modules, ctx)
@@ -296,7 +332,7 @@ def test_qt_record_cancel_preserves_shortcut_and_clean_state(qt_app, qt_modules,
     assert ctx.rebind_calls == 0
 
 
-def test_qt_duplicate_shortcuts_disable_save_and_apply(qt_app, qt_modules):
+def test_qt_duplicate_shortcuts_disable_save(qt_app, qt_modules):
     _qt_core, qt_gui, _qt_widgets, _qt_test = qt_modules
     controller = _build_controller(qt_app, qt_modules)
     duplicate = qt_gui.QKeySequence("Ctrl+Alt+L")
@@ -308,7 +344,6 @@ def test_qt_duplicate_shortcuts_disable_save_and_apply(qt_app, qt_modules):
     assert controller.status_label.property("status") == "error"
     assert "duplicates" in controller.status_label.text()
     assert not controller.save_button.isEnabled()
-    assert not controller.apply_button.isEnabled()
 
 
 def test_qt_reserved_shortcut_warns_but_still_allows_save(qt_app, qt_modules):
@@ -321,15 +356,17 @@ def test_qt_reserved_shortcut_warns_but_still_allows_save(qt_app, qt_modules):
     assert controller.status_label.property("status") == "warning"
     assert "reserved" in controller.status_label.text()
     assert controller.save_button.isEnabled()
-    assert controller.apply_button.isEnabled()
 
 
-def test_qt_save_applies_persists_rebinds_and_hides_window(qt_app, qt_modules):
+def test_qt_save_applies_persists_and_stays_open(qt_app, qt_modules, monkeypatch):
     _qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
     config = SpyConfigStore()
     ctx = SpyContext(config_store=config)
     controller = _build_controller(qt_app, qt_modules, ctx)
     controller.gap_spin.setValue(18)
+    messages = []
+    tray_icon = SimpleNamespace(showMessage=lambda title, body: messages.append((title, body)))
+    monkeypatch.setattr(qt_app, "_tray", SimpleNamespace(icon=tray_icon), raising=False)
 
     _button_box_button(controller, qt_widgets, "Save").click()
     qt_app.processEvents()
@@ -339,23 +376,36 @@ def test_qt_save_applies_persists_rebinds_and_hides_window(qt_app, qt_modules):
     assert ctx.applied[0].gap == 18
     assert ctx.rebind_calls == 0
     assert controller.dirty is False
-    assert not controller.window.isVisible()
+    assert controller.window.isVisible()
+    assert messages == []
 
 
-def test_qt_apply_persists_without_closing_window(qt_app, qt_modules):
-    _qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
-    config = SpyConfigStore()
-    ctx = SpyContext(config_store=config)
-    controller = _build_controller(qt_app, qt_modules, ctx)
-    controller.cycle_spin.setValue(3.0)
+def test_qt_escape_uses_minimise_to_tray_lifecycle(qt_app, qt_modules, monkeypatch):
+    qt_core, _qt_gui, _qt_widgets, qt_test = qt_modules
+    controller = _build_controller(qt_app, qt_modules)
+    controller.gap_spin.setValue(18)
+    confirmations = []
+    messages = []
+    tray_icon = SimpleNamespace(showMessage=lambda title, body: messages.append((title, body)))
+    monkeypatch.setattr(qt_app, "_tray", SimpleNamespace(icon=tray_icon), raising=False)
+    monkeypatch.setattr(
+        preferences,
+        "_confirm_discard_if_dirty",
+        lambda candidate, _widgets: confirmations.append(candidate) or True,
+    )
 
-    _button_box_button(controller, qt_widgets, "Apply").click()
+    qt_test.QTest.keyClick(controller.window, qt_core.Qt.Key_Escape)
     qt_app.processEvents()
 
-    assert config.saved[0].cycle_idle_timeout == pytest.approx(3.0)
-    assert ctx.applied[0].cycle_idle_timeout == pytest.approx(3.0)
+    assert confirmations == [controller]
     assert controller.dirty is False
-    assert controller.window.isVisible()
+    assert not controller.window.isVisible()
+    assert messages == [
+        (
+            "Windows Rectangle is still running",
+            "Shortcuts and layouts remain active. Click the squirrel tray icon to reopen it.",
+        )
+    ]
 
 
 def test_qt_restore_defaults_resets_shortcuts_and_marks_dirty(qt_app, qt_modules):

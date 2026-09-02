@@ -127,6 +127,21 @@ def test_pause_marks_report_entries_as_paused(windows):
     assert rep.failed_count == 0  # no real failures, just paused
 
 
+def test_applying_shortcut_changes_while_paused_does_not_rebind(windows):
+    hot = _Hot()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bind_hotkeys_via_bus(ctx, hot.register)
+    ctx.pause_hotkeys()
+    unregister_calls = hot.unregister_all_calls
+    updated = Settings(shortcuts={**ctx.settings.shortcuts, Action.LEFT_HALF: "ctrl+alt+l"})
+
+    ctx.apply_settings(updated)
+
+    assert ctx.paused is True
+    assert hot.registered == []
+    assert hot.unregister_all_calls == unregister_calls
+
+
 # ----- prefs reset ----------------------------------------------------
 
 
