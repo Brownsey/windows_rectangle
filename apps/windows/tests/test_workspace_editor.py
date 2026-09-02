@@ -170,3 +170,19 @@ def test_custom_normalized_rect_can_be_staged():
     custom = NormalizedRect(1250, 2500, 8750, 9000)
     controller.set_placement_rect("office", "slack", custom)
     assert controller.get("office").placements[0].rect == custom
+
+
+def test_templates_duplicate_and_per_rule_match_results():
+    controller = WorkspaceEditorController(Settings())
+    gaming = controller.add_runescape_template(["Main", "Iron"])
+    assert len(gaming.placements) == 2
+    duplicate = controller.duplicate(gaming.id)
+    assert duplicate.name == "RuneScape accounts copy"
+    assert duplicate.id != gaming.id
+    assert {item.id for item in duplicate.placements}.isdisjoint(
+        item.id for item in gaming.placements
+    )
+
+    office = controller.add_office_template()
+    results = controller.match_results(Manager(), office.id)
+    assert list(results.values()) == [True, False, False]

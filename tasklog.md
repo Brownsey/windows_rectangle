@@ -35,6 +35,8 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [x] Allow custom setups to be authored while applications are closed: empty workspaces, manual process/title rules, monitor selection, and reusable named position presets.
 - [x] Add workspace UI actions for creating an empty setup, adding an application, and changing a rule's position without recapturing.
 - [x] Add a visual monitor canvas with labeled application cards, synchronized table selection, drag-to-position, edge clamping, and normalized grid snapping.
+- [x] Add an Office template (Slack top-left, Outlook bottom-left, Chrome right-half) and a RuneScape wizard that creates title-specific account rules in a balanced grid.
+- [x] Add per-rule match status, workspace duplication, unsaved-change Save/Discard/Cancel handling, clearer workspace guidance, and end-user documentation.
 - [x] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
 - [x] Generate `research/Windows-Rectangle-UX-Research.docx` with first-party citations and a prioritized roadmap.
 
@@ -58,10 +60,11 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - After the first reusable dense-grid pass: 596 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - After manual custom-setup authoring: 602 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - After visual workspace editing: 605 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
+- After templates and workspace UX polish: 609 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed. Optional Qt installation was attempted but the package mirror did not complete, so rendered Qt tests remain skipped.
 - Research DOCX structural QA: valid archive, 89 paragraphs, 20 headings, one table, and 10 external hyperlinks. Visual rendering was unavailable.
 - Updated subprocess and PyInstaller-spec tests for the new `apps/windows` package location.
 - Updated the PyInstaller entry point and search path for the monorepo layout.
 
 ## Next iteration
 
-Extend the dense-grid catalogue through eighths, ninths, twelfths, and sixteenths, then add the user-specified rectangle action.
+Add canvas resizing handles and per-monitor canvas filtering, then integrate Workspaces into the primary Preferences navigation before continuing dense-grid parity.

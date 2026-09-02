@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import cast
 
 from ..core.workspace_presets import POSITION_PRESETS, preset_label
@@ -28,6 +28,7 @@ class WorkspaceDialog:
     apply_button: object
     selected_id: str = ""
     loading: bool = False
+    match_results: dict[str, bool] = field(default_factory=dict)
 
     def refresh(self) -> None:
         from PySide6 import QtCore, QtWidgets
@@ -79,12 +80,25 @@ class WorkspaceDialog:
                     placement.matcher.title_regex,
                     str(placement.monitor_index + 1),
                     preset_label(placement.rect),
+                    (
+                        "Matched"
+                        if self.match_results.get(placement.id) is True
+                        else "Not found"
+                        if self.match_results.get(placement.id) is False
+                        else "Not tested"
+                    ),
                 )
                 for column, value in enumerate(values):
                     cell = QtWidgets.QTableWidgetItem(value)
                     cell.setData(QtCore.Qt.UserRole, placement.id)
-                    if column == 5:
+                    if column >= 5:
                         cell.setFlags(cell.flags() & ~QtCore.Qt.ItemIsEditable)
+                    if column == 6 and placement.id in self.match_results:
+                        cell.setForeground(
+                            QtCore.Qt.darkGreen
+                            if self.match_results[placement.id]
+                            else QtCore.Qt.red
+                        )
                     self.placements.setItem(row, column, cell)
             self.placements.resizeRowsToContents()
             self.canvas.set_placements(workspace.placements)
@@ -187,7 +201,8 @@ def _build(ctx) -> WorkspaceDialog:
     title = QtWidgets.QLabel("Workspaces")
     title.setObjectName("workspaceTitle")
     subtitle = QtWidgets.QLabel(
-        "Capture windows once, review how each is identified, then restore the layout anytime."
+        "Capture open windows, start from a template, or add applications by name. "
+        "Drag cards to arrange them, then restore the setup with one shortcut."
     )
     subtitle.setWordWrap(True)
     root.addWidget(title)
@@ -201,13 +216,18 @@ def _build(ctx) -> WorkspaceDialog:
     workspace_list.setObjectName("workspaceList")
     workspace_list.setAccessibleName("Saved workspaces")
     left_layout.addWidget(workspace_list, 1)
+    template = QtWidgets.QPushButton("Start from template…")
+    template.setAccessibleName("Create a workspace from a template")
     create = QtWidgets.QPushButton("New empty workspace")
     create.setAccessibleName("Create an empty workspace")
     capture = QtWidgets.QPushButton("Capture current windows…")
     capture.setAccessibleName("Capture current windows as a workspace")
+    duplicate = QtWidgets.QPushButton("Duplicate workspace")
     remove = QtWidgets.QPushButton("Delete workspace")
+    left_layout.addWidget(template)
     left_layout.addWidget(create)
     left_layout.addWidget(capture)
+    left_layout.addWidget(duplicate)
     left_layout.addWidget(remove)
 
     detail = QtWidgets.QWidget()
@@ -235,9 +255,18 @@ def _build(ctx) -> WorkspaceDialog:
     placements = QtWidgets.QTableWidget()
     placements.setObjectName("workspacePlacements")
     placements.setAccessibleName("Window matching and placement rules")
-    placements.setColumnCount(6)
+    placements.setToolTip("Double-click Position to choose a preset")
+    placements.setColumnCount(7)
     placements.setHorizontalHeaderLabels(
-        ["Window", "Process", "Title contains", "Title regex", "Monitor", "Position"]
+        [
+            "Window",
+            "Process",
+            "Title contains",
+            "Title regex",
+            "Monitor",
+            "Position",
+            "Match status",
+        ]
     )
     placements.horizontalHeader().setStretchLastSection(True)
     placements.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
@@ -290,8 +319,10 @@ def _build(ctx) -> WorkspaceDialog:
     placements.cellDoubleClicked.connect(
         lambda row, column: _choose_position(controller, row, QtWidgets) if column == 5 else None
     )
+    template.clicked.connect(lambda: _create_from_template(controller, QtWidgets))
     create.clicked.connect(lambda: _create_empty(controller, QtWidgets))
     capture.clicked.connect(lambda: _capture(controller, QtWidgets))
+    duplicate.clicked.connect(lambda: _duplicate_workspace(controller))
     remove.clicked.connect(lambda: _delete_workspace(controller, QtWidgets))
     add_rule.clicked.connect(lambda: _add_application(controller, QtWidgets))
     remove_rule.clicked.connect(lambda: _delete_rule(controller))
@@ -299,7 +330,7 @@ def _build(ctx) -> WorkspaceDialog:
     restore.clicked.connect(lambda: _restore(controller, QtWidgets))
     apply_button.clicked.connect(lambda: controller.commit(False))
     save_button.clicked.connect(lambda: controller.commit(True))
-    close_button.clicked.connect(window.hide)
+    close_button.clicked.connect(lambda: _close(controller, QtWidgets))
     _apply_style(window)
     controller.refresh()
     return controller
@@ -328,6 +359,61 @@ def _canvas_moved(controller: WorkspaceDialog, placement_id: str, rect) -> None:
     controller.editor.set_placement_rect(controller.selected_id, placement_id, rect)
     controller.load_selected()
     _canvas_selected(controller, placement_id)
+
+
+def _create_from_template(controller: WorkspaceDialog, QtWidgets) -> None:
+    choices = ["Office — Slack, Outlook, Chrome", "RuneScape — account grid"]
+    selected, accepted = QtWidgets.QInputDialog.getItem(
+        controller.window, "Workspace template", "Choose a starting layout:", choices, 0, False
+    )
+    if not accepted:
+        return
+    try:
+        if selected == choices[0]:
+            workspace = controller.editor.add_office_template()
+        else:
+            accounts, accepted = QtWidgets.QInputDialog.getMultiLineText(
+                controller.window,
+                "RuneScape accounts",
+                "Enter one account/window title per line:",
+            )
+            if not accepted:
+                return
+            workspace = controller.editor.add_runescape_template(accounts.splitlines())
+    except ValueError as exc:
+        controller.update_validation(str(exc))
+        return
+    controller.selected_id = workspace.id
+    controller.match_results.clear()
+    controller.refresh()
+
+
+def _duplicate_workspace(controller: WorkspaceDialog) -> None:
+    if not controller.selected_id:
+        controller.update_validation("Select a workspace to duplicate")
+        return
+    workspace = controller.editor.duplicate(controller.selected_id)
+    controller.selected_id = workspace.id
+    controller.match_results.clear()
+    controller.refresh()
+
+
+def _close(controller: WorkspaceDialog, QtWidgets) -> None:
+    if not controller.editor.is_dirty:
+        controller.window.hide()
+        return
+    choice = QtWidgets.QMessageBox.warning(
+        controller.window,
+        "Unsaved workspace changes",
+        "Save your workspace changes before closing?",
+        QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel,
+        QtWidgets.QMessageBox.Save,
+    )
+    if choice == QtWidgets.QMessageBox.Save:
+        controller.commit(True)
+    elif choice == QtWidgets.QMessageBox.Discard:
+        controller.editor = WorkspaceEditorController(controller.ctx.settings)
+        controller.window.hide()
 
 
 def _create_empty(controller: WorkspaceDialog, QtWidgets) -> None:
@@ -458,14 +544,14 @@ def _delete_rule(controller: WorkspaceDialog) -> None:
 def _test_matches(controller: WorkspaceDialog, QtWidgets) -> None:
     if not controller.selected_id:
         return
-    matched, missing = controller.editor.match_counts(
+    controller.match_results = controller.editor.match_results(
         cast(WorkspaceWindows, controller.ctx.windows), controller.selected_id
     )
-    QtWidgets.QMessageBox.information(
-        controller.window,
-        "Workspace match test",
-        f"{matched} matched · {missing} not found. No windows were moved.",
-    )
+    matched = sum(controller.match_results.values())
+    missing = len(controller.match_results) - matched
+    controller.load_selected()
+    controller.status.setText(f"{matched} matched · {missing} not found. No windows moved.")
+    controller.status.setProperty("status", "saved" if not missing else "warning")
 
 
 def _restore(controller: WorkspaceDialog, QtWidgets) -> None:

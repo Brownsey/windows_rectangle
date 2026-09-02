@@ -14,6 +14,7 @@ from ..core.shortcuts import (
 )
 from ..core.workspace_presets import preset_rect
 from ..core.workspace_service import WorkspaceWindows, capture_workspace
+from ..core.workspace_templates import office_workspace, runescape_workspace
 from ..core.workspaces import (
     NormalizedRect,
     WindowMatcher,
@@ -64,6 +65,31 @@ class WorkspaceEditorController:
         self.staged.workspaces = (*self.staged.workspaces, workspace)
         self.staged.active_workspace_id = workspace.id
         return workspace
+
+    def add_office_template(self, name: str = "Office focus") -> Workspace:
+        workspace = office_workspace(name)
+        self.staged.workspaces = (*self.staged.workspaces, workspace)
+        self.staged.active_workspace_id = workspace.id
+        return workspace
+
+    def add_runescape_template(
+        self, accounts: list[str], name: str = "RuneScape accounts"
+    ) -> Workspace:
+        workspace = runescape_workspace(accounts, name)
+        self.staged.workspaces = (*self.staged.workspaces, workspace)
+        self.staged.active_workspace_id = workspace.id
+        return workspace
+
+    def duplicate(self, workspace_id: str) -> Workspace:
+        source = self.get(workspace_id)
+        duplicate = Workspace(
+            new_id(),
+            f"{source.name} copy",
+            tuple(replace(placement, id=new_id()) for placement in source.placements),
+        )
+        self.staged.workspaces = (*self.staged.workspaces, duplicate)
+        self.staged.active_workspace_id = duplicate.id
+        return duplicate
 
     def add_placement(
         self,
@@ -162,6 +188,12 @@ class WorkspaceEditorController:
         workspace = self.get(workspace_id)
         plan = plan_workspace(workspace, manager.list_windows(), manager.list_work_areas())
         return len(plan.moves), len(plan.unmatched_placements)
+
+    def match_results(self, manager: WorkspaceWindows, workspace_id: str) -> dict[str, bool]:
+        workspace = self.get(workspace_id)
+        plan = plan_workspace(workspace, manager.list_windows(), manager.list_work_areas())
+        matched = {move.placement_id for move in plan.moves}
+        return {placement.id: placement.id in matched for placement in workspace.placements}
 
     def validate(self) -> WorkspaceValidation:
         errors: list[str] = []
