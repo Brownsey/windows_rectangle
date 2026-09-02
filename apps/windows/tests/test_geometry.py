@@ -177,3 +177,11 @@ def test_relative_position_preserves_fractions_across_monitors():
     out = apply_relative_position(fracs, mon2)
     # Right half of mon2.
     assert out == Rect(2000 + 640, 100, 640, 720)
+
+
+def test_relative_position_degenerate_monitor_returns_full_extent():
+    """A monitor with zero/negative dims (hot-unplugged mid-call) must
+    not divide-by-zero — return (0,0,1,1) so the caller silently keeps
+    the window at full extent on the destination."""
+    fracs = relative_position(Rect(0, 0, 100, 100), Rect(0, 0, 0, 0))
+    assert fracs == (Fraction(0), Fraction(0), Fraction(1), Fraction(1))

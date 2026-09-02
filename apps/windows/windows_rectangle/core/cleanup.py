@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from types import TracebackType
 
 _log = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ class CleanupRegistry:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        tb: TracebackType | None,
+        tb: object,
     ) -> None:
         # Always unwind, even on exception.
         self.run()

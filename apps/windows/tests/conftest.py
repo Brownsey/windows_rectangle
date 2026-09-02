@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from windows_rectangle.core.eligibility import WindowFlags
 from windows_rectangle.core.geometry import Rect
+from windows_rectangle.core.monitors import best_monitor_for
 from windows_rectangle.ports.window_manager import MonitorInfo, WindowHandle
 
 
@@ -20,9 +21,9 @@ class FakeWindowManager:
     windows: dict[WindowHandle, Rect] = field(default_factory=dict)
     active: WindowHandle | None = None
     blocked: set[WindowHandle] = field(default_factory=set)
-    maximized: set[WindowHandle] = field(default_factory=set)
-    always_on_top: set[WindowHandle] = field(default_factory=set)
     blocked_topmost: set[WindowHandle] = field(default_factory=set)
+    always_on_top: set[WindowHandle] = field(default_factory=set)
+    maximized: set[WindowHandle] = field(default_factory=set)
     flags: dict[WindowHandle, WindowFlags] = field(default_factory=dict)
     default_flags: WindowFlags = field(
         default_factory=lambda: WindowFlags(has_caption=True, has_thick_frame=True)
@@ -76,14 +77,10 @@ class FakeWindowManager:
     def monitor_for_window(self, handle: WindowHandle) -> MonitorInfo | None:
         if handle not in self.windows:
             return None
-        # Pick the monitor with the largest overlap.
-        rect = self.windows[handle]
-        best: tuple[int, MonitorInfo] | None = None
-        for m in self.monitors:
-            area = rect.clamp_to(m.bounds).area
-            if best is None or area > best[0]:
-                best = (area, m)
-        return best[1] if best else None
+        # Use the production utility so the fake's behaviour (incl. tie-break
+        # ordering) matches what a real win32 adapter that falls back to
+        # overlap-area would do.
+        return best_monitor_for(self.windows[handle], self.monitors)
 
 
 def make_monitor(

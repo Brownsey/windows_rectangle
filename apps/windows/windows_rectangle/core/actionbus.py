@@ -60,15 +60,13 @@ class ActionBus:
 
     # ----- consumer side (main / dispatcher thread) -------------------
 
-    def drain(self, handler: Callable[[Action], None], *, max_items: int | None = None) -> int:
+    def drain(self, handler: Callable[[Action], None]) -> int:
         """Call `handler(action)` for every pending action. Returns count drained.
 
         Non-blocking. Safe to call repeatedly from the Qt event loop.
-        `max_items` limits how many actions are handled in this call; use it
-        from UI timers so a shortcut storm cannot monopolise the main thread.
         """
         count = 0
-        while max_items is None or count < max_items:
+        while True:
             try:
                 action = self._q.get_nowait()
             except queue.Empty:
@@ -78,28 +76,6 @@ class ActionBus:
             except Exception:  # noqa: BLE001 — by design; one bad action shouldn't kill the loop
                 _log.exception("handler raised on %s; continuing", action.value)
             count += 1
-        return count
-
-    def trim_to_latest(self, max_pending: int) -> int:
-        """Drop oldest queued actions until at most `max_pending` remain.
-
-        Window-move hotkeys are interactive commands. When the user presses
-        shortcuts faster than Windows can move windows, old queued commands
-        become stale input. Keeping the newest actions preserves the user's
-        latest intent and prevents a long catch-up period after a key storm.
-        """
-        if max_pending < 0:
-            raise ValueError("max_pending must be >= 0")
-        dropped = 0
-        while self._q.qsize() > max_pending:
-            try:
-                self._q.get_nowait()
-            except queue.Empty:  # pragma: no cover - race; queue drained elsewhere
-                break
-            dropped += 1
-        if dropped:
-            _log.warning("ActionBus trimmed %s stale queued actions", dropped)
-        return dropped
 
     def pending(self) -> int:
         """Approximate number of queued actions (best-effort, not synchronised)."""

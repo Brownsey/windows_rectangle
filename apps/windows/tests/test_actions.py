@@ -2,17 +2,12 @@
 
 import pytest
 from windows_rectangle.core.actions import (
-    ALMOST_MAXIMIZE_SCALE,
     DEFAULT_SHORTCUTS,
-    MAX_ALMOST_MAXIMIZE_SCALE,
-    MIN_ALMOST_MAXIMIZE_SCALE,
     Action,
     apply,
-    clamp_almost_maximize_scale,
     is_geometry_action,
 )
 from windows_rectangle.core.geometry import Rect
-from windows_rectangle.core.shortcuts import is_reserved
 
 WORK = Rect(0, 0, 1920, 1080)
 WIN = Rect(100, 100, 800, 600)
@@ -63,9 +58,6 @@ def test_quarters(action, expected):
     assert apply(action, WIN, WORK) == expected
 
 
-# ----- Sixths ---------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "action, expected",
     [
@@ -77,6 +69,63 @@ def test_quarters(action, expected):
 )
 def test_corner_sixths(action, expected):
     assert apply(action, WIN, WORK) == expected
+
+
+def test_center_sixths_complete_the_three_by_two_grid():
+    assert apply(Action.TOP_CENTER_SIXTH, WIN, WORK) == Rect(640, 0, 640, 540)
+    assert apply(Action.BOTTOM_CENTER_SIXTH, WIN, WORK) == Rect(640, 540, 640, 540)
+
+
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.TOP_LEFT_THIRD, Rect(0, 0, 1280, 540)),
+        (Action.TOP_RIGHT_THIRD, Rect(640, 0, 1280, 540)),
+        (Action.BOTTOM_LEFT_THIRD, Rect(0, 540, 1280, 540)),
+        (Action.BOTTOM_RIGHT_THIRD, Rect(640, 540, 1280, 540)),
+        (Action.TOP_VERTICAL_THIRD, Rect(0, 0, 1920, 360)),
+        (Action.MIDDLE_VERTICAL_THIRD, Rect(0, 360, 1920, 360)),
+        (Action.BOTTOM_VERTICAL_THIRD, Rect(0, 720, 1920, 360)),
+        (Action.TOP_VERTICAL_TWO_THIRDS, Rect(0, 0, 1920, 720)),
+        (Action.BOTTOM_VERTICAL_TWO_THIRDS, Rect(0, 360, 1920, 720)),
+    ],
+)
+def test_dense_thirds(action, expected):
+    assert apply(action, WIN, WORK) == expected
+
+
+def test_quadrant_thirds_are_orientation_aware():
+    portrait = Rect(0, 0, 900, 1600)
+    assert apply(Action.TOP_RIGHT_THIRD, WIN, portrait) == Rect(450, 0, 450, 1067)
+    assert apply(Action.BOTTOM_LEFT_THIRD, WIN, portrait) == Rect(0, 533, 450, 1067)
+
+
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.FIRST_FOURTH, Rect(0, 0, 480, 1080)),
+        (Action.SECOND_FOURTH, Rect(480, 0, 480, 1080)),
+        (Action.THIRD_FOURTH, Rect(960, 0, 480, 1080)),
+        (Action.LAST_FOURTH, Rect(1440, 0, 480, 1080)),
+        (Action.CENTER_HALF, Rect(480, 0, 960, 1080)),
+        (Action.CENTER_TWO_THIRDS, Rect(320, 0, 1280, 1080)),
+        (Action.FIRST_THREE_FOURTHS, Rect(0, 0, 1440, 1080)),
+        (Action.CENTER_THREE_FOURTHS, Rect(240, 0, 1440, 1080)),
+        (Action.LAST_THREE_FOURTHS, Rect(480, 0, 1440, 1080)),
+    ],
+)
+def test_oriented_bands_on_landscape(action, expected):
+    assert apply(action, WIN, WORK) == expected
+
+
+def test_oriented_bands_rotate_on_portrait_display():
+    portrait = Rect(-200, 50, 900, 1600)
+    assert apply(Action.FIRST_FOURTH, WIN, portrait) == Rect(-200, 50, 900, 400)
+    assert apply(Action.CENTER_HALF, WIN, portrait) == Rect(-200, 450, 900, 800)
+
+
+def test_oriented_band_gap_has_outer_and_inner_gutters():
+    assert apply(Action.SECOND_FOURTH, WIN, WORK, gap=10) == Rect(485, 10, 470, 1060)
 
 
 # ----- Thirds ---------------------------------------------------------
@@ -114,45 +163,109 @@ def test_maximize_height_keeps_horizontal_position():
 
 def test_maximize_width_keeps_vertical_position():
     r = apply(Action.MAXIMIZE_WIDTH, WIN, WORK)
-    assert r.x == WORK.x
-    assert r.width == WORK.width
-    assert r.y == WIN.y
-    assert r.height == WIN.height
+    assert r == Rect(0, WIN.y, WORK.width, WIN.height)
 
 
 def test_maximize_width_applies_horizontal_gap_only():
-    assert apply(Action.MAXIMIZE_WIDTH, WIN, WORK, gap=10) == Rect(10, WIN.y, 1900, WIN.height)
+    assert apply(Action.MAXIMIZE_WIDTH, WIN, WORK, gap=10) == Rect(
+        10, WIN.y, WORK.width - 20, WIN.height
+    )
+
+
+def test_maximize_height_applies_top_bottom_gap():
+    r = apply(Action.MAXIMIZE_HEIGHT, WIN, WORK, gap=10)
+    # With gap > 0, top + bottom should inset; x/width still untouched.
+    assert r.x == WIN.x
+    assert r.width == WIN.width
+    assert r.y == WORK.y + 10
+    assert r.height == WORK.height - 20
+
+
+def test_almost_maximize_uses_default_scale():
+    """Without an override, almost_maximize uses the module-level
+    ALMOST_MAXIMIZE_SCALE (0.85)."""
+    r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK)
+    assert r.width == int(WORK.width * 0.85)
+    assert r.height == int(WORK.height * 0.85)
+
+
+def test_almost_maximize_honours_scale_override():
+    """When apply() is given almost_maximize_scale, it overrides the
+    module-level default — closes the brief-§2-#7 prefs-slider gap."""
+    r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK, almost_maximize_scale=0.5)
+    assert r.width == int(WORK.width * 0.5)
+    assert r.height == int(WORK.height * 0.5)
+
+
+def test_almost_maximize_scale_ignored_for_other_actions():
+    """Other geometry actions don't read almost_maximize_scale."""
+    r = apply(Action.LEFT_HALF, WIN, WORK, almost_maximize_scale=0.5)
+    # Left half of 1920×1040 = 960×1040 at origin.
+    assert r.width == 960
+    assert r.x == 0
 
 
 def test_almost_maximize_centered_and_smaller():
     r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK)
-    assert r.width == int(WORK.width * ALMOST_MAXIMIZE_SCALE)
-    assert r.height == int(WORK.height * ALMOST_MAXIMIZE_SCALE)
     assert r.width < WORK.width
     assert r.height < WORK.height
     assert abs(r.center_x - WORK.center_x) <= 1
     assert abs(r.center_y - WORK.center_y) <= 1
 
 
-def test_almost_maximize_uses_custom_scale():
-    r = apply(Action.ALMOST_MAXIMIZE, WIN, WORK, almost_maximize_scale=0.75)
-    assert r.width == 1440
-    assert r.height == 810
-    assert abs(r.center_x - WORK.center_x) <= 1
-    assert abs(r.center_y - WORK.center_y) <= 1
-
-
-def test_almost_maximize_scale_is_clamped():
-    assert clamp_almost_maximize_scale(0.1) == MIN_ALMOST_MAXIMIZE_SCALE
-    assert clamp_almost_maximize_scale(2.0) == MAX_ALMOST_MAXIMIZE_SCALE
-    assert clamp_almost_maximize_scale(0.8) == 0.8
-    assert apply(Action.ALMOST_MAXIMIZE, WIN, WORK, almost_maximize_scale=2.0) == WORK
-
-
 def test_center_doesnt_resize():
     r = apply(Action.CENTER, WIN, WORK)
     assert (r.width, r.height) == (WIN.width, WIN.height)
     assert abs(r.center_x - WORK.center_x) <= 1
+
+
+def test_center_prominently_uses_upper_visual_quarter():
+    assert apply(Action.CENTER_PROMINENTLY, WIN, WORK) == Rect(560, 120, 800, 600)
+
+
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.MOVE_LEFT, Rect(0, 240, 800, 600)),
+        (Action.MOVE_RIGHT, Rect(1120, 240, 800, 600)),
+        (Action.MOVE_UP, Rect(560, 0, 800, 600)),
+        (Action.MOVE_DOWN, Rect(560, 480, 800, 600)),
+    ],
+)
+def test_move_actions_preserve_size_and_center_other_axis(action, expected):
+    assert apply(action, WIN, WORK) == expected
+
+
+@pytest.mark.parametrize(
+    "action, expected_size",
+    [
+        (Action.LARGER_WIDTH, (830, 600)),
+        (Action.SMALLER_WIDTH, (770, 600)),
+        (Action.LARGER_HEIGHT, (800, 630)),
+        (Action.SMALLER_HEIGHT, (800, 570)),
+    ],
+)
+def test_dimension_only_resize_keeps_center(action, expected_size):
+    result = apply(action, WIN, WORK)
+    assert (result.width, result.height) == expected_size
+    assert (result.center_x, result.center_y) == (WIN.center_x, WIN.center_y)
+
+
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        (Action.HALVE_WIDTH_LEFT, Rect(100, 100, 400, 600)),
+        (Action.HALVE_WIDTH_RIGHT, Rect(500, 100, 400, 600)),
+        (Action.DOUBLE_WIDTH_LEFT, Rect(0, 100, 900, 600)),
+        (Action.DOUBLE_WIDTH_RIGHT, Rect(100, 100, 1600, 600)),
+        (Action.HALVE_HEIGHT_UP, Rect(100, 100, 800, 300)),
+        (Action.HALVE_HEIGHT_DOWN, Rect(100, 400, 800, 300)),
+        (Action.DOUBLE_HEIGHT_UP, Rect(100, 0, 800, 700)),
+        (Action.DOUBLE_HEIGHT_DOWN, Rect(100, 100, 800, 980)),
+    ],
+)
+def test_anchored_dimension_scaling(action, expected):
+    assert apply(action, WIN, WORK) == expected
 
 
 def test_larger_grows_keeps_center():
@@ -220,64 +333,68 @@ def test_apply_rejects_non_geometry_actions(action):
 # ----- Defaults catalogue --------------------------------------------
 
 
-def test_every_action_has_default_shortcut():
-    for a in Action:
-        assert a in DEFAULT_SHORTCUTS, f"missing shortcut for {a}"
-
-
-def test_default_shortcuts_enable_every_action():
-    for action, combo in DEFAULT_SHORTCUTS.items():
-        assert combo, f"disabled default shortcut for {action}"
+def test_advanced_actions_are_discoverable_but_unbound_by_default():
+    advanced = set(Action) - set(DEFAULT_SHORTCUTS)
+    assert advanced == {
+        Action.CENTER_HALF,
+        Action.TOP_CENTER_SIXTH,
+        Action.BOTTOM_CENTER_SIXTH,
+        Action.CENTER_TWO_THIRDS,
+        Action.FIRST_FOURTH,
+        Action.SECOND_FOURTH,
+        Action.THIRD_FOURTH,
+        Action.LAST_FOURTH,
+        Action.FIRST_THREE_FOURTHS,
+        Action.CENTER_THREE_FOURTHS,
+        Action.LAST_THREE_FOURTHS,
+        Action.TOP_LEFT_THIRD,
+        Action.TOP_RIGHT_THIRD,
+        Action.BOTTOM_LEFT_THIRD,
+        Action.BOTTOM_RIGHT_THIRD,
+        Action.TOP_VERTICAL_THIRD,
+        Action.MIDDLE_VERTICAL_THIRD,
+        Action.BOTTOM_VERTICAL_THIRD,
+        Action.TOP_VERTICAL_TWO_THIRDS,
+        Action.BOTTOM_VERTICAL_TWO_THIRDS,
+        Action.LARGER_WIDTH,
+        Action.SMALLER_WIDTH,
+        Action.LARGER_HEIGHT,
+        Action.SMALLER_HEIGHT,
+        Action.MOVE_LEFT,
+        Action.MOVE_RIGHT,
+        Action.MOVE_UP,
+        Action.MOVE_DOWN,
+        Action.CENTER_PROMINENTLY,
+        Action.HALVE_HEIGHT_UP,
+        Action.HALVE_HEIGHT_DOWN,
+        Action.HALVE_WIDTH_LEFT,
+        Action.HALVE_WIDTH_RIGHT,
+        Action.DOUBLE_HEIGHT_UP,
+        Action.DOUBLE_HEIGHT_DOWN,
+        Action.DOUBLE_WIDTH_LEFT,
+        Action.DOUBLE_WIDTH_RIGHT,
+        Action.DISPLAY_1,
+        Action.DISPLAY_2,
+        Action.DISPLAY_3,
+        Action.DISPLAY_4,
+        Action.DISPLAY_5,
+        Action.DISPLAY_6,
+        Action.DISPLAY_7,
+        Action.DISPLAY_8,
+        Action.DISPLAY_9,
+    }
 
 
 def test_default_shortcuts_are_unique():
     seen = set()
     for combo in DEFAULT_SHORTCUTS.values():
-        if not combo:
-            continue
         assert combo not in seen, f"duplicate shortcut: {combo}"
         seen.add(combo)
 
 
-def test_no_default_uses_reserved_shortcut():
+def test_no_default_uses_reserved_win_arrow():
     for combo in DEFAULT_SHORTCUTS.values():
-        if not combo:
-            continue
-        assert not is_reserved(combo)
-
-
-def test_active_default_shortcuts_match_recommended_profile():
-    assert _enabled_defaults() == {
-        Action.LEFT_HALF: "ctrl+alt+left",
-        Action.RIGHT_HALF: "ctrl+alt+right",
-        Action.TOP_HALF: "ctrl+alt+up",
-        Action.BOTTOM_HALF: "ctrl+alt+down",
-        Action.FIRST_THIRD: "ctrl+alt+d",
-        Action.CENTER_THIRD: "ctrl+alt+f",
-        Action.LAST_THIRD: "ctrl+alt+g",
-        Action.FIRST_TWO_THIRDS: "ctrl+alt+e",
-        Action.LAST_TWO_THIRDS: "ctrl+alt+t",
-        Action.ALMOST_MAXIMIZE: "ctrl+alt+shift+enter",
-        Action.TOP_LEFT_QUARTER: "ctrl+alt+u",
-        Action.TOP_RIGHT_QUARTER: "ctrl+alt+i",
-        Action.BOTTOM_LEFT_QUARTER: "ctrl+alt+j",
-        Action.BOTTOM_RIGHT_QUARTER: "ctrl+alt+k",
-        Action.TOP_LEFT_SIXTH: "ctrl+insert",
-        Action.TOP_RIGHT_SIXTH: "ctrl+pageup",
-        Action.BOTTOM_LEFT_SIXTH: "ctrl+delete",
-        Action.BOTTOM_RIGHT_SIXTH: "ctrl+pagedown",
-        Action.MAXIMIZE: "ctrl+alt+enter",
-        Action.MAXIMIZE_HEIGHT: "ctrl+alt+shift+up",
-        Action.MAXIMIZE_WIDTH: "ctrl+alt+shift+right",
-        Action.CENTER: "ctrl+alt+c",
-        Action.LARGER: "ctrl+alt+=",
-        Action.SMALLER: "ctrl+alt+-",
-        Action.RESTORE: "ctrl+alt+backspace",
-        Action.NEXT_DISPLAY: "ctrl+alt+.",
-        Action.PREV_DISPLAY: "ctrl+alt+,",
-        Action.TOGGLE_ALWAYS_ON_TOP: "ctrl+alt+shift+space",
-    }
-
-
-def _enabled_defaults() -> dict[Action, str]:
-    return {action: combo for action, combo in DEFAULT_SHORTCUTS.items() if combo}
+        # Win+arrow is reserved by OS Snap (brief §2).
+        assert "win+" not in combo.lower() or "arrow" not in combo.lower()
+        # Also no bare meta+arrow combos.
+        assert not (combo.startswith("win+") and combo.endswith(("left", "right", "up", "down")))

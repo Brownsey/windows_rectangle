@@ -17,20 +17,6 @@ def test_submit_and_drain_roundtrip():
     assert seen == [Action.LEFT_HALF, Action.RIGHT_HALF]
 
 
-def test_drain_can_be_limited():
-    bus = ActionBus()
-    bus.submit(Action.LEFT_HALF)
-    bus.submit(Action.RIGHT_HALF)
-    bus.submit(Action.MAXIMIZE)
-
-    seen = []
-    drained = bus.drain(seen.append, max_items=2)
-
-    assert drained == 2
-    assert seen == [Action.LEFT_HALF, Action.RIGHT_HALF]
-    assert bus.pending() == 1
-
-
 def test_drain_empty_returns_zero():
     assert ActionBus().drain(lambda a: None) == 0
 
@@ -113,28 +99,3 @@ def test_producer_thread_drained_by_main_thread():
     bus.drain(seen.append)
     assert submitted == 20
     assert len(seen) == 20
-
-
-def test_trim_to_latest_drops_oldest_actions():
-    bus = ActionBus()
-    bus.submit(Action.LEFT_HALF)
-    bus.submit(Action.RIGHT_HALF)
-    bus.submit(Action.MAXIMIZE)
-    bus.submit(Action.CENTER)
-
-    assert bus.trim_to_latest(2) == 2
-
-    seen = []
-    bus.drain(seen.append)
-    assert seen == [Action.MAXIMIZE, Action.CENTER]
-
-
-def test_trim_to_latest_rejects_negative_limit():
-    bus = ActionBus()
-
-    try:
-        bus.trim_to_latest(-1)
-    except ValueError as exc:
-        assert "max_pending" in str(exc)
-    else:  # pragma: no cover - assertion guard
-        raise AssertionError("negative trim limit should fail")

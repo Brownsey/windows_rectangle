@@ -99,24 +99,36 @@ def hide(controller: OverlayController) -> None:
         controller.widget.hide()
 
 
+_user32 = None  # lazily-cached ctypes WinDLL handle (None off Windows)
+
+
 def _ensure_win32_exstyle(widget) -> None:
     """OR in WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW.
 
     Qt usually sets these via the flags above, but versions disagree.
     A redundant SetWindowLong is cheap and guarantees the contract.
+
+    Cached so this only walks GetWindowLongW once per widget — show_for
+    fires on every snap-zone transition during a drag and we don't want
+    a Win32 round-trip for an already-correct ex-style.
     """
     if sys.platform != "win32":
         return
+    if getattr(widget, "_wr_exstyle_applied", False):
+        return
+    global _user32
     try:
-        import ctypes
-
         hwnd = int(widget.winId())
         if hwnd == 0:
             return
-        user32 = ctypes.WinDLL("user32", use_last_error=True)
-        cur = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
+        if _user32 is None:
+            import ctypes
+
+            _user32 = ctypes.WinDLL("user32", use_last_error=True)
+        cur = _user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
         want = cur | _WS_EX_LAYERED | _WS_EX_TRANSPARENT | _WS_EX_NOACTIVATE | _WS_EX_TOOLWINDOW
         if cur != want:
-            user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, want)
+            _user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, want)
+        widget._wr_exstyle_applied = True
     except Exception:  # noqa: BLE001
         _log.debug("could not adjust overlay ex-style", exc_info=True)

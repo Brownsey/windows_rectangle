@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from enum import StrEnum
+from enum import Enum
 
 _log = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ _PROCESS_PER_MONITOR_DPI_AWARE = 2
 _PROCESS_SYSTEM_DPI_AWARE = 1
 
 
-class DpiAwareness(StrEnum):
+class DpiAwareness(str, Enum):
     """The level of awareness actually achieved."""
 
     PER_MONITOR_V2 = "per_monitor_v2"
