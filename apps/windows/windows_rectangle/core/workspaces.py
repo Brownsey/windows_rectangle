@@ -150,6 +150,39 @@ class WorkspacePlan:
     unmatched_placements: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class MatchedWindow:
+    placement_id: str
+    handle: object
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceMatches:
+    matches: tuple[MatchedWindow, ...]
+    unmatched_placements: tuple[str, ...]
+
+
+def match_workspace_windows(
+    placements: tuple[WorkspacePlacement, ...], windows: list[WindowIdentity]
+) -> WorkspaceMatches:
+    """Match rules one-to-one without applying any geometry."""
+    available = list(windows)
+    matches: list[MatchedWindow] = []
+    unmatched: list[str] = []
+    for placement in placements:
+        ranked = sorted(
+            enumerate(available),
+            key=lambda item: (-placement.matcher.score(item[1]), item[0]),
+        )
+        if not ranked or placement.matcher.score(ranked[0][1]) == 0:
+            unmatched.append(placement.id)
+            continue
+        index, window = ranked[0]
+        available.pop(index)
+        matches.append(MatchedWindow(placement.id, window.handle))
+    return WorkspaceMatches(tuple(matches), tuple(unmatched))
+
+
 def plan_workspace(
     workspace: Workspace,
     windows: list[WindowIdentity],
@@ -161,26 +194,22 @@ def plan_workspace(
     can never be assigned twice, which prevents broad rules from stealing the
     same RuneScape/Chrome instance from a later placement.
     """
-    available = list(windows)
+    eligible = tuple(
+        placement for placement in workspace.placements if placement.monitor_index < len(work_areas)
+    )
+    match_result = match_workspace_windows(eligible, windows)
+    matched_by_id = {match.placement_id: match.handle for match in match_result.matches}
     moves: list[PlannedMove] = []
     unmatched: list[str] = []
     for placement in workspace.placements:
-        if placement.monitor_index >= len(work_areas):
+        window_handle = matched_by_id.get(placement.id)
+        if window_handle is None:
             unmatched.append(placement.id)
             continue
-        ranked = sorted(
-            enumerate(available),
-            key=lambda item: (-placement.matcher.score(item[1]), item[0]),
-        )
-        if not ranked or placement.matcher.score(ranked[0][1]) == 0:
-            unmatched.append(placement.id)
-            continue
-        index, window = ranked[0]
-        available.pop(index)
         moves.append(
             PlannedMove(
                 placement.id,
-                window.handle,
+                window_handle,
                 placement.rect.to_rect(work_areas[placement.monitor_index]),
             )
         )

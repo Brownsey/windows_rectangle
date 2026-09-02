@@ -20,6 +20,7 @@ from ..core.workspaces import (
     WindowMatcher,
     Workspace,
     WorkspacePlacement,
+    match_workspace_windows,
     new_id,
     plan_workspace,
 )
@@ -34,6 +35,12 @@ class WorkspaceValidation:
     @property
     def ok(self) -> bool:
         return not self.errors
+
+
+@dataclass(frozen=True, slots=True)
+class PositionRecordResult:
+    updated: int
+    not_found: tuple[str, ...]
 
 
 class WorkspaceEditorController:
@@ -194,6 +201,39 @@ class WorkspaceEditorController:
         plan = plan_workspace(workspace, manager.list_windows(), manager.list_work_areas())
         matched = {move.placement_id for move in plan.moves}
         return {placement.id: placement.id in matched for placement in workspace.placements}
+
+    def record_current_positions(
+        self, manager: WorkspaceWindows, workspace_id: str
+    ) -> PositionRecordResult:
+        workspace = self.get(workspace_id)
+        matches = match_workspace_windows(workspace.placements, manager.list_windows())
+        handles = {match.placement_id: match.handle for match in matches.matches}
+        work_areas = manager.list_work_areas()
+        updated = 0
+        placements: list[WorkspacePlacement] = []
+        not_found = list(matches.unmatched_placements)
+        for placement in workspace.placements:
+            handle = handles.get(placement.id)
+            if handle is None:
+                placements.append(placement)
+                continue
+            monitor_index = manager.monitor_index_for_window(handle)
+            if monitor_index is None or monitor_index >= len(work_areas):
+                not_found.append(placement.id)
+                placements.append(placement)
+                continue
+            try:
+                rect = NormalizedRect.from_rect(
+                    manager.get_window_rect(handle), work_areas[monitor_index]
+                )
+            except ValueError:
+                not_found.append(placement.id)
+                placements.append(placement)
+                continue
+            placements.append(replace(placement, rect=rect, monitor_index=monitor_index))
+            updated += 1
+        self._replace_workspace(workspace_id, placements=tuple(placements))
+        return PositionRecordResult(updated, tuple(not_found))
 
     def validate(self) -> WorkspaceValidation:
         errors: list[str] = []

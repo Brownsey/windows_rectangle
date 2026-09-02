@@ -38,6 +38,7 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - [x] Add an Office template (Slack top-left, Outlook bottom-left, Chrome right-half) and a RuneScape wizard that creates title-specific account rules in a balanced grid.
 - [x] Add per-rule match status, workspace duplication, unsaved-change Save/Discard/Cancel handling, clearer workspace guidance, and end-user documentation.
 - [x] Make the visual editor genuinely freeform: basis-point-precision movement, draggable edge/corner resizing, visible handles, minimum sizes, and monitor-bound clamping.
+- [x] Add “Record current positions” to learn exact live window rectangles and monitor assignments while preserving saved geometry for unmatched applications.
 - [x] Conduct Deep Research on comparable Windows managers and synthesize actionable UX/performance guidance.
 - [x] Generate `research/Windows-Rectangle-UX-Research.docx` with first-party citations and a prioritized roadmap.
 
@@ -63,6 +64,7 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 - After visual workspace editing: 605 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - After templates and workspace UX polish: 609 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed. Optional Qt installation was attempted but the package mirror did not complete, so rendered Qt tests remain skipped.
 - After freeform canvas resizing: 612 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
+- After exact live-position recording: 615 passed, 16 skipped; Ruff, Ruff format, and strict mypy all passed.
 - Research DOCX structural QA: valid archive, 89 paragraphs, 20 headings, one table, and 10 external hyperlinks. Visual rendering was unavailable.
 - Updated subprocess and PyInstaller-spec tests for the new `apps/windows` package location.
 - Updated the PyInstaller entry point and search path for the monorepo layout.

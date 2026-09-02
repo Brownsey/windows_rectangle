@@ -274,11 +274,16 @@ def _build(ctx) -> WorkspaceDialog:
     tools = QtWidgets.QHBoxLayout()
     add_rule = QtWidgets.QPushButton("Add application…")
     remove_rule = QtWidgets.QPushButton("Remove selected rule")
+    record_positions = QtWidgets.QPushButton("Record current positions")
+    record_positions.setToolTip(
+        "Learn the exact size, position, and monitor of each matching open window"
+    )
     test_matches = QtWidgets.QPushButton("Test matches")
     restore = QtWidgets.QPushButton("Restore now")
     tools.addWidget(add_rule)
     tools.addWidget(remove_rule)
     tools.addStretch(1)
+    tools.addWidget(record_positions)
     tools.addWidget(test_matches)
     tools.addWidget(restore)
     detail_layout.addLayout(tools)
@@ -326,6 +331,7 @@ def _build(ctx) -> WorkspaceDialog:
     remove.clicked.connect(lambda: _delete_workspace(controller, QtWidgets))
     add_rule.clicked.connect(lambda: _add_application(controller, QtWidgets))
     remove_rule.clicked.connect(lambda: _delete_rule(controller))
+    record_positions.clicked.connect(lambda: _record_positions(controller))
     test_matches.clicked.connect(lambda: _test_matches(controller, QtWidgets))
     restore.clicked.connect(lambda: _restore(controller, QtWidgets))
     apply_button.clicked.connect(lambda: controller.commit(False))
@@ -552,6 +558,21 @@ def _test_matches(controller: WorkspaceDialog, QtWidgets) -> None:
     controller.load_selected()
     controller.status.setText(f"{matched} matched · {missing} not found. No windows moved.")
     controller.status.setProperty("status", "saved" if not missing else "warning")
+
+
+def _record_positions(controller: WorkspaceDialog) -> None:
+    if not controller.selected_id:
+        controller.update_validation("Select a workspace first")
+        return
+    result = controller.editor.record_current_positions(
+        cast(WorkspaceWindows, controller.ctx.windows), controller.selected_id
+    )
+    controller.load_selected()
+    message = f"Recorded {result.updated} current window position(s)"
+    if result.not_found:
+        message += f" · {len(result.not_found)} not found and left unchanged"
+    controller.status.setText(message)
+    controller.status.setProperty("status", "warning" if result.not_found else "dirty")
 
 
 def _restore(controller: WorkspaceDialog, QtWidgets) -> None:

@@ -186,3 +186,33 @@ def test_templates_duplicate_and_per_rule_match_results():
     office = controller.add_office_template()
     results = controller.match_results(Manager(), office.id)
     assert list(results.values()) == [True, False, False]
+
+
+def test_record_current_positions_learns_exact_rect_and_monitor():
+    class LiveManager(Manager):
+        def list_work_areas(self):
+            return [Rect(0, 0, 1920, 1080), Rect(1920, 0, 2560, 1440)]
+
+        def get_window_rect(self, _handle):
+            return Rect(2560, 144, 1280, 1008)
+
+        def monitor_index_for_window(self, _handle):
+            return 1
+
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace(),)))
+    result = controller.record_current_positions(LiveManager(), "office")
+    recorded = controller.get("office").placements[0]
+    assert result.updated == 1
+    assert result.not_found == ()
+    assert recorded.monitor_index == 1
+    assert recorded.rect == NormalizedRect(2500, 1000, 7500, 8000)
+
+
+def test_record_current_positions_preserves_missing_rules():
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace(),)))
+    manager = Manager()
+    manager.list_windows = lambda: []
+    result = controller.record_current_positions(manager, "office")
+    assert result.updated == 0
+    assert result.not_found == ("slack",)
+    assert controller.get("office") == workspace()

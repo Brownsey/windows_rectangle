@@ -8,6 +8,7 @@ from windows_rectangle.core.workspaces import (
     WindowMatcher,
     Workspace,
     WorkspacePlacement,
+    match_workspace_windows,
     plan_workspace,
 )
 
@@ -51,6 +52,19 @@ def test_matcher_combines_process_and_account_title_case_insensitively():
     assert matcher.score(WindowIdentity(1, "Alice - RuneLite", "runelite")) > 0
     assert matcher.score(WindowIdentity(2, "Bob - RuneLite", "runelite.exe")) == 0
     assert matcher.score(WindowIdentity(3, "Alice - RuneLite", "chrome.exe")) == 0
+
+
+def test_match_workspace_windows_is_geometry_independent_and_one_to_one():
+    placements = (
+        placement("alice", "Alice", NormalizedRect(0, 0, 5000, 10000), monitor=9),
+        placement("bob", "Bob", NormalizedRect(5000, 0, 10000, 10000)),
+    )
+    result = match_workspace_windows(
+        placements,
+        [WindowIdentity(1, "Alice - RuneLite", "runelite.exe")],
+    )
+    assert [(match.placement_id, match.handle) for match in result.matches] == [("alice", 1)]
+    assert result.unmatched_placements == ("bob",)
 
 
 def test_invalid_regex_and_empty_matcher_are_rejected():
