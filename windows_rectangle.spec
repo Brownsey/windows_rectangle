@@ -1,24 +1,11 @@
-# PyInstaller spec for Windows Rectangle (brief §6).
-#
-# Build:
-#   pip install pyinstaller
-#   pyinstaller windows_rectangle.spec --clean --noconfirm
-#
-# Output:
-#   dist/WindowsRectangle.exe        (--onefile mode)
-#
-# --onefile trade-off (brief §8 risks row): PyInstaller bundles every
-# dependency into a single self-extracting exe. On launch it unpacks
-# itself to %TEMP%, which adds ~1-2s startup latency and ~100MB of
-# transient disk use. For a daily-driver utility that's an acceptable
-# tax; switch to --onedir (set `EXE(... exclude_binaries=True)` and add
-# a COLLECT step) if startup latency matters more than distribution
-# simplicity.
-
+# Portable Windows build. One directory avoids extracting Qt on every launch.
+# Invoked by scripts/build-windows.ps1; keep module exclusions and assets here.
 # ruff: noqa
 # mypy: ignore-errors
+import os
+from pathlib import Path
 
-block_cipher = None
+ROOT = Path(SPECPATH)
 
 # Hidden imports: modules imported lazily inside functions (so
 # PyInstaller's static analysis misses them).
@@ -98,31 +85,35 @@ EXCLUDES = [
     "mypy",
 ]
 
-a = Analysis(
-    ["apps/windows/windows_rectangle/__main__.py"],
-    pathex=["apps/windows"],
-    binaries=[],
-    datas=[],
-    hiddenimports=HIDDEN,
-    hookspath=[],
-    runtime_hooks=[],
-    excludes=EXCLUDES,
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
-    noarchive=False,
-)
+# Match Windows DLL lookup before PATH tools. Qt uses the system ICU ABI;
+# unrelated native tools can provide an incompatible icuuc.dll on PATH.
+original_path = os.environ.get("PATH", "")
+os.environ["PATH"] = str(Path(os.environ["SYSTEMROOT"]) / "System32") + os.pathsep + original_path
+try:
+    a = Analysis(
+        [str(ROOT / "packaging/windows/WindowsRectangle.py")],
+        pathex=[str(ROOT / "apps/windows")],
+        binaries=[],
+        datas=[(str(ROOT / "logo"), "logo"), (str(ROOT / "THIRD_PARTY_NOTICES.md"), ".")],
+        hiddenimports=HIDDEN,
+        hookspath=[],
+        runtime_hooks=[],
+        excludes=EXCLUDES,
+        win_no_prefer_redirects=False,
+        win_private_assemblies=False,
+        noarchive=False,
+    )
+finally:
+    os.environ["PATH"] = original_path
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
     name="WindowsRectangle",
+    exclude_binaries=True,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -134,5 +125,9 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon="windows_rectangle/_resources/icon.ico",   # add when packaging an icon
+    icon=next((str(ROOT / "logo" / name) for name in
+               ("windows.ico", "logo.ico", "app.ico")
+               if (ROOT / "logo" / name).is_file()), None),
 )
+
+collect = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="WindowsRectangle")

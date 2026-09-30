@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.ports.config_store import Settings
-
 from windows_rectangle.settings_diff import diff_settings
 
 

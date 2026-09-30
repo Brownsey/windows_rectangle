@@ -50,13 +50,29 @@ def test_optional_pyside6_skipped_off_windows(tmp_path):
     assert rep.ok is True
 
 
-def test_windows_path_appends_win32api(tmp_path):
+def test_windows_path_checks_stdlib_native_backend_without_pywin32(tmp_path):
     rep = collect_diagnostic_report(
         on_windows=True,
         config_path_factory=lambda: tmp_path / "no_config.json",
     )
-    optional_names = {c.name for c in rep.optional}
-    assert "win32api" in optional_names
+    assert "ctypes" in {c.name for c in rep.required}
+    assert "win32api" not in {c.name for c in (*rep.required, *rep.optional)}
+
+
+def test_packaged_install_check_fails_when_gui_libraries_are_missing(monkeypatch, tmp_path):
+    from windows_rectangle import diagnostics
+
+    monkeypatch.setattr(diagnostics.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        diagnostics,
+        "_check",
+        lambda name: ImportCheck(name, name != "PySide6.QtWidgets", "missing GUI DLL"),
+    )
+    report = collect_diagnostic_report(
+        on_windows=True,
+        config_path_factory=lambda: tmp_path / "config.json",
+    )
+    assert not report.ok
 
 
 def test_config_exists_reflects_filesystem(tmp_path):

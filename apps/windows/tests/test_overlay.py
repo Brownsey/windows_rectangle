@@ -79,3 +79,33 @@ def test_ensure_win32_exstyle_skips_after_first_apply(monkeypatch):
     assert fake.gets == 1
     assert fake.sets == 1
     assert w._wr_exstyle_applied is True
+
+
+def test_show_for_uses_native_physical_pixels_on_windows(monkeypatch):
+    import sys
+
+    import windows_rectangle.ui.overlay as overlay
+    from windows_rectangle.core.geometry import Rect
+
+    calls = []
+
+    class Widget:
+        def show(self):
+            calls.append("show")
+
+        def winId(self):
+            return 321
+
+        def setGeometry(self, *_):
+            raise AssertionError("Qt logical coordinates used")
+
+    class User32:
+        def SetWindowPos(self, *args):
+            calls.append(args)
+            return 1
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(overlay, "_user32", User32())
+    monkeypatch.setattr(overlay, "_ensure_win32_exstyle", lambda *_: None)
+    overlay.show_for(overlay.OverlayController(Widget()), Rect(-2560, 125, 1280, 900))
+    assert calls == ["show", (321, 0, -2560, 125, 1280, 900, 0x0010 | 0x0004)]

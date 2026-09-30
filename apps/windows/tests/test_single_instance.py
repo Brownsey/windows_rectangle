@@ -1,12 +1,13 @@
-"""Tests for windows_rectangle.adapters.single_instance.
+"""Tests for windows_rectangle.adapters.single_instance."""
 
-The Windows ctypes path needs a Windows runtime + would mutate kernel state,
-so we only test MemorySingleInstance + helpers here.
-"""
+import sys
+import uuid
 
 import pytest
+
 from windows_rectangle.adapters.single_instance import (
     MemorySingleInstance,
+    WindowsMutexSingleInstance,
     best_available,
 )
 from windows_rectangle.ports.single_instance import DEFAULT_MUTEX_NAME
@@ -62,3 +63,20 @@ def test_best_available_returns_a_guard():
     impl = best_available("Local\\TestApp")
     assert hasattr(impl, "acquire")
     assert hasattr(impl, "release")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="win32 only")
+def test_windows_mutex_closes_duplicate_and_owner_handles():
+    name = f"Local\\WindowsRectangleTest-{uuid.uuid4()}"
+    owner = WindowsMutexSingleInstance(name)
+    duplicate = WindowsMutexSingleInstance(name)
+    replacement = WindowsMutexSingleInstance(name)
+    try:
+        assert owner.acquire() is True
+        assert duplicate.acquire() is False
+        owner.release()
+        assert replacement.acquire() is True
+    finally:
+        owner.release()
+        duplicate.release()
+        replacement.release()

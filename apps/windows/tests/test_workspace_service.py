@@ -97,3 +97,17 @@ def test_capture_excludes_its_own_editor_window():
     wm.monitor_indexes[9] = 0
     workspace = capture_workspace(wm, "Office")
     assert all("Windows Rectangle" not in placement.name for placement in workspace.placements)
+
+
+def test_capture_skips_window_that_closes_during_capture():
+    wm = manager()
+    original = wm.get_window_rect
+
+    def rect(handle):
+        if handle == 2:
+            raise OSError("window closed")
+        return original(handle)
+
+    wm.get_window_rect = rect
+    workspace = capture_workspace(wm, "Office")
+    assert [p.name for p in workspace.placements] == ["Slack", "Docs - Chrome"]

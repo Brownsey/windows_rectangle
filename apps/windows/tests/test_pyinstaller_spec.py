@@ -13,6 +13,9 @@ and inspect the captured kwargs.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -25,6 +28,8 @@ class _Capture:
     def __init__(self):
         self.analysis: dict | None = None
         self.exe: dict | None = None
+        self.collect: dict | None = None
+        self.analysis_path = ""
 
     def make_analysis(self):
         capture = self
@@ -32,6 +37,7 @@ class _Capture:
         class Analysis:
             def __init__(self, *args, **kwargs):
                 capture.analysis = {"args": args, "kwargs": kwargs}
+                capture.analysis_path = os.environ.get("PATH", "")
                 # PyInstaller's Analysis exposes attributes a PYZ + EXE need.
                 self.pure = []
                 self.zipped_data = []
@@ -58,6 +64,12 @@ class _Capture:
 
         return EXE
 
+    def make_collect(self):
+        def collect(*args, **kwargs):
+            self.collect = {"args": args, "kwargs": kwargs}
+
+        return collect
+
 
 def _exec_spec() -> _Capture:
     capture = _Capture()
@@ -65,6 +77,8 @@ def _exec_spec() -> _Capture:
         "Analysis": capture.make_analysis(),
         "PYZ": capture.make_pyz(),
         "EXE": capture.make_exe(),
+        "COLLECT": capture.make_collect(),
+        "SPECPATH": str(REPO_ROOT),
     }
     exec(compile(SPEC.read_text(), str(SPEC), "exec"), namespace)
     return capture
@@ -78,11 +92,27 @@ def test_spec_evaluates_without_error():
     _exec_spec()
 
 
-def test_analysis_targets_main_module():
+def test_analysis_prefers_windows_system_dlls_over_unrelated_path_tools(monkeypatch):
+    before = "C:\\unrelated-native-tools"
+    monkeypatch.setenv("PATH", before)
+    cap = _exec_spec()
+    system32 = str(Path(os.environ["SYSTEMROOT"]) / "System32")
+    assert cap.analysis_path.split(os.pathsep)[0].casefold() == system32.casefold()
+    assert os.environ["PATH"] == before
+
+
+def test_analysis_entrypoint_runs_as_a_script():
     cap = _exec_spec()
     assert cap.analysis is not None
     scripts = cap.analysis["args"][0]
-    assert any("__main__.py" in str(s) for s in scripts)
+    assert len(scripts) == 1
+    result = subprocess.run(
+        [sys.executable, scripts[0], "--check-install"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_lazy_adapter_imports_are_hidden():
@@ -138,3 +168,12 @@ def test_exe_is_windowed_not_console():
 def test_exe_has_branded_name():
     cap = _exec_spec()
     assert cap.exe["kwargs"]["name"] == "WindowsRectangle"
+
+
+def test_build_is_portable_without_startup_extraction_and_includes_assets():
+    cap = _exec_spec()
+    assert cap.exe["kwargs"].get("exclude_binaries") is True
+    assert cap.collect is not None
+    assert cap.collect["kwargs"]["name"] == "WindowsRectangle"
+    assert any(destination == "logo" for _, destination in cap.analysis["kwargs"]["datas"])
+    assert any(destination == "." for _, destination in cap.analysis["kwargs"]["datas"])

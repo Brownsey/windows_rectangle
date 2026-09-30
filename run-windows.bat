@@ -17,18 +17,18 @@ if /I "%MODE%"=="build" goto :build_exe
 if /I "%MODE%"=="package" goto :build_exe
 if /I "%MODE%"=="exe" goto :build_exe
 
-call :stop_existing
-if errorlevel 1 goto :error
-
 if not exist "%PYTHON_EXE%" (
     echo Creating virtual environment in %VENV_DIR%...
     call :create_venv
     if errorlevel 1 goto :error
 )
 
-echo Installing/updating Windows Rectangle dependencies...
-"%PYTHON_EXE%" -m pip install -e ".[win,dev]"
-if errorlevel 1 goto :error
+"%PYTHON_EXE%" -c "import windows_rectangle.__main__, PySide6.QtWidgets, pytest, ruff, mypy" >nul 2>nul
+if errorlevel 1 (
+    echo Installing Windows Rectangle dependencies...
+    "%PYTHON_EXE%" -m pip install -e ".[win,dev]"
+    if errorlevel 1 goto :error
+)
 
 if /I "%MODE%"=="run" goto :run_with_preferences
 if /I "%MODE%"=="app" goto :run_with_preferences

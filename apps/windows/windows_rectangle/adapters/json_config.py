@@ -48,7 +48,8 @@ class JsonConfigStore:
             return Settings()
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
+            return _from_dict(raw)
+        except (OSError, json.JSONDecodeError, ValueError) as e:
             # Corrupt or unreadable: fall back to defaults rather than
             # crash, but log a warning so the user sees *something*
             # (otherwise a partially-zapped config silently reverts to
@@ -61,7 +62,6 @@ class JsonConfigStore:
                 e,
             )
             return Settings()
-        return _from_dict(raw)
 
     def save(self, settings: Settings) -> None:
         self._atomic_write(self.path, _to_dict(settings))
@@ -101,22 +101,20 @@ class JsonConfigStore:
         `--import-config --dry-run` to preview without writing, and
         by `import_from` itself.
 
-        Raises FileNotFoundError if the source is missing, JSONDecodeError
-        if it's not valid JSON. Unknown fields / keys are tolerated by
-        the lenient `_from_dict` decode — a file produced by a newer
-        version mostly works, and an older file picks up any new fields
-        as their dataclass defaults.
+        Raises FileNotFoundError if missing, JSONDecodeError for invalid
+        JSON, and ValueError for malformed settings. Unknown fields are
+        tolerated for forward compatibility; missing fields use defaults.
         """
         src = Path(source).expanduser().resolve()
         if not src.exists():
             raise FileNotFoundError(f"import source does not exist: {src}")
         raw = json.loads(src.read_text(encoding="utf-8"))
-        return _from_dict(raw)
+        return _from_dict(raw, strict=True)
 
     # ----- internals --------------------------------------------------
 
     @staticmethod
-    def _atomic_write(target: Path, payload: dict) -> None:
+    def _atomic_write(target: Path, payload: dict[str, object]) -> None:
         """Write JSON to `target` atomically via temp file + rename.
 
         Cleanup on error must close the handle BEFORE unlinking — on
@@ -153,7 +151,7 @@ class JsonConfigStore:
 # ----- (de)serialisation ---------------------------------------------
 
 
-def _to_dict(settings: Settings) -> dict:
+def _to_dict(settings: Settings) -> dict[str, object]:
     data = asdict(settings)
     # Serialise EVERY known Action — explicit empty string for actions
     # the user deliberately unbound (via clear_shortcut), missing-from-
@@ -166,7 +164,7 @@ def _to_dict(settings: Settings) -> dict:
     return data
 
 
-def _from_dict(raw: dict) -> Settings:
+def _from_dict(raw: object, *, strict: bool = False) -> Settings:
     """Tolerant decode.
 
     - Unknown shortcut keys: silently dropped (forward-compat with older
@@ -179,36 +177,71 @@ def _from_dict(raw: dict) -> Settings:
       added after the user's last save).
     - Other missing fields: dataclass defaults.
     """
+    if not isinstance(raw, dict):
+        raise ValueError("config root must be an object")
     defaults = Settings()
-    shortcuts_raw = raw.get("shortcuts") or {}
+    shortcuts_raw = raw.get("shortcuts")
+    if shortcuts_raw is None:
+        shortcuts_raw = {}  # legacy null shortcut maps used defaults
+    if not isinstance(shortcuts_raw, dict):
+        raise ValueError("shortcuts must be an object")
+    workspaces_raw = raw.get("workspaces", [])
+    if not isinstance(workspaces_raw, list):
+        raise ValueError("workspaces must be a list")
+
+    gap = raw.get("gap", defaults.gap)
+    if type(gap) is not int or not 0 <= gap <= 256:
+        raise ValueError("gap must be an integer in [0, 256]")
+
+    def number(name: str, default: float, low: float, high: float) -> float:
+        value = raw.get(name, default)
+        if type(value) not in (int, float) or not low <= value <= high:
+            raise ValueError(f"{name} must be finite and in [{low}, {high}]")
+        return float(value)
+
+    def boolean(name: str, default: bool) -> bool:
+        value = raw.get(name, default)
+        if type(value) is not bool:
+            raise ValueError(f"{name} must be boolean")
+        return value
+
+    cycle_idle_timeout = number("cycle_idle_timeout", defaults.cycle_idle_timeout, 0.0, 10.0)
+    almost_maximize_scale = number(
+        "almost_maximize_scale", defaults.almost_maximize_scale, 0.1, 1.0
+    )
+    launch_at_login = boolean("launch_at_login", defaults.launch_at_login)
+    drag_to_edge_enabled = boolean("drag_to_edge_enabled", defaults.drag_to_edge_enabled)
+    active_workspace_id = raw.get("active_workspace_id", "")
+    if not isinstance(active_workspace_id, str):
+        raise ValueError("active_workspace_id must be a string")
     shortcuts: dict[Action, str] = {}
     for action in Action:
         if action.value in shortcuts_raw:
             combo = shortcuts_raw[action.value]
-            if isinstance(combo, str) and combo:
+            if not isinstance(combo, str):
+                raise ValueError(f"shortcut {action.value} must be a string")
+            if combo:
                 shortcuts[action] = combo
-            # else: empty string or non-str → leave unbound.
+            # Empty string deliberately leaves the action unbound.
         elif action in DEFAULT_SHORTCUTS:
             shortcuts[action] = DEFAULT_SHORTCUTS[action]
 
-    workspaces = tuple(
-        workspace
-        for item in raw.get("workspaces", [])
-        if isinstance(item, dict) and (workspace := _workspace_from_dict(item)) is not None
-    )
-    active_workspace_id = str(raw.get("active_workspace_id", ""))
+    parsed = [
+        _workspace_from_dict(item) if isinstance(item, dict) else None for item in workspaces_raw
+    ]
+    if strict and any(workspace is None for workspace in parsed):
+        raise ValueError("workspaces contains an invalid entry")
+    workspaces = tuple(workspace for workspace in parsed if workspace is not None)
     if active_workspace_id and all(w.id != active_workspace_id for w in workspaces):
         active_workspace_id = ""
 
     return Settings(
         shortcuts=shortcuts,
-        gap=int(raw.get("gap", defaults.gap)),
-        launch_at_login=bool(raw.get("launch_at_login", defaults.launch_at_login)),
-        cycle_idle_timeout=float(raw.get("cycle_idle_timeout", defaults.cycle_idle_timeout)),
-        drag_to_edge_enabled=bool(raw.get("drag_to_edge_enabled", defaults.drag_to_edge_enabled)),
-        almost_maximize_scale=float(
-            raw.get("almost_maximize_scale", defaults.almost_maximize_scale)
-        ),
+        gap=gap,
+        launch_at_login=launch_at_login,
+        cycle_idle_timeout=cycle_idle_timeout,
+        drag_to_edge_enabled=drag_to_edge_enabled,
+        almost_maximize_scale=almost_maximize_scale,
         workspaces=workspaces,
         active_workspace_id=active_workspace_id,
     )
@@ -270,5 +303,5 @@ def _workspace_from_dict(raw: dict[str, object]) -> Workspace | None:
             shortcut=str(raw.get("shortcut", "")),
             placements=tuple(placements),
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None

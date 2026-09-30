@@ -6,6 +6,7 @@ registry, which we don't do in unit tests.
 """
 
 import pytest
+
 from windows_rectangle.adapters.winreg_autostart import (
     MemoryAutoStart,
     best_available,

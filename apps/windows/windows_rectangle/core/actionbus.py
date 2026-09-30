@@ -1,13 +1,11 @@
 """Thread-safe action marshalling (brief §5 #6 and #8).
 
-Hotkey + mouse-hook callbacks run on their own daemon threads with
-private Win32 message loops. They must return fast, so they don't
-dispatch directly — they `submit` an Action onto this bus. The Qt
-main thread drains the bus and calls the Dispatcher.
+Hotkey callbacks submit actions from their message-loop thread. The Qt
+main thread drains bounded batches and calls the Dispatcher. Mouse input
+uses a separate latest-state handoff so cursor motion cannot fill this queue.
 
-`queue.SimpleQueue` is unbounded and lock-free for single-producer-
-single-consumer; we use it via `Queue` with optional size cap and
-oldest-dropping overflow handling for safety.
+`queue.Queue` provides synchronized storage with an optional size cap and
+oldest-dropping overflow handling.
 """
 
 from __future__ import annotations
@@ -54,19 +52,24 @@ class ActionBus:
                 dropped = self._q.get_nowait()
                 _log.warning("ActionBus full; dropped %s", dropped.value)
                 self._q.put_nowait(action)
-            except queue.Empty:  # pragma: no cover — race; queue was drained
+            except (queue.Empty, queue.Full):  # another producer/consumer won the race
                 pass
             return False
 
     # ----- consumer side (main / dispatcher thread) -------------------
 
-    def drain(self, handler: Callable[[Action], None]) -> int:
-        """Call `handler(action)` for every pending action. Returns count drained.
+    def drain(self, handler: Callable[[Action], object], *, limit: int | None = None) -> int:
+        """Handle the current batch, capped by `limit`. Returns count drained.
 
         Non-blocking. Safe to call repeatedly from the Qt event loop.
         """
         count = 0
-        while True:
+        # A producer may refill during dispatch. Yield back to Qt after the
+        # current batch instead of chasing a moving queue indefinitely.
+        batch = self._q.qsize()
+        if limit is not None:
+            batch = min(batch, max(0, limit))
+        for _ in range(batch):
             try:
                 action = self._q.get_nowait()
             except queue.Empty:
@@ -76,6 +79,7 @@ class ActionBus:
             except Exception:  # noqa: BLE001 — by design; one bad action shouldn't kill the loop
                 _log.exception("handler raised on %s; continuing", action.value)
             count += 1
+        return count
 
     def pending(self) -> int:
         """Approximate number of queued actions (best-effort, not synchronised)."""

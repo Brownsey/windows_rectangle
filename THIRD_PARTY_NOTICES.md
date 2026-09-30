@@ -2,9 +2,8 @@
 
 ## Rectangle
 
-This repository vendors a fork snapshot of the macOS
-[Rectangle](https://github.com/rxhanson/Rectangle) app in
-`apps/mac/Rectangle`.
+This Windows implementation is inspired by
+[Rectangle](https://github.com/rxhanson/Rectangle).
 
 The Windows app's window-geometry math, action catalogue, and default shortcut
 map are modelled on Rectangle.
@@ -33,6 +32,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-
-The upstream Rectangle README, license, credits, and source files are preserved
-under `apps/mac/Rectangle`.

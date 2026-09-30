@@ -16,7 +16,7 @@ dependencies = []
 windows-rectangle = "windows_rectangle.__main__:main"
 
 [project.optional-dependencies]
-win = ["pywin32>=306", "PySide6>=6.6"]
+win = ["PySide6-Essentials>=6.6"]
 build = ["pyinstaller>=6.11"]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
 
@@ -32,6 +32,7 @@ pythonpath = ["apps/windows"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+src = ["apps/windows"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]

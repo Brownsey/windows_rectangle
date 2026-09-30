@@ -10,6 +10,8 @@ trip ImportError at collection time.
 
 import importlib
 
+import pytest
+
 
 def test_prefs_dialog_module_imports_without_pyside6():
     mod = importlib.import_module("windows_rectangle.ui.prefs_dialog")
@@ -33,3 +35,27 @@ def test_prefs_dialog_does_not_eagerly_import_pyside6():
         assert "PySide6" not in sys.modules, (
             "ui.prefs_dialog should defer PySide6 import to build_dialog()"
         )
+
+
+def test_invalid_shortcut_stays_blocking_after_general_change(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets")
+    from windows_rectangle.core.actions import Action
+    from windows_rectangle.ports.config_store import Settings
+    from windows_rectangle.ui.preferences import PrefsController
+    from windows_rectangle.ui.prefs_dialog import build_dialog
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    dialog = build_dialog(PrefsController(Settings()))
+    table = dialog.findChild(QtWidgets.QTableWidget)
+    row = list(Action).index(Action.LEFT_HALF)
+    table.item(row, 1).setText("ctrl+")
+    ok = dialog.findChild(QtWidgets.QDialogButtonBox).button(QtWidgets.QDialogButtonBox.Ok)
+    assert not ok.isEnabled()
+    dialog.findChild(QtWidgets.QSpinBox).setValue(12)
+    assert not ok.isEnabled()
+    assert "left_half" in dialog.findChild(QtWidgets.QLabel).text()
+    table.item(row, 1).setText("ctrl+alt+left")
+    assert ok.isEnabled()
+    dialog.close()
+    _ = app

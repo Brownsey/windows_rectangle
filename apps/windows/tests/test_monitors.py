@@ -1,8 +1,7 @@
 """Tests for windows_rectangle.core.monitors."""
 
-from windows_rectangle.core.geometry import Rect
-
 from windows_rectangle.core import monitors
+from windows_rectangle.core.geometry import Rect
 
 from .conftest import make_monitor
 
@@ -73,6 +72,14 @@ def test_move_to_monitor_preserves_relative_fraction():
 def test_move_to_monitor_same_monitor_no_op():
     win = Rect(100, 100, 800, 600)
     assert monitors.move_to_monitor(win, M1, M1) == win
+
+
+def test_move_to_monitor_brings_offscreen_window_onscreen_without_shrinking():
+    assert monitors.move_to_monitor(Rect(-100, 100, 800, 500), M1, M2) == Rect(1920, 100, 800, 500)
+
+
+def test_move_to_monitor_brings_spanning_window_onscreen_without_shrinking():
+    assert monitors.move_to_monitor(Rect(1800, 100, 400, 500), M1, M2) == Rect(3440, 100, 400, 500)
 
 
 def test_best_monitor_for_window_picks_largest_overlap():

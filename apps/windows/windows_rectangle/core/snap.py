@@ -19,8 +19,7 @@ from . import monitors as monitors_mod
 from .actions import Action, apply
 from .geometry import Rect
 
-# Hot-zone thickness in pixels. Rectangle uses ~30px on macOS; Windows
-# users running at 1080p won't notice 24px any less.
+# Hot-zone thickness in physical pixels.
 EDGE_THICKNESS = 24
 CORNER_SIZE = 60  # square corner zone — wins over edge if cursor is in both
 

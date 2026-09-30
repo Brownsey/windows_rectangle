@@ -19,9 +19,7 @@ from enum import Enum
 _log = logging.getLogger(__name__)
 
 
-# DPI_AWARENESS_CONTEXT values (winuser.h). The handle values are negative
-# integers cast to HANDLE; passing them as ints to ctypes works because
-# SetProcessDpiAwarenessContext takes a DPI_AWARENESS_CONTEXT (a void*).
+# DPI_AWARENESS_CONTEXT values (winuser.h) are pointer-sized pseudohandles.
 _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4  # Win10 1703+
 _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE = -3  # Win10 +
 
@@ -54,6 +52,8 @@ def enable_dpi_awareness() -> DpiAwareness:
     # 1. user32.SetProcessDpiAwarenessContext(-4)
     try:
         user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        user32.SetProcessDpiAwarenessContext.restype = ctypes.c_int
         if user32.SetProcessDpiAwarenessContext(_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2):
             return DpiAwareness.PER_MONITOR_V2
         if user32.SetProcessDpiAwarenessContext(_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE):

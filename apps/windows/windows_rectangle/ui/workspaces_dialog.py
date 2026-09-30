@@ -14,7 +14,7 @@ from .workspace_editor import WorkspaceEditorController
 _log = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, weakref_slot=True)
 class WorkspaceDialog:
     ctx: object
     editor: WorkspaceEditorController
@@ -160,6 +160,7 @@ class WorkspaceDialog:
         outcome = self.editor.autosave(
             getattr(store, "save", None),
             self.ctx.apply_settings,
+            current_settings=self.ctx.settings,
         )
         if outcome.error:
             self.update_validation(f"Autosave failed: {outcome.error}")

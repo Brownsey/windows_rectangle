@@ -1,111 +1,20 @@
-# Rectangle Desktop Apps
+# Windows Rectangle
 
-This repository contains two platform apps:
+A Windows 10/11 window manager with configurable global shortcuts, drag snapping,
+undo, monitor switching, and saved multi-application workspaces. Implemented in
+Python with native Win32 adapters and a PySide6 tray interface.
 
-- `apps/mac/Rectangle`: a vendored fork snapshot of the macOS Rectangle app.
-- `apps/windows`: the Python Windows Rectangle implementation.
+The repository builds and supports Windows only. Geometry, matching and settings
+logic remain independent of the operating system so they can be tested cheaply.
 
-The macOS app is copied from the upstream Rectangle repository so builds do not
-depend on fetching the application source from upstream at release time. The
-Windows app remains a separate implementation that follows Rectangle's behavior
-and shortcut model on Windows.
+- [User guide and default shortcuts](apps/windows/README.md)
+- [Architecture](apps/windows/BRIEF.md)
+- [Contributing](CONTRIBUTING.md)
+- [Code review and performance evidence](REVIEW.md)
 
-## Shared Logo
+![Windows Preferences with searchable shortcuts](research/windows-preferences.png)
 
-Custom logo files live in the repository root `logo` folder. The same folder is
-used by both platform builds.
-
-Recommended cross-platform setup:
-
-```text
-logo/logo.png
-logo/logo.webp
-logo/windows.ico
-logo/tray_logo.png
-logo/tray_logo.webp
-logo/tray_logo.ico
-logo/mac/logo.png
-logo/mac/logo.webp
-logo/mac/tray_logo.png
-logo/mac/tray_logo.webp
-```
-
-Use a 1024x1024 PNG or WebP for `logo/logo.*` or `logo/mac/logo.*`. PNG remains
-the preferred format for the widest tooling compatibility. On Windows,
-`logo/logo.png` is shown in the Preferences UI. On Windows, `logo/tray_logo.png`
-is used for the system tray icon and `logo/windows.ico` is used for the
-executable icon. On macOS, `logo/mac/logo.*` and `logo/mac/tray_logo.*` take
-priority, with root `logo/logo.*` and `logo/tray_logo.*` as fallbacks. If
-`tray_logo.*` is missing, the tray/menu bar uses a transparent blank icon. More
-detail is in `logo/README.md`.
-
-## macOS App
-
-Source: `apps/mac/Rectangle`
-
-Upstream project: <https://github.com/rxhanson/Rectangle>
-
-Snapshot commit: `6cfcb4720b3a6f83df82a8896a3da4751e90ca4e`
-
-Upstream commit date: `2026-07-28 22:12:35 -0400`
-
-Requirements:
-
-- macOS with Xcode installed.
-- Xcode command line tools available through `xcodebuild`.
-- Accessibility permission granted to the built app the first time it runs.
-
-Run the fork locally from the repository root:
-
-```bash
-bash build-mac-release.sh
-open apps/mac/build/Build/Products/Release/Rectangle.app
-```
-
-To build a local downloadable zip on macOS:
-
-```bash
-bash build-mac-release.sh
-```
-
-The output is written to `apps/mac/exe/Rectangle-macOS.zip`, with a SHA-256
-checksum beside it. For distribution outside local testing, use an Apple
-Developer signing identity and notarize the resulting app.
-
-Mac build checklist from a Mac:
-
-```bash
-git pull
-bash build-mac-release.sh
-open apps/mac/build/Build/Products/Release/Rectangle.app
-```
-
-The build creates a zip containing `Rectangle.app`; it does not currently create
-a `.pkg` or `.dmg` installer. Users can extract the zip and move the app into
-`/Applications`.
-
-To customize the macOS logo, place one of these before building:
-
-```text
-logo/mac/AppIcon.appiconset
-logo/mac/logo.png
-logo/mac/logo.webp
-logo/mac/tray_logo.png
-logo/mac/tray_logo.webp
-logo/logo.png
-logo/logo.webp
-logo/tray_logo.png
-logo/tray_logo.webp
-```
-
-If a PNG or WebP app logo is provided, `apps/mac/build-release.sh` uses macOS
-`sips` to generate the required app icon sizes automatically for the build. The
-same script also creates temporary `CustomAppLogo` and `CustomTrayLogo` asset
-catalog entries so the Preferences UI and menu bar icon use the custom assets.
-The script restores the vendored Rectangle icon and generated logo assets after
-the build completes.
-
-## Windows App
+## Development
 
 Source: `apps/windows/windows_rectangle`
 
@@ -123,8 +32,7 @@ Run the app locally from the repository root:
 .\run-windows.bat
 ```
 
-The launcher creates `.venv` when needed, installs dependencies, stops any
-existing Windows Rectangle instance, and opens the Preferences window.
+The launcher creates `.venv` when needed, installs missing dependencies and opens the Preferences window.
 
 Useful local run commands:
 
@@ -237,17 +145,8 @@ Run the full Windows quality gate with:
 
 The root GitHub Actions workflow runs the same gate on `windows-latest`.
 
-## Credits
+## Attribution
 
-Full credit for the macOS Rectangle app goes to the original Rectangle project:
-
-- Rectangle by Ryan Hanson: <https://github.com/rxhanson/Rectangle>
-- Rectangle is MIT licensed. See `apps/mac/Rectangle/LICENSE`.
-- Rectangle is based on Spectacle by Eric Czarny.
-- Rectangle uses MASShortcut and Sparkle, as documented in the upstream
-  `apps/mac/Rectangle/README.md`.
-- App icon credits and community contributor credits remain in the upstream
-  README copied into `apps/mac/Rectangle/README.md`.
-
-The Windows app was built to match Rectangle's behavior on Windows and credits
-Rectangle in `THIRD_PARTY_NOTICES.md`.
+Window actions and shortcut conventions are inspired by
+[Rectangle by Ryan Hanson](https://github.com/rxhanson/Rectangle).
+Required attribution is retained in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

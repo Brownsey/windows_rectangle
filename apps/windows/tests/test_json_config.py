@@ -3,6 +3,7 @@
 import json
 
 import pytest
+
 from windows_rectangle.adapters.json_config import (
     SCHEMA_VERSION,
     JsonConfigStore,
@@ -105,6 +106,91 @@ def test_load_corrupt_json_falls_back_to_defaults(store):
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text("{not valid json", encoding="utf-8")
     assert store.load() == Settings()
+
+
+@pytest.mark.parametrize(
+    "payload", [[], 7, None, {"shortcuts": []}, {"workspaces": None}, {"workspaces": {}}]
+)
+def test_load_malformed_valid_json_preserves_file_and_uses_defaults(store, payload):
+    encoded = json.dumps(payload)
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(encoded, encoding="utf-8")
+    assert store.load() == Settings()
+    assert store.path.read_text(encoding="utf-8") == encoded
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("gap", -1),
+        ("gap", True),
+        ("gap", 257),
+        ("cycle_idle_timeout", float("inf")),
+        ("cycle_idle_timeout", -0.1),
+        ("almost_maximize_scale", float("nan")),
+        ("almost_maximize_scale", 1.1),
+        ("cycle_idle_timeout", 10**400),
+        ("launch_at_login", "false"),
+        ("drag_to_edge_enabled", 0),
+    ],
+)
+def test_invalid_setting_falls_back_without_mutating_file(store, field, value):
+    encoded = json.dumps({field: value})
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(encoded, encoding="utf-8")
+    assert store.load() == Settings()
+    assert store.path.read_text(encoding="utf-8") == encoded
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        None,
+        {"shortcuts": []},
+        {"shortcuts": {"left_half": 42}},
+        {"workspaces": None},
+        {"gap": -1},
+    ],
+)
+def test_import_rejects_malformed_valid_json_without_replacing_config(store, tmp_path, payload):
+    store.save(Settings(gap=12))
+    before = store.path.read_bytes()
+    source = tmp_path / "invalid.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError):
+        store.import_from(source)
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", ["monitor_index", "left"])
+def test_overflowing_workspace_number_is_safe_on_load_and_rejected_on_import(
+    store, tmp_path, field
+):
+    placement = {
+        "id": "entry",
+        "name": "Entry",
+        "monitor_index": 0,
+        "matcher": {"process_name": "example.exe"},
+        "rect": {"left": 0, "top": 0, "right": 5000, "bottom": 10000},
+    }
+    target = placement if field == "monitor_index" else placement["rect"]
+    target[field] = float("inf")
+    encoded = json.dumps(
+        {"workspaces": [{"id": "w", "name": "Workspace", "placements": [placement]}]}
+    ).replace("Infinity", "1e309")
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text(encoded, encoding="utf-8")
+    assert store.load().workspaces == ()
+    assert store.path.read_text(encoding="utf-8") == encoded
+
+    source = tmp_path / "overflow.json"
+    source.write_text(encoded, encoding="utf-8")
+    store.save(Settings(gap=12))
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="invalid entry"):
+        store.import_from(source)
+    assert store.path.read_bytes() == before
 
 
 def test_load_unknown_shortcut_key_ignored(store):

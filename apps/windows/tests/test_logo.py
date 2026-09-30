@@ -84,6 +84,22 @@ def test_find_logo_file_checks_pyinstaller_resource_directory(tmp_path, monkeypa
     assert logo.find_logo_file() == bundled_logo / "app.png"
 
 
+def test_frozen_local_logo_overrides_bundled_logo(tmp_path, monkeypatch):
+    executable_dir = tmp_path / "installed"
+    local = executable_dir / "logo"
+    bundled = tmp_path / "bundle" / "logo"
+    local.mkdir(parents=True)
+    bundled.mkdir(parents=True)
+    (local / "logo.png").write_bytes(b"local")
+    (bundled / "windows.ico").write_bytes(b"bundled")
+    monkeypatch.delenv("WINDOWS_RECTANGLE_LOGO_DIR", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(executable_dir / "Rectangle.exe"))
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "bundle"), raising=False)
+
+    assert logo.find_logo_file() == local / "logo.png"
+
+
 def test_find_logo_file_returns_none_when_no_supported_logo_exists(tmp_path, monkeypatch):
     (tmp_path / "logo").mkdir()
     (tmp_path / "logo" / "README.md").write_text("docs only", encoding="utf-8")

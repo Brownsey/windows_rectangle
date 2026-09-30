@@ -1,6 +1,7 @@
 """Tests for windows_rectangle.core.keymap."""
 
 import pytest
+
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS
 from windows_rectangle.core.keymap import (
     MOD_ALT,

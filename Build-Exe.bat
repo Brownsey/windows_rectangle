@@ -19,7 +19,7 @@ echo.
 if %RC% NEQ 0 (
     echo Build failed with exit code %RC%.
 ) else (
-    echo Build complete — see dist\WindowsRectangle.exe.
+    echo Build complete — see apps\windows\exe\WindowsRectangle.exe.
 )
 pause
 endlocal & exit /b %RC%

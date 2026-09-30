@@ -1,6 +1,7 @@
 """Tests for the pure workspace editor/review controller."""
 
 import pytest
+
 from windows_rectangle.core.actions import Action
 from windows_rectangle.core.geometry import Rect
 from windows_rectangle.core.workspaces import (
@@ -170,6 +171,94 @@ def test_custom_normalized_rect_can_be_staged():
     custom = NormalizedRect(1250, 2500, 8750, 9000)
     controller.set_placement_rect("office", "slack", custom)
     assert controller.get("office").placements[0].rect == custom
+
+
+def test_unchanged_placement_edits_do_not_raise_or_mark_dirty():
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace(),)))
+    placement = controller.get("office").placements[0]
+    controller.set_placement_rect("office", "slack", placement.rect)
+    controller.update_placement(
+        "office",
+        "slack",
+        name="Slack",
+        process_name="slack.exe",
+        title_contains="Slack",
+        title_regex="",
+        monitor_index=0,
+    )
+    assert not controller.is_dirty
+
+
+def test_unknown_placement_still_raises_key_error():
+    controller = WorkspaceEditorController(Settings(workspaces=(workspace(),)))
+    with pytest.raises(KeyError, match="missing"):
+        controller.set_placement_rect("office", "missing", NormalizedRect(0, 0, 5000, 5000))
+    with pytest.raises(KeyError, match="missing"):
+        controller.update_placement(
+            "office",
+            "missing",
+            name="Slack",
+            process_name="slack.exe",
+            title_contains="Slack",
+            title_regex="",
+            monitor_index=0,
+        )
+
+
+def test_autosave_merges_workspace_edits_with_current_settings(tmp_path):
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+
+    store = JsonConfigStore(tmp_path / "config.json")
+    initial = Settings(workspaces=(workspace(),), active_workspace_id="office")
+    store.save(initial)
+    controller = WorkspaceEditorController(store.load())
+    controller.rename("office", "Edited")
+    current = store.load()
+    current.gap = 24
+    current.launch_at_login = True
+    current.workspaces += (Workspace("new", "Another", ()),)
+    current.active_workspace_id = "new"
+    store.save(current)
+
+    outcome = controller.autosave(store.save, current_settings=store.load())
+    saved = store.load()
+    assert outcome.saved
+    assert saved.gap == 24
+    assert saved.launch_at_login is True
+    assert [(w.id, w.name) for w in saved.workspaces] == [("office", "Edited"), ("new", "Another")]
+    assert saved.active_workspace_id == "new"
+
+
+def test_autosave_preserves_concurrent_untouched_workspace_change():
+    baseline = Settings(workspaces=(workspace(), Workspace("other", "Before", ())))
+    controller = WorkspaceEditorController(baseline)
+    controller.rename("office", "Edited")
+    current = Settings(workspaces=(workspace(), Workspace("other", "Changed elsewhere", ())))
+    saved = []
+
+    assert controller.autosave(saved.append, current_settings=current).saved
+    assert [(w.id, w.name) for w in saved[0].workspaces] == [
+        ("office", "Edited"),
+        ("other", "Changed elsewhere"),
+    ]
+
+
+def test_autosave_failure_keeps_current_config_and_pending_edit(tmp_path):
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+
+    store = JsonConfigStore(tmp_path / "config.json")
+    store.save(Settings(workspaces=(workspace(),), gap=7))
+    controller = WorkspaceEditorController(store.load())
+    controller.rename("office", "Pending")
+
+    def fail(_settings):
+        raise OSError("disk full")
+
+    outcome = controller.autosave(fail, current_settings=store.load())
+    assert outcome.error == "disk full"
+    assert controller.is_dirty
+    assert store.load().workspaces[0].name == "Office"
+    assert store.load().gap == 7
 
 
 def test_templates_duplicate_and_per_rule_match_results():

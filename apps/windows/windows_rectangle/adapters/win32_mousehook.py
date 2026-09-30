@@ -73,15 +73,24 @@ class Win32MouseHook:
         self._thread_id: int | None = None
         self._started = threading.Event()
         self._stopped = threading.Event()
+        self._startup_error: Exception | None = None
         # The HOOKPROC must outlive the hook installation; keep a ref.
         self._hook_proc = None
         self._hook_handle: int = 0
         self._thread = threading.Thread(
-            target=self._run, name="WindowsRectangle-MouseHook", daemon=True
+            target=self._run_guarded, name="WindowsRectangle-MouseHook", daemon=True
         )
         self._thread.start()
         if not self._started.wait(timeout=5.0):
+            self._stopped.set()
+            self._thread.join(timeout=2.0)
             raise RuntimeError("mouse hook thread failed to start")
+        if self._startup_error is not None:
+            raise RuntimeError(
+                f"mouse hook thread failed: {self._startup_error}"
+            ) from self._startup_error
+        if not self._hook_handle:
+            raise RuntimeError("mouse hook installation failed")
 
     def shutdown(self) -> None:
         """Unhook + stop the pump. Idempotent."""
@@ -96,6 +105,16 @@ class Win32MouseHook:
         self._thread.join(timeout=2.0)
 
     # ----- internals ------------------------------------------------
+
+    def _run_guarded(self) -> None:
+        try:
+            self._run()
+        except Exception as exc:  # noqa: BLE001
+            self._startup_error = exc
+            self._stopped.set()
+            _log.exception("mouse hook thread failed")
+        finally:
+            self._started.set()
 
     def _run(self) -> None:
         import ctypes
@@ -126,7 +145,9 @@ class Win32MouseHook:
             ]
 
         # HOOKPROC signature: LRESULT (int nCode, WPARAM wParam, LPARAM lParam)
-        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+        HOOKPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+        )
 
         # CallNextHookEx setup.
         user32.CallNextHookEx.argtypes = [
@@ -135,7 +156,7 @@ class Win32MouseHook:
             wintypes.WPARAM,
             wintypes.LPARAM,
         ]
-        user32.CallNextHookEx.restype = ctypes.c_long
+        user32.CallNextHookEx.restype = ctypes.c_ssize_t
         user32.SetWindowsHookExW.argtypes = [
             ctypes.c_int,
             HOOKPROC,
@@ -168,21 +189,19 @@ class Win32MouseHook:
         h_module = kernel32.GetModuleHandleW(None)
         handle = user32.SetWindowsHookExW(_WH_MOUSE_LL, self._hook_proc, h_module, 0)
         if not handle:
-            _log.error("SetWindowsHookExW failed: err=%s", ctypes.get_last_error())
-            self._started.set()  # unblock constructor — will see stopped
-            self._stopped.set()
-            return
+            raise OSError(f"SetWindowsHookExW failed: err={ctypes.get_last_error()}")
         self._hook_handle = handle
         self._started.set()
 
         # Pump messages until WM_QUIT.
-        while not self._stopped.is_set():
-            ret = user32.GetMessageW(ctypes.byref(msg), 0, 0, 0)
-            if ret == 0 or ret == -1:
-                break
-            user32.TranslateMessage(ctypes.byref(msg))
-            user32.DispatchMessageW(ctypes.byref(msg))
-
-        if self._hook_handle:
-            user32.UnhookWindowsHookEx(self._hook_handle)
-            self._hook_handle = 0
+        try:
+            while not self._stopped.is_set():
+                ret = user32.GetMessageW(ctypes.byref(msg), 0, 0, 0)
+                if ret == 0 or ret == -1:
+                    break
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+        finally:
+            if self._hook_handle:
+                user32.UnhookWindowsHookEx(self._hook_handle)
+                self._hook_handle = 0

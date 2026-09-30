@@ -143,3 +143,23 @@ def test_start_resets_previous_state():
     # New drag starts fresh.
     s.start(Rect(0, 0, 200, 200))
     assert s.poll() is None
+
+
+def test_finish_consumes_release_position_even_before_next_preview_tick():
+    session, clock = make_session()
+    session.start(Rect(100, 100, 800, 600))
+    session.update(2, 540)
+    clock.advance(1)
+    assert session.poll().zone is SnapZone.LEFT
+    session.update(1918, 540)
+    assert session.finish().zone is SnapZone.RIGHT
+
+
+def test_finish_outside_zone_does_not_apply_cached_preview():
+    session, clock = make_session()
+    session.start(Rect(100, 100, 800, 600))
+    session.update(2, 540)
+    clock.advance(1)
+    session.poll()
+    session.update(960, 540)
+    assert session.finish() is None

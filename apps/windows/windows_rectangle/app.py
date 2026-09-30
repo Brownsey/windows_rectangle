@@ -2,7 +2,7 @@
 
 `AppContext` wires Settings into a Dispatcher + CleanupRegistry. The
 win32 adapters import lazily inside `bind_win32()` so that pytest on
-non-Windows CI doesn't pay for pywin32/PySide6 imports just to test
+non-Windows CI doesn't pay for native/Qt imports just to test
 core. The dispatcher itself is fully driveable via any `WindowManager`
 fake, as the tests demonstrate.
 """
@@ -22,6 +22,7 @@ from .core.cleanup import CleanupRegistry
 from .core.cycle import CycleState
 from .core.dispatcher import Dispatcher
 from .core.dragsession import DragSession
+from .core.eligibility import Capability, classify
 from .core.geometry import Rect
 from .core.history import History
 from .core.snap import SnapHit
@@ -190,6 +191,8 @@ class AppContext:
         default_factory=lambda: queue.Queue(maxsize=64), init=False, repr=False
     )
     last_workspace_result: WorkspaceResult | None = field(default=None, init=False)
+    _drag_handle: object | None = field(default=None, init=False, repr=False)
+    _pending_snap: tuple[object, SnapHit] | None = field(default=None, init=False, repr=False)
 
     def apply_settings(self, settings: Settings) -> None:
         """Mutate the live dispatcher to reflect new user settings.
@@ -369,6 +372,17 @@ class AppContext:
         """
         if self.hotkeys is None:
             return 0
+        if self.paused:
+            self.last_binding_report = BindingReport(
+                bound=tuple(self.settings.shortcuts.items()),
+                workspace_bound=tuple(
+                    (workspace.id, workspace.name, workspace.shortcut)
+                    for workspace in self.settings.workspaces
+                    if workspace.shortcut.strip()
+                ),
+                paused=True,
+            )
+            return 0
         try:
             self.hotkeys.unregister_all()
         except Exception:  # noqa: BLE001
@@ -401,6 +415,7 @@ class AppContext:
         """
         if not self.settings.drag_to_edge_enabled:
             return
+        self._drag_handle = self.windows.get_active_window()
         self.drag.monitors = self.windows.list_monitors()
         self.drag.gap = self.settings.gap
         self.drag.start(window)
@@ -446,29 +461,30 @@ class AppContext:
         hit = self.drag.finish()
         if hit is None or hit.action is None:
             return None
-        self.dispatcher.dispatch(hit.action)
+        handle, self._drag_handle = self._drag_handle, None
+        if handle is not None and hit.target is not None:
+            self.dispatcher.dispatch_target(handle, hit.action, hit.target)
         return hit.action
 
     def end_drag_via_bus(self) -> Action | None:
-        """Mouse-up: finish the session and submit the action via the bus.
+        """Queue the final HWND and exact target for the next main-thread drain.
 
-        Designed for the WH_MOUSE_LL hook thread — `bus.submit()` is O(1)
-        and overflow-tolerant. The Qt main thread picks up the action on
-        its next `drain_actions()` tick (≤16 ms later, brief §5 #7).
-
-        Returns the submitted Action (or None if the cursor wasn't in a
-        zone). Note: the action has been *queued*, not dispatched, by
-        the time this returns.
+        Kept for callers that want deferred placement. Like the rest of the
+        DragSession facade, call this on the main thread; the mouse hook uses
+        the input mailbox instead.
         """
         hit = self.drag.finish()
         if hit is None or hit.action is None:
             return None
-        self.bus.submit(hit.action)
+        handle, self._drag_handle = self._drag_handle, None
+        if handle is not None:
+            self._pending_snap = (handle, hit)
         return hit.action
 
     def cancel_drag(self) -> None:
         """Escape press / drag abort: drop the session without dispatching."""
         self.drag.cancel()
+        self._drag_handle = None
 
     # ----- ActionBus draining (brief §5 #6) --------------------------
 
@@ -477,7 +493,16 @@ class AppContext:
 
         Called by the Qt main thread on a timer. Returns the count drained.
         """
-        return self.bus.drain(self.dispatcher.dispatch) + self.drain_workspaces()
+        if self._mousehook is not None:
+            self._mousehook[1].poll()
+        count = 0
+        pending, self._pending_snap = self._pending_snap, None
+        if pending is not None:
+            handle, hit = pending
+            if hit.action is not None and hit.target is not None:
+                self.dispatcher.dispatch_target(handle, hit.action, hit.target)
+                count = 1
+        return count + self.bus.drain(self.dispatcher.dispatch, limit=16) + self.drain_workspaces()
 
     # ----- named workspaces -----------------------------------------
 
@@ -515,7 +540,9 @@ class AppContext:
     def drain_workspaces(self) -> int:
         """Apply queued workspace requests on the main/Qt thread."""
         count = 0
-        while True:
+        # Each workspace can move many windows. One per tick keeps the UI
+        # responsive even while workspace shortcuts are being repeated.
+        for _ in range(min(1, self._workspace_queue.qsize())):
             try:
                 workspace_id = self._workspace_queue.get_nowait()
             except queue.Empty:
@@ -525,6 +552,7 @@ class AppContext:
             except Exception:  # noqa: BLE001
                 _log.exception("workspace restore failed: %s", workspace_id)
             count += 1
+        return count
 
     # ----- Drag-preview pump (brief §2 #13) --------------------------
 
@@ -815,88 +843,162 @@ def bind_win32(
     _log.info("DPI awareness: %s", dpi_level.value)
 
     si = best_single()
-    config = JsonConfigStore() if config_path is None else JsonConfigStore(config_path)
-    # Detect first-run BEFORE load() — load() tolerates a missing file by
-    # returning Settings(), so once it's run we can't tell "fresh install"
-    # from "user has an empty config" anymore.
-    first_run = not config.path.exists()
-    settings = config.load()
-    # Persist defaults immediately on first launch so the user can find +
-    # hand-edit the file; also flips first_run for the next start.
-    if first_run:
-        try:
-            config.save(settings)
-        except Exception:  # noqa: BLE001
-            _log.warning("first-run config save failed", exc_info=True)
-
-    windows = Win32WindowManager()
-    hotkeys = Win32Hotkeys()
-    autostart = best_autostart()
-
-    ctx = build(
-        settings,
-        windows,
-        hotkeys=hotkeys,
-        config_store=config,
-        autostart=autostart,
-        autostart_command_line=command_line,
-        single_instance=si,
-        first_run=first_run,
-    )
-
-    # Hotkey callbacks must not block the pump thread → route via the bus.
-    bind_hotkeys_via_bus(ctx, hotkeys.register)
-
-    # Tear down the hotkey pump on shutdown.
-    ctx.cleanup.register(hotkeys.shutdown)
-
-    # Drag-to-edge: install the low-level mouse hook and wire it through
-    # the detector to the drag-snap facade. Best-effort — a hook failure
-    # must not block startup (the keyboard shortcuts still work).
+    if not si.acquire():
+        raise SecondInstanceError("another instance is already running")
+    cleanup = CleanupRegistry()
+    cleanup.register(si.release)
     try:
-        bind_mousehook(ctx)
-    except Exception:  # noqa: BLE001
-        _log.warning("mouse hook install failed — drag-to-edge disabled", exc_info=True)
+        config = JsonConfigStore() if config_path is None else JsonConfigStore(config_path)
+        # Detect first-run BEFORE load() — load() tolerates a missing file by
+        # returning Settings(), so once it's run we can't tell "fresh install"
+        # from "user has an empty config" anymore.
+        first_run = not config.path.exists()
+        settings = config.load()
+        # Persist defaults immediately on first launch so the user can find +
+        # hand-edit the file; also flips first_run for the next start.
+        if first_run:
+            try:
+                config.save(settings)
+            except Exception:  # noqa: BLE001
+                _log.warning("first-run config save failed", exc_info=True)
 
-    return ctx
+        windows = Win32WindowManager()
+        hotkeys = Win32Hotkeys()
+        cleanup.register(hotkeys.shutdown)
+        autostart = best_autostart()
+
+        ctx = build(
+            settings,
+            windows,
+            hotkeys=hotkeys,
+            config_store=config,
+            autostart=autostart,
+            autostart_command_line=command_line,
+            cleanup=cleanup,
+            first_run=first_run,
+        )
+
+        ctx.single_instance = si
+
+        # Hotkey callbacks must not block the pump thread → route via the bus.
+        bind_hotkeys_via_bus(ctx, hotkeys.register)
+
+        # Drag-to-edge: install the low-level mouse hook and wire it through
+        # the detector to the drag-snap facade. Best-effort — a hook failure
+        # must not block startup (the keyboard shortcuts still work).
+        try:
+            bind_mousehook(ctx)
+        except Exception:  # noqa: BLE001
+            _log.warning("mouse hook install failed — drag-to-edge disabled", exc_info=True)
+
+        return ctx
+    except BaseException:
+        cleanup.run()
+        raise
+
+
+class _DragInput:
+    """Coalesce hook input; all native queries and drag state stay on the UI thread.
+
+    One immutable snapshot is published per event. Reading it never clears the
+    slot, so a concurrent producer cannot lose a release between read and clear.
+    A complete click between UI ticks intentionally does not start a snap.
+    """
+
+    def __init__(self, ctx: AppContext) -> None:
+        self.ctx = ctx
+        self._pressed = False
+        self._generation = 0
+        self._latest: tuple[int, bool, int, int] | None = None
+        self._consumed_generation = -1
+        self._initial: Rect | None = None
+        self._handle: object | None = None
+        self._translated = False
+        self._cancelled = False
+
+    @property
+    def state(self) -> str:
+        if self._cancelled or not self._latest or not self._latest[1]:
+            return "idle"
+        return "dragging" if self.ctx.drag.active else "armed"
+
+    def on_event(self, kind: str, x: int, y: int) -> None:
+        # Hook thread: constant memory, no native calls, dispatch or logging.
+        if kind == "lbutton_down":
+            self._generation += 1
+            self._pressed = True
+        elif kind == "lbutton_up":
+            self._pressed = False
+        elif kind != "move" or not self._pressed:
+            return
+        self._latest = (self._generation, self._pressed, x, y)
+
+    def reset(self) -> None:
+        self.ctx.cancel_drag()
+        self._handle = None
+        self._initial = None
+        self._translated = False
+        self._cancelled = True
+
+    def poll(self) -> None:
+        snapshot = self._latest
+        if snapshot is None:
+            return
+        generation, pressed, x, y = snapshot
+        if generation != self._consumed_generation:
+            self.reset()
+            self._cancelled = False
+            self._consumed_generation = generation
+        if self._cancelled:
+            return
+        windows = self.ctx.windows
+        try:
+            if getattr(windows, "is_escape_pressed", lambda: False)():
+                self.reset()
+                return
+            moving = getattr(windows, "get_drag_window", lambda: None)()
+            if self._handle is None:
+                if moving is None:
+                    return  # Windows may not have processed the first movement yet.
+                if classify(windows.get_window_flags(moving)) is Capability.NONE:
+                    self.reset()
+                    return
+                self._initial = windows.get_window_rect(moving)
+                self._handle = moving
+                self.ctx.begin_drag(self._initial)
+                self.ctx._drag_handle = moving
+            elif pressed and moving != self._handle:
+                self.reset()  # Escape or an aborted native move loop.
+                return
+            if not pressed and moving == self._handle:
+                # The hook runs before the target handles mouse-up. Let its
+                # native move/snap finish before applying our final rectangle.
+                return
+            current = windows.get_window_rect(self._handle)
+            initial = self._initial
+            assert initial is not None
+            if pressed and (current.width, current.height) != (initial.width, initial.height):
+                self.reset()  # GUI_INMOVESIZE also covers border resizing.
+                return
+            if pressed:
+                self._translated |= (current.x, current.y) != (initial.x, initial.y)
+            if self._translated:
+                self.ctx.drag_update(x, y)
+            if not pressed:
+                if self._translated:
+                    self.ctx.end_drag()
+                self.reset()
+        except (OSError, ValueError):
+            _log.debug("native drag ended before it could be snapped", exc_info=True)
+            self.reset()
 
 
 def make_drag_event_dispatcher(
     ctx: AppContext,
-) -> tuple[Callable[[str, int, int], None], object]:
-    """Build the on_event closure and the DragDetector it drives.
-
-    Pure-Python (no win32 imports), so tests can drive synthetic event
-    streams through it without installing a real WH_MOUSE_LL hook.
-    Returns (on_event, detector) — the detector is returned so callers
-    can also register `detector.reset` for shutdown.
-    """
-    # Lazy: the kind constants are simple strings, but importing the
-    # adapter module here keeps the symbol source-of-truth in one place.
-    from .adapters.win32_mousehook import (
-        EVENT_LBUTTON_DOWN,
-        EVENT_LBUTTON_UP,
-        EVENT_MOVE,
-    )
-    from .core.dragdetector import DragDetector
-
-    detector = DragDetector(
-        on_begin=lambda x, y: ctx.begin_drag_for_active_window(),
-        on_update=ctx.drag_update,
-        # Route end-of-drag dispatch through the ActionBus — the hook
-        # thread can't afford to block on Win32 work (brief §5 #7).
-        on_end=lambda: ctx.end_drag_via_bus(),
-    )
-
-    def on_event(kind: str, x: int, y: int) -> None:
-        if kind == EVENT_MOVE:
-            detector.on_move(x, y)
-        elif kind == EVENT_LBUTTON_DOWN:
-            detector.on_button_down(x, y)
-        elif kind == EVENT_LBUTTON_UP:
-            detector.on_button_up(x, y)
-
-    return on_event, detector
+) -> tuple[Callable[[str, int, int], None], _DragInput]:
+    """Return the O(1) hook producer and main-thread drag consumer."""
+    controller = _DragInput(ctx)
+    return controller.on_event, controller
 
 
 def bind_mousehook(ctx: AppContext) -> bool:
@@ -909,12 +1011,8 @@ def bind_mousehook(ctx: AppContext) -> bool:
 
     Returns True iff the hook is now active.
 
-    Hot-path notes: the detector's `on_begin` calls back into the
-    WindowManager on the hook thread to look up the active window. That's
-    a fast read of GetForegroundWindow / GetWindowRect — well within the
-    WH_MOUSE_LL latency budget (brief §5 #7). Update + end run on the
-    hook thread too. `drag.update()` only sets a LatestValue (O(1));
-    `end_drag_via_bus()` enqueues the dispatch onto the bus so the Qt
-    thread actually runs it.
+    The hook only publishes an immutable input snapshot. drain_actions()
+    consumes it on the main thread, including native move-loop detection,
+    preview state and final placement.
     """
     return ctx.start_mousehook()

@@ -1,6 +1,7 @@
 """Tests for windows_rectangle.core.shortcuts."""
 
 import pytest
+
 from windows_rectangle.core.shortcuts import (
     Combo,
     ShortcutParseError,

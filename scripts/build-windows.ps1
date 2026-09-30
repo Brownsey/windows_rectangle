@@ -50,15 +50,11 @@ function Test-PackagedExecutable {
         [Parameter(Mandatory = $true)][string]$FilePath
     )
 
-    try {
-        Invoke-Native $FilePath @("--version") "Packaged executable smoke test failed"
-    } catch {
-        $message = [string]$_.Exception.Message
-        if ($message -like "*Application Control policy has blocked this file*") {
-            Write-Warning "Packaged executable smoke test was blocked by Windows Application Control; continuing after successful build and test gate."
-            return
-        }
-        throw
+    # PowerShell does not reliably wait for GUI-subsystem executables invoked
+    # with &; LASTEXITCODE can still contain the previous command's success.
+    $smoke = Start-Process -FilePath $FilePath -ArgumentList "--check-install" -Wait -PassThru -WindowStyle Hidden
+    if ($smoke.ExitCode -ne 0) {
+        throw "Packaged executable smoke test failed (exit code $($smoke.ExitCode))"
     }
 }
 
@@ -139,15 +135,6 @@ function Wait-DirectoryReady([string]$Path) {
         ForEach-Object { Wait-FileReady $_.FullName }
 }
 
-function First-ExistingFile([string[]]$Paths) {
-    foreach ($path in $Paths) {
-        if (Test-Path -LiteralPath $path -PathType Leaf) {
-            return $path
-        }
-    }
-    return $null
-}
-
 if ($env:OS -ne "Windows_NT") {
     throw "Windows executable builds must run on Windows."
 }
@@ -157,10 +144,6 @@ $ReleaseDir = Resolve-InRepoPath (Join-Path $RepoRoot "apps\windows\exe")
 $DistDir = Resolve-InRepoPath (Join-Path $RepoRoot "build\pyinstaller\dist")
 $BuildDir = Resolve-InRepoPath (Join-Path $RepoRoot "build\pyinstaller\windows")
 $PackageDir = Resolve-InRepoPath (Join-Path $RepoRoot "build\pyinstaller\package")
-$SpecDir = Resolve-InRepoPath (Join-Path $RepoRoot "build\pyinstaller\spec")
-$EntryPoint = Resolve-InRepoPath (Join-Path $RepoRoot "packaging\windows\WindowsRectangle.py")
-$WindowsSource = Resolve-InRepoPath (Join-Path $RepoRoot "apps\windows")
-$LogoDir = Resolve-InRepoPath (Join-Path $RepoRoot "logo")
 $StopScript = Resolve-InRepoPath (Join-Path $ScriptDir "stop-windows.ps1")
 $BuiltAppDir = Join-Path $DistDir "WindowsRectangle"
 $BuiltExePath = Join-Path $BuiltAppDir "WindowsRectangle.exe"
@@ -192,10 +175,9 @@ try {
         Remove-DirectoryIfPresent $DistDir
         Remove-DirectoryIfPresent $BuildDir
         Remove-DirectoryIfPresent $PackageDir
-        Remove-DirectoryIfPresent $SpecDir
     }
     Remove-DirectoryIfPresent $ReleaseDir
-    New-Item -ItemType Directory -Force -Path $ReleaseDir, $DistDir, $BuildDir, $PackageDir, $SpecDir |
+    New-Item -ItemType Directory -Force -Path $ReleaseDir, $DistDir, $BuildDir, $PackageDir |
         Out-Null
 
     $versionOutput = & $Python -c "from windows_rectangle import __version__; print(__version__)"
@@ -211,29 +193,10 @@ try {
         "-m", "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onedir",
-        "--windowed",
-        "--name", "WindowsRectangle",
         "--distpath", $DistDir,
         "--workpath", $BuildDir,
-        "--specpath", $SpecDir,
-        "--paths", $WindowsSource,
-        "--hidden-import", "win32timezone",
-        $EntryPoint
+        (Join-Path $RepoRoot "windows_rectangle.spec")
     )
-
-    if (Test-Path -LiteralPath $LogoDir -PathType Container) {
-        $pyInstallerArgs += @("--add-data", "$LogoDir;logo")
-    }
-
-    $IconPath = First-ExistingFile @(
-        (Join-Path $LogoDir "windows.ico"),
-        (Join-Path $LogoDir "logo.ico"),
-        (Join-Path $LogoDir "app.ico")
-    )
-    if ($IconPath) {
-        $pyInstallerArgs += @("--icon", $IconPath)
-    }
 
     Write-Host "Building portable executable folder..."
     Invoke-Native $Python $pyInstallerArgs "PyInstaller build failed"

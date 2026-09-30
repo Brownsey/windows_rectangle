@@ -1,6 +1,7 @@
 """Tests for windows_rectangle.core.dispatcher."""
 
 import pytest
+
 from windows_rectangle.core.actions import Action
 from windows_rectangle.core.cycle import CycleState
 from windows_rectangle.core.dispatcher import Dispatcher
@@ -120,6 +121,66 @@ def test_restore_consumes_one_at_a_time(fake_wm):
     # Undo back to original.
     d.dispatch(Action.RESTORE)
     assert fake_wm.windows[101] == original
+
+
+def test_failed_restore_keeps_undo_entry(fake_wm):
+    history = History()
+    d = Dispatcher(fake_wm, history=history)
+    original = fake_wm.windows[101]
+    d.dispatch(Action.LEFT_HALF)
+    fake_wm.blocked.add(101)
+    assert d.dispatch(Action.RESTORE).reason == "blocked"
+    assert history.peek(101) == original
+
+
+def test_failed_move_keeps_existing_deduplicated_undo_entry(fake_wm):
+    history = History()
+    original = fake_wm.windows[101]
+    history.push(101, original)
+    fake_wm.blocked.add(101)
+    Dispatcher(fake_wm, history=history).dispatch(Action.LEFT_HALF)
+    assert history.peek(101) == original
+    assert len(history) == 1
+
+
+def test_exception_during_move_keeps_history_unchanged(fake_wm, monkeypatch):
+    history = History()
+    original = fake_wm.windows[101]
+    history.push(101, original)
+
+    def fail(_self, _handle, _rect):
+        raise OSError("window closed")
+
+    monkeypatch.setattr(FakeWindowManager, "set_window_rect", fail)
+    with pytest.raises(OSError):
+        Dispatcher(fake_wm, history=history).dispatch(Action.LEFT_HALF)
+    assert history.peek(101) == original
+    assert len(history) == 1
+
+
+def test_dispatch_target_moves_captured_window_to_exact_target_without_cycle(fake_wm):
+    fake_wm.windows[202] = Rect(2000, 100, 400, 300)
+    target = Rect(1920, 0, 960, 1040)
+    result = Dispatcher(fake_wm).dispatch_target(202, Action.LEFT_HALF, target)
+    assert result.moved and result.after == target
+    assert fake_wm.windows[101] == Rect(100, 100, 800, 600)
+    assert fake_wm.windows[202] == target
+
+
+def test_dispatch_target_rejects_closed_or_ineligible_window(fake_wm):
+    d = Dispatcher(fake_wm)
+    target = Rect(0, 0, 960, 1040)
+    assert not d.dispatch_target(999, Action.LEFT_HALF, target).moved
+    fake_wm.flags[101] = WindowFlags(is_tool_window=True)
+    assert d.dispatch_target(101, Action.LEFT_HALF, target).reason == "ineligible"
+
+
+def test_dispatch_target_centers_move_only_window_at_target(fake_wm):
+    fake_wm.flags[101] = WindowFlags(has_caption=True, has_thick_frame=False)
+    fake_wm.windows[101] = Rect(100, 100, 400, 300)
+    target = Rect(1920, 0, 960, 1040)
+    Dispatcher(fake_wm).dispatch_target(101, Action.LEFT_HALF, target)
+    assert fake_wm.windows[101] == Rect(2200, 370, 400, 300)
 
 
 # ----- Multi-monitor -------------------------------------------------

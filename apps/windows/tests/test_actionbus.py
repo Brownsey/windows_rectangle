@@ -99,3 +99,29 @@ def test_producer_thread_drained_by_main_thread():
     bus.drain(seen.append)
     assert submitted == 20
     assert len(seen) == 20
+
+
+def test_drain_yields_when_producer_replenishes_queue():
+    bus = ActionBus()
+    bus.submit(Action.LEFT_HALF)
+    handled = []
+
+    def handle(action):
+        handled.append(action)
+        if len(handled) < 1000:
+            bus.submit(Action.RIGHT_HALF)
+
+    assert bus.drain(handle) == 1
+    assert handled == [Action.LEFT_HALF]
+    assert bus.pending() == 1
+
+
+def test_drain_limit_preserves_remaining_actions_for_later_ticks():
+    bus = ActionBus()
+    for action in (Action.CENTER, Action.LEFT_HALF, Action.RIGHT_HALF):
+        bus.submit(action)
+    seen = []
+    assert bus.drain(seen.append, limit=2) == 2
+    assert seen == [Action.CENTER, Action.LEFT_HALF]
+    assert bus.drain(seen.append, limit=2) == 1
+    assert seen[-1] is Action.RIGHT_HALF

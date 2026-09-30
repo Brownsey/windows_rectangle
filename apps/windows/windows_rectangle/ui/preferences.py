@@ -27,7 +27,7 @@ import copy
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from ..core.actions import Action
+from ..core.actions import DEFAULT_SHORTCUTS, Action
 from ..core.shortcuts import (
     ShortcutParseError,
     is_reserved,
@@ -202,6 +202,8 @@ class PrefsController:
         self,
         on_save: Callable[[Settings], None] | None = None,
         on_apply: Callable[[Settings], None] | None = None,
+        *,
+        current_settings: Settings | None = None,
     ) -> ValidationReport:
         """Validate and, if clean, persist + apply the staged settings.
 
@@ -214,13 +216,35 @@ class PrefsController:
         report = self.validate()
         if not report.ok:
             return report
+        candidate = (
+            self._snapshot(current_settings) if current_settings is not None else self.staged
+        )
+        if current_settings is not None:
+            for name in (
+                "gap",
+                "launch_at_login",
+                "cycle_idle_timeout",
+                "drag_to_edge_enabled",
+                "almost_maximize_scale",
+            ):
+                if getattr(self.staged, name) != getattr(self.baseline, name):
+                    setattr(candidate, name, getattr(self.staged, name))
+            for action in self.baseline.shortcuts.keys() | self.staged.shortcuts.keys():
+                if self.staged.shortcuts.get(action) != self.baseline.shortcuts.get(action):
+                    if action in self.staged.shortcuts:
+                        candidate.shortcuts[action] = self.staged.shortcuts[action]
+                    else:
+                        candidate.shortcuts.pop(action, None)
+            report = PrefsController(candidate).validate()
+            if not report.ok:
+                return report
         if on_save is not None:
-            on_save(self.staged)
+            on_save(candidate)
         if on_apply is not None:
-            on_apply(self.staged)
+            on_apply(candidate)
         # Promote staged → baseline; copy so further edits don't mutate
         # what we just handed to the callbacks.
-        self.baseline = self._snapshot(self.staged)
+        self.baseline = self._snapshot(candidate)
         self.staged = self._snapshot(self.baseline)
         return report
 
@@ -232,7 +256,7 @@ class PrefsController:
         """Replace staged shortcuts with `DEFAULT_SHORTCUTS`.
 
         Useful for the dialog's "Reset shortcuts" button: a user who's
-        rebound several actions and now wants the macOS-Rectangle
+        rebound several actions and now wants the default Rectangle
         defaults back doesn't have to retype each combo.
 
         Leaves non-shortcut fields (gap, drag-to-edge, etc.) untouched —
@@ -289,7 +313,7 @@ def open_prefs_window(
     if not dlg.exec():
         return None
     on_save = ctx.config_store.save if ctx.config_store is not None else None
-    return pc.commit(on_save=on_save, on_apply=ctx.apply_settings)
+    return pc.commit(on_save=on_save, on_apply=ctx.apply_settings, current_settings=ctx.settings)
 
 
 # Structural alias for AppContext — we only touch four attributes, so
@@ -299,3 +323,469 @@ class AppContextLike:  # pragma: no cover — typing only
     config_store: object | None
 
     def apply_settings(self, settings: Settings) -> None: ...
+
+
+# ----- modeless Qt preferences window ---------------------------------
+
+
+def ordered_actions() -> list[Action]:
+    return list(Action)
+
+
+def action_label(action: Action) -> str:
+    from .cheat_sheet import ACTION_LABELS
+
+    return ACTION_LABELS[action].title()
+
+
+def _sequence_text(button) -> str:
+    from PySide6 import QtGui
+
+    return button.keySequence().toString(QtGui.QKeySequence.PortableText)
+
+
+def _qt_sequence_text(combo: str) -> str:
+    if not combo:
+        return ""
+    try:
+        combo = normalise_combo(combo)
+    except ShortcutParseError:
+        return combo  # Keep malformed stored bindings visible to validation.
+    return combo.replace("win+", "Meta+").replace("pageup", "PgUp").replace("pagedown", "PgDown")
+
+
+def _canonical_sequence_text(text: str) -> str:
+    return normalise_combo(text.replace("PgUp", "PageUp").replace("PgDown", "PageDown"))
+
+
+def _record_shortcut(parent, action_name: str, qt_core, qt_gui, qt_widgets):
+    dialog = qt_widgets.QDialog(parent)
+    dialog.setObjectName("recordShortcutDialog")
+    dialog.setWindowTitle(f"Record Shortcut — {action_name}")
+    layout = qt_widgets.QVBoxLayout(dialog)
+    layout.addWidget(qt_widgets.QLabel("Press the shortcut you want to use."))
+    editor = qt_widgets.QKeySequenceEdit(dialog)
+    editor.setObjectName("recordShortcutEditor")
+    editor.setAccessibleName(f"Record {action_name} shortcut")
+    layout.addWidget(editor)
+    buttons = qt_widgets.QDialogButtonBox(
+        qt_widgets.QDialogButtonBox.Ok | qt_widgets.QDialogButtonBox.Cancel
+    )
+    clear = buttons.addButton("Clear", qt_widgets.QDialogButtonBox.ActionRole)
+    clear.clicked.connect(lambda: (editor.clear(), dialog.accept()))
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    editor.setFocus()
+    return editor.keySequence() if dialog.exec() == qt_widgets.QDialog.Accepted else None
+
+
+class PreferencesController:
+    def __init__(
+        self,
+        ctx,
+        window,
+        shortcut_widgets,
+        rows,
+        sections,
+        status_label,
+        save_button,
+        apply_button,
+        gap_spin,
+        cycle_spin,
+        almost_spin,
+        drag_checkbox,
+        launch_checkbox,
+    ):
+        self.ctx = ctx
+        self.window = window
+        self.shortcut_widgets = shortcut_widgets
+        self.rows = rows
+        self.sections = sections
+        self.status_label = status_label
+        self.save_button = save_button
+        self.apply_button = apply_button
+        self.gap_spin = gap_spin
+        self.cycle_spin = cycle_spin
+        self.almost_spin = almost_spin
+        self.drag_checkbox = drag_checkbox
+        self.launch_checkbox = launch_checkbox
+        self.dirty = False
+
+    def load_settings(self, settings: Settings) -> None:
+        from PySide6 import QtGui
+
+        self._baseline = copy.deepcopy(settings)
+        controls = (
+            self.gap_spin,
+            self.cycle_spin,
+            self.almost_spin,
+            self.drag_checkbox,
+            self.launch_checkbox,
+        )
+        for control in controls:
+            control.blockSignals(True)
+        self.gap_spin.setValue(settings.gap)
+        self.cycle_spin.setValue(settings.cycle_idle_timeout)
+        self.almost_spin.setValue(round(settings.almost_maximize_scale * 100))
+        self.drag_checkbox.setChecked(settings.drag_to_edge_enabled)
+        self.launch_checkbox.setChecked(settings.launch_at_login)
+        for control in controls:
+            control.blockSignals(False)
+        self._baseline_cycle_value = self.cycle_spin.value()
+        for action, button in self.shortcut_widgets.items():
+            combo = _qt_sequence_text(settings.shortcuts.get(action, ""))
+            button.setKeySequence(QtGui.QKeySequence(combo))
+        self._baseline_sequences = {
+            action: _sequence_text(button) for action, button in self.shortcut_widgets.items()
+        }
+        self.dirty = False
+        self._refresh_status()
+
+    def collect_settings(self) -> Settings:
+        settings = copy.deepcopy(self.ctx.settings)
+        values = {
+            "gap": self.gap_spin.value(),
+            "cycle_idle_timeout": self.cycle_spin.value(),
+            "almost_maximize_scale": self.almost_spin.value() / 100,
+            "drag_to_edge_enabled": self.drag_checkbox.isChecked(),
+            "launch_at_login": self.launch_checkbox.isChecked(),
+        }
+        for name, value in values.items():
+            baseline = getattr(self._baseline, name)
+            if name == "almost_maximize_scale":
+                baseline = round(baseline * 100) / 100
+            elif name == "cycle_idle_timeout":
+                baseline = self._baseline_cycle_value
+            if value != baseline:
+                setattr(settings, name, value)
+        for action, button in self.shortcut_widgets.items():
+            text = _sequence_text(button)
+            if text != self._baseline_sequences[action]:
+                combo = _canonical_sequence_text(text) if text else ""
+                if combo:
+                    settings.shortcuts[action] = combo
+                else:
+                    settings.shortcuts.pop(action, None)
+        return settings
+
+    def _validation(self):
+        try:
+            candidate = self.collect_settings()
+        except ShortcutParseError as exc:
+            return None, f"Invalid shortcut: {exc}", "error"
+        duplicate = shortcut_conflicts(
+            {action.value: combo for action, combo in candidate.shortcuts.items()}
+        )
+        if duplicate:
+            return None, "Shortcut duplicates: only one command can use each combo", "error"
+        report = PrefsController(candidate).validate()
+        if report.errors:
+            return None, report.errors[0], "error"
+        if report.warnings:
+            return candidate, report.warnings[0], "warning"
+        return (
+            candidate,
+            "Unsaved changes" if self.dirty else "All changes saved",
+            "dirty" if self.dirty else "saved",
+        )
+
+    def _refresh_status(self) -> None:
+        _candidate, message, state = self._validation()
+        self.status_label.setText(message)
+        self.status_label.setProperty("status", state)
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
+        self.save_button.setEnabled(state != "error" and self.dirty)
+        self.apply_button.setEnabled(state != "error" and self.dirty)
+
+    def mark_dirty(self) -> None:
+        self.dirty = any(
+            (
+                self.gap_spin.value() != self._baseline.gap,
+                self.cycle_spin.value() != self._baseline_cycle_value,
+                self.almost_spin.value() != round(self._baseline.almost_maximize_scale * 100),
+                self.drag_checkbox.isChecked() != self._baseline.drag_to_edge_enabled,
+                self.launch_checkbox.isChecked() != self._baseline.launch_at_login,
+            )
+        )
+        if not self.dirty:
+            self.dirty = any(
+                _sequence_text(button) != self._baseline_sequences[action]
+                for action, button in self.shortcut_widgets.items()
+            )
+        self._refresh_status()
+
+    def record_action(self, action: Action) -> None:
+        from PySide6 import QtCore, QtGui, QtWidgets
+
+        hotkeys = getattr(self.ctx, "hotkeys", None)
+        if hotkeys is not None:
+            hotkeys.unregister_all()
+        try:
+            sequence = _record_shortcut(self.window, action_label(action), QtCore, QtGui, QtWidgets)
+        finally:
+            if hotkeys is not None:
+                self.ctx.rebind_hotkeys()
+        if sequence is not None:
+            self.shortcut_widgets[action].setKeySequence(sequence)
+            self.mark_dirty()
+
+    def save(self, *, close: bool) -> None:
+        candidate, _message, state = self._validation()
+        if state == "error" or candidate is None or not self.dirty:
+            return
+        try:
+            if self.ctx.config_store is not None:
+                self.ctx.config_store.save(candidate)
+            retry_failed_bindings = (
+                candidate.shortcuts == self.ctx.settings.shortcuts
+                and getattr(getattr(self.ctx, "last_binding_report", None), "failed_count", 0) > 0
+            )
+            self.ctx.apply_settings(candidate)
+            if retry_failed_bindings:
+                self.ctx.rebind_hotkeys()
+        except Exception as exc:  # noqa: BLE001 — surface save failures without losing edits
+            self.status_label.setText(f"Could not save preferences: {exc}")
+            self.status_label.setProperty("status", "error")
+            return
+        self.load_settings(self.ctx.settings)
+        if close:
+            self.window.hide()
+
+
+def show(ctx) -> PreferencesController:
+    from PySide6 import QtCore, QtWidgets
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    existing = getattr(app, "_windows_rectangle_preferences", None)
+    if isinstance(existing, PreferencesController):
+        if not existing.dirty:
+            existing.load_settings(ctx.settings)
+        existing.window.show()
+        existing.window.raise_()
+        existing.window.activateWindow()
+        return existing
+    controller = _build_window(ctx, QtCore, QtWidgets)
+    app._windows_rectangle_preferences = controller
+    controller.window.show()
+    return controller
+
+
+def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
+    from PySide6 import QtGui
+
+    from .logo import build_logo_pixmap, build_qicon
+
+    class ShortcutButton(qt_widgets.QPushButton):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._sequence = QtGui.QKeySequence()
+
+        def keySequence(self):
+            return self._sequence
+
+        def setKeySequence(self, sequence):
+            self._sequence = sequence
+            self.setText(sequence.toString(QtGui.QKeySequence.PortableText) or "Unassigned")
+
+    window = qt_widgets.QDialog()
+    window.setObjectName("preferencesWindow")
+    window.setWindowTitle("Windows Rectangle")
+    window.setWindowIcon(build_qicon(QtGui))
+    window.setMinimumSize(600, 400)
+    available = qt_widgets.QApplication.primaryScreen().availableGeometry()
+    window.resize(min(920, available.width() - 32), min(700, available.height() - 48))
+    window.setFont(QtGui.QFont("Segoe UI", 10))
+    root = qt_widgets.QVBoxLayout(window)
+    root.setContentsMargins(22, 18, 22, 18)
+    root.setSpacing(14)
+
+    header = qt_widgets.QHBoxLayout()
+    brand = qt_widgets.QFrame()
+    brand.setObjectName("brandLogoPanel")
+    brand.setAccessibleName("Application logo")
+    brand.setMinimumSize(196, 56)
+    brand_layout = qt_widgets.QHBoxLayout(brand)
+    logo = qt_widgets.QLabel()
+    logo.setObjectName("brandLogo")
+    logo.setAccessibleName("Application logo image")
+    logo.setPixmap(build_logo_pixmap(QtGui))
+    brand_layout.addWidget(logo)
+    header.addWidget(brand)
+    heading = qt_widgets.QLabel("Windows Rectangle")
+    heading.setObjectName("preferencesHeading")
+    header.addWidget(heading, 1)
+    root.addLayout(header)
+
+    tabs = qt_widgets.QTabWidget()
+    tabs.setObjectName("preferencesTabs")
+    root.addWidget(tabs, 1)
+    shortcuts_page = qt_widgets.QWidget()
+    shortcut_layout = qt_widgets.QVBoxLayout(shortcuts_page)
+    search = qt_widgets.QLineEdit()
+    search.setObjectName("shortcutSearch")
+    search.setPlaceholderText("Search commands")
+    search.setAccessibleName("Search commands")
+    search.setClearButtonEnabled(True)
+    shortcut_layout.addWidget(search)
+
+    def focus_search() -> None:
+        tabs.setCurrentIndex(0)
+        search.setFocus()
+
+    find_shortcut = QtGui.QShortcut(QtGui.QKeySequence.Find, window)
+    find_shortcut.activated.connect(focus_search)
+    clear_search_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Escape"), search)
+    clear_search_shortcut.setContext(qt_core.Qt.WidgetShortcut)
+    clear_search_shortcut.activated.connect(search.clear)
+    scroll = qt_widgets.QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(qt_widgets.QFrame.NoFrame)
+    content = qt_widgets.QWidget()
+    rows_layout = qt_widgets.QVBoxLayout(content)
+    rows_layout.setSpacing(5)
+    sections: dict[str, tuple[object, list[Action]]] = {}
+    rows: dict[Action, object] = {}
+    shortcut_widgets: dict[Action, object] = {}
+
+    def section_for(action: Action) -> str:
+        name = action.value
+        if "sixth" in name:
+            return "Sixths"
+        if "half" in name:
+            return "Halves"
+        if "quarter" in name or "fourth" in name:
+            return "Quarters"
+        if "third" in name:
+            return "Thirds"
+        if "display" in name:
+            return "Displays"
+        return "Other commands"
+
+    groups: dict[str, list[Action]] = {}
+    for action in ordered_actions():
+        groups.setdefault(section_for(action), []).append(action)
+    for section_name, actions in groups.items():
+        label = qt_widgets.QLabel(section_name)
+        label.setObjectName("sectionHeading")
+        rows_layout.addWidget(label)
+        sections[section_name] = (label, actions)
+        for action in actions:
+            row = qt_widgets.QFrame()
+            row.setObjectName("shortcutRow")
+            row.setProperty("action", action.value)
+            row_layout = qt_widgets.QHBoxLayout(row)
+            row_layout.setContentsMargins(10, 3, 10, 3)
+            row_layout.addWidget(qt_widgets.QLabel(action_label(action)), 1)
+            button = ShortcutButton()
+            button.setObjectName("shortcutButton")
+            button.setToolTip("Record Shortcut")
+            button.setAccessibleName(f"{action_label(action)} shortcut")
+            button.setMinimumSize(220, 34)
+            row_layout.addWidget(button)
+            rows_layout.addWidget(row)
+            rows[action] = row
+            shortcut_widgets[action] = button
+    no_results = qt_widgets.QLabel("No commands found. Try another search.")
+    no_results.setObjectName("noShortcutsFound")
+    no_results.setAccessibleName("No matching shortcuts")
+    no_results.hide()
+    rows_layout.addWidget(no_results)
+    rows_layout.addStretch(1)
+    scroll.setWidget(content)
+    shortcut_layout.addWidget(scroll, 1)
+    tabs.addTab(shortcuts_page, "Shortcuts")
+
+    general_page = qt_widgets.QWidget()
+    general_layout = qt_widgets.QFormLayout(general_page)
+    gap_spin = qt_widgets.QSpinBox()
+    gap_spin.setRange(GAP_MIN, GAP_MAX)
+    cycle_spin = qt_widgets.QDoubleSpinBox()
+    cycle_spin.setRange(CYCLE_TIMEOUT_MIN, CYCLE_TIMEOUT_MAX)
+    cycle_spin.setSingleStep(0.1)
+    almost_spin = qt_widgets.QSpinBox()
+    almost_spin.setRange(10, 100)
+    almost_spin.setSuffix(" %")
+    drag_checkbox = qt_widgets.QCheckBox("Snap windows when dragged to screen edges")
+    launch_checkbox = qt_widgets.QCheckBox("Launch at login")
+    general_layout.addRow("Gap between windows", gap_spin)
+    general_layout.addRow("Repeat-key cycle timeout", cycle_spin)
+    general_layout.addRow("Almost-maximize size", almost_spin)
+    general_layout.addRow(drag_checkbox)
+    general_layout.addRow(launch_checkbox)
+    tabs.addTab(general_page, "General")
+
+    status = qt_widgets.QLabel()
+    status.setObjectName("preferencesStatus")
+    status.setWordWrap(True)
+    root.addWidget(status)
+    buttons = qt_widgets.QDialogButtonBox()
+    save_button = buttons.addButton("Save", qt_widgets.QDialogButtonBox.AcceptRole)
+    apply_button = buttons.addButton("Apply", qt_widgets.QDialogButtonBox.ApplyRole)
+    restore_button = buttons.addButton("Restore Defaults", qt_widgets.QDialogButtonBox.ResetRole)
+    root.addWidget(buttons)
+    controller = PreferencesController(
+        ctx,
+        window,
+        shortcut_widgets,
+        rows,
+        sections,
+        status,
+        save_button,
+        apply_button,
+        gap_spin,
+        cycle_spin,
+        almost_spin,
+        drag_checkbox,
+        launch_checkbox,
+    )
+    window.controller = controller
+    controller.load_settings(ctx.settings)
+
+    def filter_shortcuts(query: str) -> None:
+        tokens = query.casefold().split()
+        matches = 0
+        for name, (label, actions) in sections.items():
+            any_visible = False
+            for action in actions:
+                haystack = f"{name} {action_label(action)}".casefold().replace("sixths", "six")
+                visible = all(token in haystack for token in tokens)
+                rows[action].setVisible(visible)
+                any_visible |= visible
+                matches += visible
+            label.setVisible(any_visible)
+        no_results.setVisible(matches == 0)
+
+    search.textChanged.connect(filter_shortcuts)
+    for action, button in shortcut_widgets.items():
+        button.clicked.connect(
+            lambda _checked=False, selected=action: controller.record_action(selected)
+        )
+    for control in (gap_spin, cycle_spin, almost_spin, drag_checkbox, launch_checkbox):
+        if hasattr(control, "valueChanged"):
+            control.valueChanged.connect(controller.mark_dirty)
+        else:
+            control.toggled.connect(controller.mark_dirty)
+    save_button.clicked.connect(lambda: controller.save(close=True))
+    apply_button.clicked.connect(lambda: controller.save(close=False))
+
+    def restore_defaults():
+        for action, button in shortcut_widgets.items():
+            combo = _qt_sequence_text(DEFAULT_SHORTCUTS.get(action, ""))
+            button.setKeySequence(QtGui.QKeySequence(combo))
+        controller.mark_dirty()
+
+    restore_button.clicked.connect(restore_defaults)
+    window.setStyleSheet("""
+        QDialog#preferencesWindow { background: #f5f7fb; color: #172338; }
+        QFrame#brandLogoPanel { background: #172338; border-radius: 8px; }
+        QLabel#preferencesHeading { font-family: 'Segoe UI Variable Display', 'Segoe UI';
+            font-size: 23px; font-weight: 650; color: #172338; }
+        QLabel#sectionHeading { color: #4268a3; font-weight: 700; padding-top: 12px; }
+        QFrame#shortcutRow { background: #ffffff; border: 1px solid #dce4f0; border-radius: 6px; }
+        QPushButton#shortcutButton { text-align: left; padding-left: 12px; }
+        QLabel#preferencesStatus[status="error"] { color: #a52323; }
+        QLabel#preferencesStatus[status="warning"] { color: #80540c; }
+    """)
+    return controller

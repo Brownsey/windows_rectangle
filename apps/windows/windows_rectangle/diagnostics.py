@@ -38,7 +38,7 @@ class DiagnosticReport:
     """Outcome of a `--check-install` run.
 
     `ok` is True iff every required check passed. Optional probes
-    (e.g. pywin32 on a non-Windows host) don't gate it.
+    (e.g. Qt in a source/headless install) don't gate it.
     """
 
     version: str
@@ -123,16 +123,17 @@ def collect_diagnostic_report(
         _check("windows_rectangle.app"),
         _check("windows_rectangle.adapters.json_config"),
     ]
-    # PySide6 + pywin32 are technically optional (the headless path works
-    # without them), but a user expecting the tray UX needs both.
-    optional = [
-        _check("PySide6"),
-    ]
+    if getattr(sys, "frozen", False):
+        # A distributed GUI build must load the actual Qt DLLs, not just the
+        # PySide6 namespace. Source/headless installs keep Qt optional.
+        required.extend(
+            _check(name) for name in ("PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets")
+        )
+    # The source/headless path needs only stdlib native bindings. Frozen GUI
+    # builds also require the actual Qt imports checked above.
+    optional = [_check("PySide6")]
     if on_windows:
-        # On Windows pywin32 is essentially required for the tray
-        # experience, but the headless mode + the diagnostic itself
-        # don't need it — keep in optional, not required.
-        optional.append(_check("win32api"))
+        required.append(_check("ctypes"))
 
     cfg_path: Path = config_path_factory()
     return DiagnosticReport(

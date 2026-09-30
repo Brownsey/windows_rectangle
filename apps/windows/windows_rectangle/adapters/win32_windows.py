@@ -20,7 +20,7 @@ import ntpath
 import sys
 from typing import TYPE_CHECKING
 
-from ..core.borders import BorderInsets, measure, to_outer_rect, to_visible_rect
+from ..core.borders import BorderInsets, measure, to_outer_rect
 from ..core.eligibility import WindowFlags
 from ..core.geometry import Rect
 from ..core.workspaces import WindowIdentity
@@ -52,6 +52,8 @@ _DWMWA_CLOAKED = 14
 
 _MONITORINFOF_PRIMARY = 0x00000001
 _MONITOR_DEFAULTTONEAREST = 0x00000002
+_GUI_INMOVESIZE = 0x0002
+_VK_ESCAPE = 0x1B
 
 # SetWindowPos flags
 _HWND_TOPMOST = -1
@@ -81,6 +83,42 @@ class Win32WindowManager:
 
         # Signatures we care about (typed for safety where it matters).
         self._user32.GetForegroundWindow.restype = wintypes.HWND
+        self._user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        self._user32.GetWindowRect.restype = wintypes.BOOL
+        self._dwm.DwmGetWindowAttribute.argtypes = [
+            wintypes.HWND,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        self._dwm.DwmGetWindowAttribute.restype = ctypes.c_long
+        self._user32.GetWindowPlacement.argtypes = [wintypes.HWND, ctypes.c_void_p]
+        self._user32.GetWindowPlacement.restype = wintypes.BOOL
+        self._user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        self._user32.MonitorFromWindow.restype = wintypes.HMONITOR
+        self._user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.c_void_p]
+        self._user32.GetMonitorInfoW.restype = wintypes.BOOL
+        self._monitor_enum_proc = ctypes.WINFUNCTYPE(
+            wintypes.BOOL,
+            wintypes.HMONITOR,
+            wintypes.HDC,
+            ctypes.POINTER(wintypes.RECT),
+            wintypes.LPARAM,
+        )
+        self._user32.EnumDisplayMonitors.argtypes = [
+            wintypes.HDC,
+            ctypes.POINTER(wintypes.RECT),
+            self._monitor_enum_proc,
+            wintypes.LPARAM,
+        ]
+        self._user32.EnumDisplayMonitors.restype = wintypes.BOOL
+        self._window_enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        self._user32.EnumWindows.argtypes = [self._window_enum_proc, wintypes.LPARAM]
+        self._user32.EnumWindows.restype = wintypes.BOOL
+        self._user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.c_void_p]
+        self._user32.GetGUIThreadInfo.restype = wintypes.BOOL
+        self._user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+        self._user32.GetAsyncKeyState.restype = wintypes.SHORT
         self._user32.IsWindow.argtypes = [wintypes.HWND]
         self._user32.IsWindow.restype = wintypes.BOOL
         self._user32.IsIconic.argtypes = [wintypes.HWND]
@@ -98,8 +136,8 @@ class Win32WindowManager:
             wintypes.UINT,
         ]
         self._user32.SetWindowPos.restype = wintypes.BOOL
-        self._user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-        self._user32.ShowWindow.restype = wintypes.BOOL
+        self._user32.ShowWindowAsync.argtypes = [wintypes.HWND, ctypes.c_int]
+        self._user32.ShowWindowAsync.restype = wintypes.BOOL
         self._user32.IsWindowVisible.argtypes = [wintypes.HWND]
         self._user32.IsWindowVisible.restype = wintypes.BOOL
         self._user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
@@ -170,8 +208,20 @@ class Win32WindowManager:
 
     def get_window_rect(self, handle: WindowHandle) -> Rect:
         """Return the *visible* rect — we hide the invisible border from core."""
-        outer = self._outer_rect(handle)
-        return to_visible_rect(outer, self._insets(handle))
+        return self._extended_frame(handle) or self._outer_rect(handle)
+
+    def get_drag_window(self) -> WindowHandle | None:
+        """Return the HWND in the foreground thread's native move/size loop."""
+        info = _GUITHREADINFO(self._ct, self._wt)
+        info.cbSize = self._ct.sizeof(info)
+        if not self._user32.GetGUIThreadInfo(0, self._ct.byref(info)):
+            return None
+        if not info.flags & _GUI_INMOVESIZE or not info.hwndMoveSize:
+            return None
+        return int(info.hwndMoveSize)
+
+    def is_escape_pressed(self) -> bool:
+        return bool(self._user32.GetAsyncKeyState(_VK_ESCAPE) & 0x8000)
 
     def set_window_rect(self, handle: WindowHandle, rect: Rect) -> bool:
         # Expand the visible rect we were handed into the outer rect Win32 expects.
@@ -228,7 +278,7 @@ class Win32WindowManager:
         return wp.showCmd == _SW_SHOWMAXIMIZED
 
     def restore_window(self, handle: WindowHandle) -> None:
-        self._user32.ShowWindow(self._hwnd(handle), _SW_RESTORE)
+        self._user32.ShowWindowAsync(self._hwnd(handle), _SW_RESTORE)
 
     def is_always_on_top(self, handle: WindowHandle) -> bool:
         ex_style = self._user32.GetWindowLongW(self._hwnd(handle), _GWL_EXSTYLE)
@@ -236,7 +286,7 @@ class Win32WindowManager:
 
     def set_always_on_top(self, handle: WindowHandle, enabled: bool) -> bool:
         insert_after = self._wt.HWND(_HWND_TOPMOST if enabled else _HWND_NOTOPMOST)
-        flags = _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE
+        flags = _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_ASYNCWINDOWPOS
         ok = self._user32.SetWindowPos(self._hwnd(handle), insert_after, 0, 0, 0, 0, flags)
         if not ok:
             _log.info(
@@ -253,9 +303,6 @@ class Win32WindowManager:
 
         # EnumDisplayMonitors callback prototype:
         # BOOL CALLBACK(HMONITOR, HDC, LPRECT, LPARAM)
-        MonitorEnumProc = ct.WINFUNCTYPE(
-            wt.BOOL, wt.HMONITOR, wt.HDC, ct.POINTER(wt.RECT), wt.LPARAM
-        )
 
         def callback(hmon, hdc, lprect, lparam):
             info = _MONITORINFO(ct, wt)
@@ -274,7 +321,7 @@ class Win32WindowManager:
             )
             return True
 
-        self._user32.EnumDisplayMonitors(None, None, MonitorEnumProc(callback), 0)
+        self._user32.EnumDisplayMonitors(None, None, self._monitor_enum_proc(callback), 0)
         return monitors
 
     def monitor_for_window(self, handle: WindowHandle) -> MonitorInfo | None:
@@ -301,9 +348,7 @@ class Win32WindowManager:
     def list_windows(self) -> list[WindowIdentity]:
         """Enumerate visible, user-manageable top-level windows in z-order."""
         ct = self._ct
-        wt = self._wt
         windows: list[WindowIdentity] = []
-        enum_proc = ct.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
 
         def callback(hwnd, _lparam):
             handle = int(hwnd)
@@ -321,7 +366,7 @@ class Win32WindowManager:
             windows.append(WindowIdentity(handle, title, self._process_name(hwnd)))
             return True
 
-        self._user32.EnumWindows(enum_proc(callback), 0)
+        self._user32.EnumWindows(self._window_enum_proc(callback), 0)
         return windows
 
     def _process_name(self, hwnd: int) -> str:
@@ -389,3 +434,20 @@ def _WINDOWPLACEMENT(ct, wt):
         ]
 
     return WINDOWPLACEMENT()
+
+
+def _GUITHREADINFO(ct, wt):
+    class GUITHREADINFO(ct.Structure):
+        _fields_ = [
+            ("cbSize", wt.DWORD),
+            ("flags", wt.DWORD),
+            ("hwndActive", wt.HWND),
+            ("hwndFocus", wt.HWND),
+            ("hwndCapture", wt.HWND),
+            ("hwndMenuOwner", wt.HWND),
+            ("hwndMoveSize", wt.HWND),
+            ("hwndCaret", wt.HWND),
+            ("rcCaret", wt.RECT),
+        ]
+
+    return GUITHREADINFO()

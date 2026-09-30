@@ -12,6 +12,7 @@ import sys
 import time
 
 import pytest
+
 from windows_rectangle.adapters.win32_hotkeys import Win32Hotkeys
 from windows_rectangle.ports.hotkeys import HotkeyRegistrationError
 
@@ -71,3 +72,46 @@ def test_shutdown_stops_thread():
     # Give the thread a moment to wind down.
     time.sleep(0.1)
     assert not h._thread.is_alive()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="win32 only")
+def test_pump_startup_failure_raises_from_constructor(monkeypatch):
+    def fail_start(_self):
+        raise OSError("pump failed")
+
+    monkeypatch.setattr(Win32Hotkeys, "_run_pump", fail_start)
+    with pytest.raises(RuntimeError, match="pump failed"):
+        Win32Hotkeys()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="win32 only")
+def test_register_after_shutdown_fails_immediately():
+    h = Win32Hotkeys()
+    h.shutdown()
+    with pytest.raises(HotkeyRegistrationError, match="stopped"):
+        h.register("ctrl+alt+shift+f24", lambda: None)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="win32 only")
+def test_failed_wakeup_cannot_register_later(monkeypatch):
+    h = Win32Hotkeys()
+    real_wake = h._wake_pump
+    try:
+        monkeypatch.setattr(h, "_wake_pump", lambda: False)
+        with pytest.raises(HotkeyRegistrationError, match="wake"):
+            h.register("ctrl+alt+shift+f22", lambda: None)
+        monkeypatch.setattr(h, "_wake_pump", real_wake)
+        live_id = h.register("ctrl+alt+shift+f23", lambda: None)
+        assert set(h._callbacks) == {live_id}
+    finally:
+        monkeypatch.setattr(h, "_wake_pump", real_wake)
+        h.shutdown()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="win32 only")
+def test_unregister_after_shutdown_fails_immediately():
+    h = Win32Hotkeys()
+    hotkey_id = h.register("ctrl+alt+shift+f24", lambda: None)
+    h.shutdown()
+    with pytest.raises(RuntimeError, match="stopped"):
+        h.unregister(hotkey_id)

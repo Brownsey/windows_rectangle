@@ -9,13 +9,12 @@ from __future__ import annotations
 import json
 
 from windows_rectangle.core.geometry import Rect
-from windows_rectangle.ports.window_manager import MonitorInfo
-
 from windows_rectangle.monitors_view import (
     monitors_to_dicts,
     monitors_to_json,
     monitors_to_text,
 )
+from windows_rectangle.ports.window_manager import MonitorInfo
 
 
 def _make(handle: int, x: int, y: int, w: int, h: int, *, taskbar: int = 40, primary: bool = False):

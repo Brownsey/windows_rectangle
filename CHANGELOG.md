@@ -1,6 +1,6 @@
 # Changelog
 
-User-facing notable changes. The technical brief lives in [`BRIEF.md`](BRIEF.md);
+User-facing notable changes. The technical brief lives in [`apps/windows/BRIEF.md`](apps/windows/BRIEF.md);
 this file tracks what shipped from a user's point of view.
 
 The project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -9,13 +9,18 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- One-shot **`Build-Exe.ps1`** / `Build-Exe.bat` build the single-file
-  `dist\WindowsRectangle.exe` and auto-install the runtime deps
-  (PyInstaller, PySide6, pywin32). `-InstallStartMenuShortcut` drops a
-  per-user `.lnk` into the Start Menu; `-Launch` starts the freshly-
-  built .exe so a contributor can install + run in one step. The
-  script refuses < Python 3.11 and won't try to overwrite a running
-  WindowsRectangle.exe.
+- Windows-only source, tests, CI and documentation, with redundant vendored and
+  duplicate source trees removed. See [review evidence](REVIEW.md).
+- `Build-Exe.ps1` / `Build-Exe.bat` delegate to the canonical portable-folder
+  build in `scripts/build-windows.ps1`. Distribute the full
+  `apps/windows/exe` folder or its versioned ZIP; the executable requires
+  its adjacent `_internal` directory.
+- Native drag detection, exact release-target snapping, bounded input draining,
+  strict configuration validation, safer undo and concurrent workspace editing.
+- Modeless Preferences with searchable commands and shortcut recording; closing
+  Preferences leaves the tray running. Explicit `--tray` and
+  `--open-preferences` startup modes.
+- Repeatable workspace-matching benchmark and Windows native integration checks.
 - **`Uninstall-WindowsRectangle.ps1`** — stops a live tray copy,
   removes the per-user Start-Menu shortcut, removes the
   `HKCU\…\Run\WindowsRectangle` autostart entry. Pass `-PurgeConfig`
@@ -25,7 +30,7 @@ Dates are absolute (YYYY-MM-DD). Versions follow [SemVer](https://semver.org/).
   a tray copy is open.
 - **`--check-install`** / **`--check-install-json`** self-diagnostic
   — version, Python info, dep importability for `core/`, `ports/`,
-  `adapters/json_config`, plus optional PySide6 / pywin32 probes, and
+  `adapters/json_config`, plus Qt and native-runtime probes, and
   the on-disk config path. Exits 0/1 so it pipes into CI. Backed by
   `windows_rectangle.diagnostics` (pure, 100% test-covered).
 - **`CONTRIBUTING.md`** — fast-path commands, project layout,

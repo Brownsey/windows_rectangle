@@ -166,21 +166,65 @@ def match_workspace_windows(
     placements: tuple[WorkspacePlacement, ...], windows: list[WindowIdentity]
 ) -> WorkspaceMatches:
     """Match rules one-to-one without applying any geometry."""
-    available = list(windows)
-    matches: list[MatchedWindow] = []
-    unmatched: list[str] = []
+    unique_windows: dict[object, WindowIdentity] = {}
+    for window in windows:
+        unique_windows.setdefault(window.handle, window)
+    windows = list(unique_windows.values())
+    window_keys = [
+        (window.process_name.casefold().removesuffix(".exe"), window.title.casefold())
+        for window in windows
+    ]
+
+    candidates: list[list[int]] = []
     for placement in placements:
-        ranked = sorted(
-            enumerate(available),
-            key=lambda item: (-placement.matcher.score(item[1]), item[0]),
+        matcher = placement.matcher
+        process = (
+            matcher.process_name.casefold().removesuffix(".exe") if matcher.process_name else None
         )
-        if not ranked or placement.matcher.score(ranked[0][1]) == 0:
-            unmatched.append(placement.id)
-            continue
-        index, window = ranked[0]
-        available.pop(index)
-        matches.append(MatchedWindow(placement.id, window.handle))
-    return WorkspaceMatches(tuple(matches), tuple(unmatched))
+        title = matcher.title_contains.casefold() if matcher.title_contains else None
+        regex = re.compile(matcher.title_regex, re.IGNORECASE) if matcher.title_regex else None
+        matches: list[int] = []
+        for index, (window_process, window_title) in enumerate(window_keys):
+            if process is not None and process != window_process:
+                continue
+            if title is not None and title not in window_title:
+                continue
+            if regex is not None and regex.search(windows[index].title) is None:
+                continue
+            matches.append(index)
+        candidates.append(matches)
+
+    owners: dict[int, int] = {}
+
+    def assign(placement_index: int, seen: set[int]) -> bool:
+        for window_index in candidates[placement_index]:
+            if window_index not in owners:
+                owners[window_index] = placement_index
+                return True
+        for window_index in candidates[placement_index]:
+            if window_index in seen:
+                continue
+            seen.add(window_index)
+            if assign(owners[window_index], seen):
+                owners[window_index] = placement_index
+                return True
+        return False
+
+    for placement_index in sorted(range(len(placements)), key=lambda i: len(candidates[i])):
+        assign(placement_index, set())
+
+    assigned = {
+        placement_index: windows[window_index].handle
+        for window_index, placement_index in owners.items()
+    }
+    return WorkspaceMatches(
+        tuple(
+            MatchedWindow(placement.id, assigned[index])
+            for index, placement in enumerate(placements)
+            if index in assigned
+        ),
+        tuple(placement.id for index, placement in enumerate(placements) if index not in assigned),
+    )
 
 
 def plan_workspace(
@@ -190,9 +234,9 @@ def plan_workspace(
 ) -> WorkspacePlan:
     """Match each placement to at most one window, deterministically.
 
-    Highest-specificity matches win. Ties keep OS enumeration order. A window
-    can never be assigned twice, which prevents broad rules from stealing the
-    same RuneScape/Chrome instance from a later placement.
+    Rules with fewer candidate windows take priority. Ties keep placement
+    order; candidate ties keep OS enumeration order. A window can never be
+    assigned twice, and overlapping rules can be reassigned to avoid misses.
     """
     eligible = tuple(
         placement for placement in workspace.placements if placement.monitor_index < len(work_areas)

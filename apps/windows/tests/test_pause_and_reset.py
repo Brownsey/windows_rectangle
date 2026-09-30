@@ -12,11 +12,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
+
 from windows_rectangle.app import bind_hotkeys_via_bus, build
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.core.geometry import Rect
 from windows_rectangle.ports.config_store import Settings
-
 from windows_rectangle.ui.preferences import PrefsController
 
 from .conftest import FakeWindowManager, make_monitor
@@ -125,6 +125,21 @@ def test_pause_marks_report_entries_as_paused(windows):
     assert rep.bound_count == 0
     assert rep.would_bind_count == n_would_before
     assert rep.failed_count == 0  # no real failures, just paused
+
+
+def test_editing_shortcuts_while_paused_defers_registration_until_resume(windows):
+    hot = _Hot()
+    ctx = build(Settings(), windows, hotkeys=hot)
+    bind_hotkeys_via_bus(ctx, hot.register)
+    ctx.pause_hotkeys()
+    updated = Settings(shortcuts={Action.CENTER: "ctrl+alt+9"})
+    ctx.apply_settings(updated)
+    assert hot.registered == []
+    assert ctx.last_binding_report.paused
+    assert ctx.last_binding_report.bound_count == 0
+    assert ctx.last_binding_report.bound == ((Action.CENTER, "ctrl+alt+9"),)
+    ctx.resume_hotkeys()
+    assert [combo for combo, _ in hot.registered] == ["ctrl+alt+9"]
 
 
 # ----- prefs reset ----------------------------------------------------

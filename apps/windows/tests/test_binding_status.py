@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
+
 from windows_rectangle.app import (
     EMPTY_BINDING_REPORT,
     BindingReport,
@@ -23,7 +24,6 @@ from windows_rectangle.app import (
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.core.geometry import Rect
 from windows_rectangle.ports.config_store import Settings
-
 from windows_rectangle.ui.binding_status_view import (
     binding_status_html,
     binding_status_text,

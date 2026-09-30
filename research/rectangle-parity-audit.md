@@ -2,10 +2,9 @@
 
 Last audited: 2026-08-29
 
-This inventory compares the vendored Rectangle source in `apps/mac/Rectangle` with the
-Windows implementation. The authoritative command list is
-`Rectangle/WindowAction.swift`; behavior is cross-checked against `WindowCalculation`,
-`Snapping`, `MultiWindow`, `TitleBarManager.swift`, and `Defaults.swift`.
+This inventory compares the upstream [Rectangle source](https://github.com/rxhanson/Rectangle) with the
+Windows implementation. Upstream source is retrieved directly from its repository;
+this repository maintains only the Windows application.
 
 ## Current coverage
 

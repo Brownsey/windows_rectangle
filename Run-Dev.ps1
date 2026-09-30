@@ -5,7 +5,7 @@
 .DESCRIPTION
     Quick-path for contributors:
       1. Verifies the chosen Python interpreter exists.
-      2. Auto-installs PySide6 + pywin32 if either is missing (skipped
+      2. Auto-installs the app and Qt if missing (skipped
          with -NoInstall).
       3. Runs `python -m windows_rectangle` so the tray icon appears.
 
@@ -28,7 +28,7 @@
 
 [CmdletBinding()]
 param(
-    [string] $Python = "python",
+    [string] $Python = "",
     [switch] $NoInstall,
     [switch] $Headless,
     [ValidateSet("DEBUG", "INFO", "WARNING", "ERROR")]
@@ -38,6 +38,10 @@ param(
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $here
+if (-not $Python) {
+    $localPython = Join-Path $here ".venv\Scripts\python.exe"
+    $Python = if (Test-Path -LiteralPath $localPython) { $localPython } else { "python" }
+}
 
 function Step($msg) {
     Write-Host ""
@@ -57,11 +61,11 @@ if (-not $NoInstall) {
     # Probe rather than blindly running pip — keeps repeat launches fast.
     # If either probe fails we install both; resolver work happens once.
     $missing = $false
-    & $Python -c "import PySide6, win32api" 2>$null
+    & $Python -c "import windows_rectangle.__main__, PySide6.QtWidgets" 2>$null
     if ($LASTEXITCODE -ne 0) { $missing = $true }
     if ($missing) {
-        Step "Installing PySide6 + pywin32"
-        & $Python -m pip install "PySide6>=6.6" "pywin32>=306"
+        Step "Installing Windows Rectangle and Qt"
+        & $Python -m pip install "-e" ".[win,dev]"
         if ($LASTEXITCODE -ne 0) {
             Write-Error "pip install failed (exit $LASTEXITCODE)."
             exit $LASTEXITCODE

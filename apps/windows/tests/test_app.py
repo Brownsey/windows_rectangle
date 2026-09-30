@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+
 from windows_rectangle.app import (
     SecondInstanceError,
     bind_hotkeys,
@@ -555,10 +556,8 @@ def test_end_drag_via_bus_submits_instead_of_dispatching(windows):
     assert action is Action.LEFT_HALF
     # Window UNCHANGED — dispatch was queued, not run.
     assert windows.windows[101] == original
-    assert ctx.bus.pending() == 1
-
-    # Drain on the "Qt main thread" → now the window moves.
-    ctx.drain_actions()
+    # Snap requests retain HWND and target, separately from shortcut actions.
+    assert ctx.drain_actions() == 1
     assert windows.windows[101] == Rect(0, 0, 960, 1040)
 
 
@@ -570,9 +569,8 @@ def test_end_drag_via_bus_returns_none_when_no_zone(windows):
     assert ctx.bus.pending() == 0
 
 
-def test_make_drag_event_dispatcher_uses_bus_for_end(windows):
-    """Verify that mouse-up through the dispatcher closure goes via the
-    bus, not synchronously — required for hook-thread safety."""
+def test_make_drag_event_dispatcher_defers_all_work_until_main_thread(windows):
+    """A hook callback publishes input without beginning or dispatching a drag."""
     from windows_rectangle.adapters.win32_mousehook import (
         EVENT_LBUTTON_DOWN,
         EVENT_LBUTTON_UP,
@@ -590,9 +588,10 @@ def test_make_drag_event_dispatcher_uses_bus_for_end(windows):
     ctx.drag._throttle.reset()
     ctx.drag_poll()  # cache the hit
     on_event(EVENT_LBUTTON_UP, 2, 540)
-    # Window untouched yet; action is queued.
+    # A complete click between main-thread ticks is never a native snap.
     assert windows.windows[101] == original
-    assert ctx.bus.pending() == 1
+    assert not ctx.drag.active
+    assert ctx.bus.pending() == 0
 
 
 def test_end_drag_without_zone_returns_none(windows):
@@ -813,7 +812,7 @@ def test_drag_event_dispatcher_routes_kinds(windows):
     on_event(EVENT_LBUTTON_DOWN, 100, 100)
     assert detector.state == "armed"
     on_event(EVENT_MOVE, 120, 120)  # past 5-px threshold
-    assert detector.state == "dragging"
+    assert detector.state == "armed"  # native movement is checked on the UI thread
     on_event(EVENT_LBUTTON_UP, 120, 120)
     assert detector.state == "idle"
 
@@ -1098,6 +1097,30 @@ def test_drain_actions_dispatches_pending(windows):
     assert windows.windows[101] == Rect(0, 0, 960, 1040)
 
 
+def test_main_tick_bounds_actions_and_preserves_pending_work(windows):
+    ctx = build(Settings(), windows)
+    for _ in range(20):
+        ctx.bus.submit(Action.LEFT_HALF)
+    assert ctx.drain_actions() == 16
+    assert ctx.bus.pending() == 4
+    assert ctx.drain_actions() == 4
+    assert ctx.bus.pending() == 0
+
+
+def test_main_tick_applies_only_one_workspace(windows, monkeypatch):
+    from windows_rectangle.app import AppContext
+
+    calls = []
+    monkeypatch.setattr(AppContext, "apply_named_workspace", lambda self, key: calls.append(key))
+    ctx = build(Settings(), windows)
+    assert ctx.queue_workspace("first")
+    assert ctx.queue_workspace("second")
+    assert ctx.drain_actions() == 1
+    assert calls == ["first"]
+    assert ctx.drain_actions() == 1
+    assert calls == ["first", "second"]
+
+
 def test_app_module_does_not_eagerly_import_win32_adapters():
     """Brief §4 / module docstring: adapters must be lazy-imported inside
     bind_win32/bind_mousehook. We can't reset sys.modules mid-session, so
@@ -1129,3 +1152,23 @@ def test_app_module_does_not_eagerly_import_win32_adapters():
     )
     bad = result.stdout.strip()
     assert bad == "", f"unexpectedly-loaded adapter modules: {bad}"
+
+
+def test_second_instance_rejected_before_starting_native_threads(monkeypatch, tmp_path):
+    from windows_rectangle import app
+    from windows_rectangle.adapters import single_instance, win32_hotkeys
+
+    guard = single_instance.MemorySingleInstance("startup-order-test")
+    assert guard.acquire()
+    monkeypatch.setattr(single_instance, "best_available", lambda: guard)
+
+    def forbidden_thread():
+        raise AssertionError("started a hotkey thread before checking the mutex")
+
+    monkeypatch.setattr(win32_hotkeys, "Win32Hotkeys", forbidden_thread)
+    try:
+        with pytest.raises(SecondInstanceError):
+            app.bind_win32(config_path=str(tmp_path / "settings.json"))
+        assert not (tmp_path / "settings.json").exists()
+    finally:
+        guard.release()

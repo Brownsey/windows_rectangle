@@ -89,9 +89,22 @@ def show_for(controller: OverlayController, rect: Rect) -> None:
     w = controller.widget
     if w is None:
         return
-    w.setGeometry(rect.x, rect.y, rect.width, rect.height)
+    if sys.platform != "win32":
+        w.setGeometry(rect.x, rect.y, rect.width, rect.height)
+        w.show()
+        return
     w.show()
     _ensure_win32_exstyle(w)
+    if not _win32_user32().SetWindowPos(
+        int(w.winId()),
+        0,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        0x0010 | 0x0004,  # NOACTIVATE | NOZORDER
+    ):
+        _log.warning("could not position snap-preview overlay")
 
 
 def hide(controller: OverlayController) -> None:
@@ -100,6 +113,29 @@ def hide(controller: OverlayController) -> None:
 
 
 _user32 = None  # lazily-cached ctypes WinDLL handle (None off Windows)
+
+
+def _win32_user32():
+    global _user32
+    if _user32 is None:
+        import ctypes
+
+        _user32 = ctypes.WinDLL("user32", use_last_error=True)
+        _user32.GetWindowLongW.argtypes = (ctypes.c_void_p, ctypes.c_int)
+        _user32.GetWindowLongW.restype = ctypes.c_long
+        _user32.SetWindowLongW.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_long)
+        _user32.SetWindowLongW.restype = ctypes.c_long
+        _user32.SetWindowPos.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+        )
+        _user32.SetWindowPos.restype = ctypes.c_bool
+    return _user32
 
 
 def _ensure_win32_exstyle(widget) -> None:
@@ -116,19 +152,15 @@ def _ensure_win32_exstyle(widget) -> None:
         return
     if getattr(widget, "_wr_exstyle_applied", False):
         return
-    global _user32
     try:
         hwnd = int(widget.winId())
         if hwnd == 0:
             return
-        if _user32 is None:
-            import ctypes
-
-            _user32 = ctypes.WinDLL("user32", use_last_error=True)
-        cur = _user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
+        user32 = _win32_user32()
+        cur = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
         want = cur | _WS_EX_LAYERED | _WS_EX_TRANSPARENT | _WS_EX_NOACTIVATE | _WS_EX_TOOLWINDOW
         if cur != want:
-            _user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, want)
+            user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, want)
         widget._wr_exstyle_applied = True
     except Exception:  # noqa: BLE001
         _log.debug("could not adjust overlay ex-style", exc_info=True)

@@ -42,13 +42,9 @@ function Test-IsWindowsRectangleProcess {
         if ($commandLine -match "(^|\s)-m\s+windows_rectangle(\s|$)") {
             return $true
         }
-        if ($inRepo -and (Test-ContainsText $commandLine "windows_rectangle")) {
+        if ($inRepo -and $commandLine -match '[\\/]windows_rectangle[\\/]__main__\.py(?:"|\s|$)') {
             return $true
         }
-    }
-
-    if ($inRepo -and (Test-ContainsText $commandLine "windows-rectangle")) {
-        return $true
     }
 
     return $false

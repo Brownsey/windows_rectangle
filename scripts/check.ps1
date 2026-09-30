@@ -32,8 +32,8 @@ if (-not $Python) {
 
 Push-Location $RepoRoot
 try {
-    Invoke-Native $Python @("-m", "ruff", "check", "apps/windows") "Ruff lint failed"
-    Invoke-Native $Python @("-m", "ruff", "format", "--check", "apps/windows") "Ruff format check failed"
+    Invoke-Native $Python @("-m", "ruff", "check", "apps/windows", "scripts/benchmark-windows.py", "packaging/windows") "Ruff lint failed"
+    Invoke-Native $Python @("-m", "ruff", "format", "--check", "apps/windows", "scripts/benchmark-windows.py", "packaging/windows") "Ruff format check failed"
     Invoke-Native $Python @("-m", "mypy") "Mypy failed"
     Invoke-Native $Python @("-m", "pytest") "Pytest failed"
 } finally {

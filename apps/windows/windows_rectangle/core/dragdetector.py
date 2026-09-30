@@ -30,9 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
-# Squared-distance threshold. 5 pixels² ≈ a click-and-release-with-jitter
-# noise floor on a 1080p display. Tuned conservatively — Rectangle uses a
-# similar cushion on macOS.
+# Movement threshold in physical pixels, squared during the distance check.
 DEFAULT_DRAG_THRESHOLD_PX = 5
 
 

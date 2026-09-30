@@ -1,19 +1,18 @@
 """Drag-to-edge session state (brief §2 #13).
 
 Wires:
-  - `throttle.LatestValue` for the fast mouse-hook write path,
+  - `throttle.LatestValue` for main-thread cursor handoff,
   - `throttle.Throttle` to rate-limit the snap-zone computation,
   - `snap.find_snap` for the actual classification.
 
-Usage (from adapters):
+Main-thread usage:
     session = DragSession(monitors=wm.list_monitors(), gap=settings.gap)
     session.start(window_rect)
-    # mouse hook thread (fast):
+    # UI timer consumes the hook's immutable input snapshot:
     session.update(x, y)
-    # UI timer thread (~60 Hz):
     hit = session.poll()
     if hit and hit.action: overlay.show(hit.target)
-    # on mouse-up:
+    # on mouse-up, still on the UI thread:
     final = session.finish()
     if final and final.action: dispatcher.dispatch(final.action)
 """
@@ -39,8 +38,8 @@ class DragSession:
     """Stateful coordinator for a single drag-and-snap interaction.
 
     Thread model:
-        - `update(x, y)` is hot-path; safe from the mouse hook thread.
-        - `poll()` and `finish()` are main-thread only.
+        - `start()`, `update()`, `poll()`, `finish()` and `cancel()` run on the
+          main thread. The mouse hook only publishes an immutable snapshot.
     """
 
     monitors: Sequence[MonitorInfo]
@@ -71,10 +70,10 @@ class DragSession:
     def active(self) -> bool:
         return self._active
 
-    # ----- producer (mouse hook) --------------------------------------
+    # ----- input (UI timer) -------------------------------------------
 
     def update(self, x: int, y: int) -> None:
-        """Mouse moved. O(1), non-blocking, safe from hook thread."""
+        """Record the latest cursor position on the main thread."""
         if not self._active:
             return
         self._coords.set((x, y))
@@ -106,6 +105,12 @@ class DragSession:
         """End the session. Returns the last snap hit (if any) for the
         dispatcher to apply. Resets state regardless.
         """
+        # A release can arrive before the next preview tick. Always consume
+        # its coordinates, bypassing the preview throttle.
+        coords = self._coords.pop()
+        if self._active and coords is not None:
+            hit = find_snap(*coords, self.monitors, window=self._window, gap=self.gap)
+            self._last_hit = hit if hit.zone is not SnapZone.NONE else None
         result = self._last_hit
         self._active = False
         self._last_hit = None

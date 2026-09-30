@@ -1,6 +1,7 @@
 """Tests for user-facing workspace position presets."""
 
 import pytest
+
 from windows_rectangle.core.workspace_presets import (
     POSITION_PRESETS,
     preset_label,

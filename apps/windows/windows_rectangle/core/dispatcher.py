@@ -104,6 +104,25 @@ class Dispatcher:
             action, handle, None, None, False, "unsupported"
         )
 
+    def dispatch_target(self, handle: object, action: Action, target: Rect) -> DispatchResult:
+        """Apply a captured drag target to its original live window."""
+        if not is_geometry_action(action):
+            return DispatchResult(action, handle, None, None, False, "unsupported")
+        if not self._windows.is_window_valid(handle):
+            return DispatchResult(action, handle, None, None, False, "no_window")
+        cap = classify(self._windows.get_window_flags(handle))
+        if cap is Capability.NONE:
+            return DispatchResult(action, handle, None, None, False, "ineligible")
+        before = self._windows.get_window_rect(handle)
+        if Capability.RESIZE not in cap:
+            target = Rect(
+                target.center_x - before.width // 2,
+                target.center_y - before.height // 2,
+                before.width,
+                before.height,
+            )
+        return self._move(handle, action, before, target)
+
     # ----- internals -----
 
     def _apply_geometry(self, handle: object, action: Action) -> DispatchResult:
@@ -167,12 +186,14 @@ class Dispatcher:
         return self._move(handle, action, before, target)
 
     def _restore(self, handle: object) -> DispatchResult:
-        previous = self._history.pop(handle)
+        previous = self._history.peek(handle)
         if previous is None:
             return DispatchResult(Action.RESTORE, handle, None, None, False, "no_undo")
         before = self._windows.get_window_rect(handle)
         # Don't re-record the restore itself in history.
         ok = self._windows.set_window_rect(handle, previous)
+        if ok:
+            self._history.pop(handle)
         return DispatchResult(
             Action.RESTORE,
             handle,
@@ -203,14 +224,11 @@ class Dispatcher:
         # rect for the undo entry, so RESTORE re-maximizes via the recorded shape.
         if self._windows.is_maximized(handle):
             self._windows.restore_window(handle)
-        if self._record:
-            self._history.push(handle, before)
         ok = self._windows.set_window_rect(handle, target)
         if not ok:
-            # Move was blocked (UIPI / elevated window) — drop the undo entry we just pushed.
-            if self._record:
-                self._history.pop(handle)
             return DispatchResult(action, handle, before, None, False, "blocked")
+        if self._record:
+            self._history.push(handle, before)
         return DispatchResult(action, handle, before, target, True, "ok")
 
     # ----- housekeeping (called by adapters periodically) -----

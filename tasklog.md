@@ -1,6 +1,6 @@
 # Windows Rectangle Task Log
 
-Last updated: 2026-09-02
+Last updated: 2026-09-30
 
 ## Current objective
 
@@ -10,7 +10,14 @@ Build a polished Windows counterpart to Rectangle with robust keyboard and drag 
 
 - Core snap geometry, keyboard dispatch, drag detection, overlay previews, undo history, cycling, monitor selection, borders, cleanup, autostart, single-instance handling, and Win32 adapters.
 - Preferences, tray UI, shortcut rebinding and conflict reporting, pause/reset controls, diagnostics, log handling, import/export, packaging scripts, and Windows build documentation.
-- Vendored upstream Rectangle snapshot and reorganized the repository into platform-specific apps.
+- Consolidated the application under `apps/windows`; upstream source is fetched separately when needed.
+
+## 2026-09-30 — Windows review
+
+The repository is Windows-only. Runtime, persistence, Preferences, native input,
+launchers and packaging were reviewed and corrected. The findings, repeatable
+performance comparison, validation evidence and remaining hardware checks are
+recorded in [REVIEW.md](REVIEW.md).
 
 ## 2026-08-29 — Active iteration
 

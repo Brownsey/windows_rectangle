@@ -54,10 +54,10 @@ def capture_workspace(manager: WorkspaceWindows, name: str) -> Workspace:
         # workspace captured while its UI is open.
         if window.title.casefold().startswith("windows rectangle"):
             continue
-        monitor_index = manager.monitor_index_for_window(window.handle)
-        if monitor_index is None or monitor_index >= len(work_areas):
-            continue
         try:
+            monitor_index = manager.monitor_index_for_window(window.handle)
+            if monitor_index is None or not 0 <= monitor_index < len(work_areas):
+                continue
             rect = NormalizedRect.from_rect(
                 manager.get_window_rect(window.handle), work_areas[monitor_index]
             )
@@ -65,7 +65,7 @@ def capture_workspace(manager: WorkspaceWindows, name: str) -> Workspace:
                 process_name=window.process_name,
                 title_contains=window.title,
             )
-        except ValueError:
+        except (OSError, ValueError):
             continue
         placements.append(
             WorkspacePlacement(

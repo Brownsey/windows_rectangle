@@ -3,6 +3,7 @@
 from fractions import Fraction
 
 import pytest
+
 from windows_rectangle.core.geometry import (
     EdgeFlags,
     Rect,

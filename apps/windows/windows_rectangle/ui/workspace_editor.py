@@ -135,7 +135,7 @@ class WorkspaceEditorController:
             replace(placement, rect=rect) if placement.id == placement_id else placement
             for placement in workspace.placements
         )
-        if placements == workspace.placements:
+        if not any(placement.id == placement_id for placement in workspace.placements):
             raise KeyError(placement_id)
         self._replace_workspace(workspace_id, placements=placements)
 
@@ -179,7 +179,7 @@ class WorkspaceEditorController:
             else placement
             for placement in workspace.placements
         )
-        if placements == workspace.placements:
+        if not any(placement.id == placement_id for placement in workspace.placements):
             raise KeyError(placement_id)
         self._replace_workspace(workspace_id, placements=placements)
 
@@ -304,21 +304,55 @@ class WorkspaceEditorController:
         self.staged = deepcopy(self.baseline)
         return report
 
-    def autosave(self, on_save=None, on_apply=None) -> WorkspaceSaveOutcome:
+    def autosave(
+        self, on_save=None, on_apply=None, *, current_settings: Settings | None = None
+    ) -> WorkspaceSaveOutcome:
         """Persist a valid staged snapshot while retaining dirty state on failure."""
-        report = self.validate()
+        candidate = (
+            self._merge_current(current_settings) if current_settings is not None else self.staged
+        )
+        report = WorkspaceEditorController(candidate).validate()
         if not report.ok:
             return WorkspaceSaveOutcome(False, report)
         try:
             if on_save is not None:
-                on_save(self.staged)
+                on_save(candidate)
             if on_apply is not None:
-                on_apply(self.staged)
+                on_apply(candidate)
         except Exception as exc:  # noqa: BLE001 - adapters surface errors in the UI
             return WorkspaceSaveOutcome(False, report, str(exc))
-        self.baseline = deepcopy(self.staged)
+        self.baseline = deepcopy(candidate)
         self.staged = deepcopy(self.baseline)
         return WorkspaceSaveOutcome(True, report)
+
+    def _merge_current(self, current: Settings) -> Settings:
+        merged = deepcopy(current)
+        baseline = {workspace.id: workspace for workspace in self.baseline.workspaces}
+        staged = {workspace.id: workspace for workspace in self.staged.workspaces}
+        changed = {
+            workspace_id
+            for workspace_id in baseline.keys() | staged.keys()
+            if baseline.get(workspace_id) != staged.get(workspace_id)
+        }
+        workspaces = [
+            staged[workspace.id] if workspace.id in changed else workspace
+            for workspace in current.workspaces
+            if workspace.id not in changed or workspace.id in staged
+        ]
+        existing = {workspace.id for workspace in current.workspaces}
+        workspaces.extend(
+            workspace
+            for workspace in self.staged.workspaces
+            if workspace.id in changed and workspace.id not in existing
+        )
+        merged.workspaces = tuple(workspaces)
+        if self.staged.active_workspace_id != self.baseline.active_workspace_id:
+            merged.active_workspace_id = self.staged.active_workspace_id
+        if merged.active_workspace_id and not any(
+            workspace.id == merged.active_workspace_id for workspace in merged.workspaces
+        ):
+            merged.active_workspace_id = merged.workspaces[0].id if merged.workspaces else ""
+        return merged
 
     def _replace_workspace(self, workspace_id: str, **changes) -> None:
         found = False

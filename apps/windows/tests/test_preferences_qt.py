@@ -6,14 +6,19 @@ through the dialog. They skip cleanly when PySide6 is not installed.
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
 from contextlib import suppress
+from pathlib import Path
+from textwrap import dedent
 
 import pytest
+
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.core.shortcuts import normalise
 from windows_rectangle.ports.config_store import Settings
-
 from windows_rectangle.ui import preferences
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -125,8 +130,6 @@ def test_qt_preferences_window_has_expected_structure(qt_app, qt_modules):
     window = controller.window
     assert window.objectName() == "preferencesWindow"
     assert window.windowTitle() == "Windows Rectangle"
-    assert window.minimumWidth() >= 820
-    assert window.minimumHeight() >= 620
 
     tabs = window.findChild(qt_widgets.QTabWidget, "preferencesTabs")
     assert tabs is not None
@@ -176,8 +179,8 @@ def test_qt_preferences_window_renders_non_blank_screenshot(qt_app, qt_modules):
 
     pixmap = controller.window.grab()
     assert not pixmap.isNull()
-    assert pixmap.width() >= 820
-    assert pixmap.height() >= 620
+    assert pixmap.width() >= 600
+    assert pixmap.height() >= 400
 
     image = pixmap.toImage()
     sample_points = [
@@ -188,6 +191,51 @@ def test_qt_preferences_window_renders_non_blank_screenshot(qt_app, qt_modules):
     ]
     sampled_colors = {image.pixelColor(x, y).rgba() for x, y in sample_points}
     assert len(sampled_colors) > 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows desktop scaling")
+def test_qt_preferences_buttons_fit_scaled_desktop():
+    script = dedent("""
+        import json
+        from PySide6 import QtCore, QtWidgets
+        from windows_rectangle.ports.config_store import Settings
+        from windows_rectangle.ui.preferences import _build_window
+        class Context:
+            settings = Settings()
+            config_store = None
+        app = QtWidgets.QApplication([])
+        controller = _build_window(Context(), QtCore, QtWidgets)
+        controller.window.show()
+        app.processEvents()
+        screen = controller.window.screen().availableGeometry()
+        frame = controller.window.frameGeometry()
+        apply = controller.apply_button
+        apply_bottom = apply.mapToGlobal(QtCore.QPoint(apply.width() - 1, apply.height() - 1))
+        print(json.dumps({
+            "screen": [screen.x(), screen.y(), screen.width(), screen.height()],
+            "frame": [frame.x(), frame.y(), frame.width(), frame.height()],
+            "frame_fits": screen.contains(frame),
+            "apply_fits": screen.contains(apply_bottom),
+        }))
+        controller.window.close()
+    """)
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "windows"
+    env["QT_SCALE_FACTOR"] = "2"
+    package_dir = Path(__file__).resolve().parents[1]
+    env["PYTHONPATH"] = str(package_dir) + os.pathsep + env.get("PYTHONPATH", "")
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+        timeout=30,
+    )
+    geometry = json.loads(result.stdout)
+
+    assert geometry["frame_fits"], geometry
+    assert geometry["apply_fits"], geometry
 
 
 def test_qt_shortcut_search_filters_rows_and_sections(qt_app, qt_modules):
@@ -217,6 +265,49 @@ def test_qt_shortcut_search_filters_rows_and_sections(qt_app, qt_modules):
     assert all(row.isVisible() for row in rows)
 
 
+def test_qt_search_explains_no_results_and_supports_keyboard(qt_app, qt_modules):
+    qt_core, _qt_gui, qt_widgets, qt_test = qt_modules
+    controller = _build_controller(qt_app, qt_modules)
+    search = controller.window.findChild(qt_widgets.QLineEdit, "shortcutSearch")
+    empty = controller.window.findChild(qt_widgets.QLabel, "noShortcutsFound")
+    assert empty is not None
+
+    qt_test.QTest.keyClick(controller.window, qt_core.Qt.Key_F, qt_core.Qt.ControlModifier)
+    assert search.hasFocus()
+    qt_test.QTest.keyClicks(search, "no-matching-command")
+    qt_app.processEvents()
+    assert empty.isVisible()
+    assert "no" in empty.text().casefold()
+    assert not any(row.isVisible() for row in controller.rows.values())
+
+    qt_test.QTest.keyClick(search, qt_core.Qt.Key_Escape)
+    qt_app.processEvents()
+    assert search.text() == ""
+    assert not empty.isVisible()
+    assert controller.window.isVisible()
+
+    tabs = controller.window.findChild(qt_widgets.QTabWidget, "preferencesTabs")
+    tabs.setCurrentIndex(1)
+    controller.gap_spin.setFocus()
+    qt_test.QTest.keyClick(controller.gap_spin, qt_core.Qt.Key_F, qt_core.Qt.ControlModifier)
+    qt_app.processEvents()
+    assert tabs.currentIndex() == 0
+    assert search.hasFocus()
+
+
+def test_qt_escape_outside_search_closes_window(qt_app, qt_modules):
+    qt_core, _qt_gui, qt_widgets, qt_test = qt_modules
+    controller = _build_controller(qt_app, qt_modules)
+    tabs = controller.window.findChild(qt_widgets.QTabWidget, "preferencesTabs")
+    tabs.setCurrentIndex(1)
+    controller.gap_spin.setFocus()
+
+    qt_test.QTest.keyClick(controller.gap_spin, qt_core.Qt.Key_Escape)
+    qt_app.processEvents()
+
+    assert not controller.window.isVisible()
+
+
 def test_qt_general_controls_mark_dirty_and_collect_settings(qt_app, qt_modules):
     controller = _build_controller(qt_app, qt_modules)
 
@@ -233,6 +324,92 @@ def test_qt_general_controls_mark_dirty_and_collect_settings(qt_app, qt_modules)
     assert settings.almost_maximize_scale == pytest.approx(0.73)
     assert settings.drag_to_edge_enabled is False
     assert settings.launch_at_login is True
+
+
+def test_qt_reverting_general_edit_restores_clean_state(qt_app, qt_modules):
+    ctx = SpyContext(Settings(gap=4))
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    controller.gap_spin.setValue(18)
+    assert controller.apply_button.isEnabled()
+
+    controller.gap_spin.setValue(4)
+
+    assert controller.dirty is False
+    assert controller.status_label.text() == "All changes saved"
+    assert not controller.save_button.isEnabled()
+    assert not controller.apply_button.isEnabled()
+
+
+@pytest.mark.parametrize("timeout", [0.123, 0.125, 3.45678])
+def test_qt_unedited_precise_timeout_survives_other_changes(qt_app, qt_modules, timeout):
+    config = SpyConfigStore()
+    ctx = SpyContext(Settings(gap=4, cycle_idle_timeout=timeout), config_store=config)
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    controller.gap_spin.setValue(18)
+    controller.gap_spin.setValue(4)
+    assert controller.dirty is False
+    assert not controller.apply_button.isEnabled()
+
+    controller.gap_spin.setValue(18)
+    controller.save(close=False)
+
+    assert config.saved[0].cycle_idle_timeout == timeout
+
+
+def test_qt_unedited_mixed_case_shortcut_survives_other_changes(qt_app, qt_modules):
+    config = SpyConfigStore()
+    settings = Settings(gap=4)
+    settings.shortcuts[Action.LEFT_HALF] = "Ctrl+Alt+L"
+    controller = _build_controller(qt_app, qt_modules, SpyContext(settings, config_store=config))
+    controller.gap_spin.setValue(18)
+    controller.gap_spin.setValue(4)
+    assert controller.dirty is False
+    assert not controller.apply_button.isEnabled()
+
+    controller.gap_spin.setValue(18)
+    controller.save(close=False)
+
+    assert config.saved[0].shortcuts[Action.LEFT_HALF] == "Ctrl+Alt+L"
+
+
+def test_qt_mixed_case_win_and_pageup_shortcuts_display_and_clear(qt_app, qt_modules):
+    _qt_core, qt_gui, _qt_widgets, _qt_test = qt_modules
+    config = SpyConfigStore()
+    settings = Settings()
+    settings.shortcuts[Action.LEFT_HALF] = "Win+L"
+    settings.shortcuts[Action.TOP_RIGHT_SIXTH] = "Ctrl+PageUp"
+    controller = _build_controller(qt_app, qt_modules, SpyContext(settings, config_store=config))
+    left = controller.shortcut_widgets[Action.LEFT_HALF]
+    right = controller.shortcut_widgets[Action.TOP_RIGHT_SIXTH]
+
+    assert preferences._sequence_text(left), "Win shortcut was blank in the editor"
+    assert preferences._sequence_text(right), "PageUp shortcut was blank in the editor"
+    assert normalise(preferences._sequence_text(left)) == "win+l"
+    assert normalise(preferences._sequence_text(right)) == "ctrl+pgup"
+    left.setKeySequence(qt_gui.QKeySequence())
+    controller.mark_dirty()
+    assert controller.apply_button.isEnabled(), controller.status_label.text()
+
+    controller.save(close=False)
+
+    assert Action.LEFT_HALF not in config.saved[0].shortcuts
+    assert config.saved[0].shortcuts[Action.TOP_RIGHT_SIXTH] == "Ctrl+PageUp"
+
+
+def test_qt_reverting_shortcut_edit_restores_clean_state(qt_app, qt_modules):
+    _qt_core, qt_gui, _qt_widgets, _qt_test = qt_modules
+    controller = _build_controller(qt_app, qt_modules)
+    button = controller.shortcut_widgets[Action.LEFT_HALF]
+    original = button.keySequence()
+    button.setKeySequence(qt_gui.QKeySequence("Ctrl+Alt+L"))
+    controller.mark_dirty()
+    assert controller.apply_button.isEnabled()
+
+    button.setKeySequence(original)
+    controller.mark_dirty()
+
+    assert controller.dirty is False
+    assert not controller.apply_button.isEnabled()
 
 
 def test_qt_record_button_updates_shortcut_and_restores_hotkeys(qt_app, qt_modules, monkeypatch):
@@ -300,7 +477,7 @@ def test_qt_reserved_shortcut_warns_but_still_allows_save(qt_app, qt_modules):
     assert controller.apply_button.isEnabled()
 
 
-def test_qt_save_applies_persists_rebinds_and_hides_window(qt_app, qt_modules):
+def test_qt_save_general_settings_skips_rebind_and_hides_window(qt_app, qt_modules):
     _qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
     config = SpyConfigStore()
     ctx = SpyContext(config_store=config)
@@ -313,9 +490,24 @@ def test_qt_save_applies_persists_rebinds_and_hides_window(qt_app, qt_modules):
     assert len(config.saved) == 1
     assert config.saved[0].gap == 18
     assert ctx.applied[0].gap == 18
-    assert ctx.rebind_calls == 1
+    assert ctx.rebind_calls == 0
     assert controller.dirty is False
     assert not controller.window.isVisible()
+
+
+def test_qt_save_retries_previous_binding_failure(qt_app, qt_modules):
+    from windows_rectangle.app import BindingReport
+
+    ctx = SpyContext()
+    ctx.last_binding_report = BindingReport(
+        failed=((Action.LEFT_HALF, "ctrl+alt+left", "already registered"),)
+    )
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    controller.gap_spin.setValue(18)
+
+    controller.save(close=False)
+
+    assert ctx.rebind_calls == 1
 
 
 def test_qt_apply_persists_without_closing_window(qt_app, qt_modules):
@@ -334,11 +526,58 @@ def test_qt_apply_persists_without_closing_window(qt_app, qt_modules):
     assert controller.window.isVisible()
 
 
+def test_qt_apply_preserves_newer_tray_setting_and_workspace(qt_app, qt_modules, tmp_path):
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+    from windows_rectangle.core.workspaces import Workspace
+
+    _qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+    store = JsonConfigStore(tmp_path / "config.json")
+    store.save(Settings(gap=4, launch_at_login=False))
+    ctx = SpyContext(store.load(), config_store=store)
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    controller.gap_spin.setValue(18)
+
+    current = store.load()
+    current.launch_at_login = True
+    current.workspaces = (Workspace("office", "Office", ()),)
+    store.save(current)
+    ctx.settings = current
+
+    _button_box_button(controller, qt_widgets, "Apply").click()
+    saved = store.load()
+    assert saved.gap == 18
+    assert saved.launch_at_login is True
+    assert saved.workspaces[0].id == "office"
+    assert controller.launch_checkbox.isChecked()
+
+
+def test_qt_apply_merges_only_edited_shortcut(qt_app, qt_modules, tmp_path):
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+
+    _qt_core, qt_gui, qt_widgets, _qt_test = qt_modules
+    store = JsonConfigStore(tmp_path / "config.json")
+    store.save(Settings())
+    ctx = SpyContext(store.load(), config_store=store)
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    controller.shortcut_widgets[Action.LEFT_HALF].setKeySequence(qt_gui.QKeySequence("Ctrl+Alt+L"))
+    controller.mark_dirty()
+
+    current = store.load()
+    current.shortcuts[Action.RIGHT_HALF] = "ctrl+shift+right"
+    store.save(current)
+    ctx.settings = current
+
+    _button_box_button(controller, qt_widgets, "Apply").click()
+    saved = store.load()
+    assert saved.shortcuts[Action.LEFT_HALF] == "ctrl+alt+l"
+    assert saved.shortcuts[Action.RIGHT_HALF] == "ctrl+shift+right"
+
+
 def test_qt_restore_defaults_resets_shortcuts_and_marks_dirty(qt_app, qt_modules):
     _qt_core, qt_gui, qt_widgets, _qt_test = qt_modules
-    controller = _build_controller(qt_app, qt_modules)
-    controller.shortcut_widgets[Action.LEFT_HALF].setKeySequence(qt_gui.QKeySequence("Ctrl+Alt+L"))
-    controller.dirty = False
+    settings = Settings()
+    settings.shortcuts[Action.LEFT_HALF] = "ctrl+alt+l"
+    controller = _build_controller(qt_app, qt_modules, SpyContext(settings))
 
     _button_box_button(controller, qt_widgets, "Restore Defaults").click()
     qt_app.processEvents()

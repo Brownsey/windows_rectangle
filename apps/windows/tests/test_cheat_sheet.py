@@ -7,7 +7,6 @@ and strings out.
 from __future__ import annotations
 
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
-
 from windows_rectangle.ui.cheat_sheet import (
     ACTION_LABELS,
     UNBOUND_PLACEHOLDER,

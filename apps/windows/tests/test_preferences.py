@@ -4,10 +4,10 @@ The PrefsController is pure-Python — no PySide6 / no Win32 needed.
 """
 
 import pytest
+
 from windows_rectangle.core.actions import Action
 from windows_rectangle.core.shortcuts import ShortcutParseError
 from windows_rectangle.ports.config_store import Settings
-
 from windows_rectangle.ui.preferences import (
     ALMOST_MAX_MAX,
     ALMOST_MAX_MIN,
@@ -163,6 +163,68 @@ def test_commit_calls_callbacks_and_promotes_staged():
     assert not pc.is_dirty
 
 
+def test_commit_keeps_workspace_saved_while_preferences_were_open(tmp_path):
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+    from windows_rectangle.core.workspaces import Workspace
+
+    store = JsonConfigStore(tmp_path / "config.json")
+    store.save(Settings(gap=4))
+    pc = PrefsController(store.load())
+    pc.set_gap(18)
+    live = store.load()
+    live.workspaces = (Workspace("office", "Office", ()),)
+    store.save(live)
+
+    assert pc.commit(on_save=store.save, current_settings=store.load()).ok
+    assert store.load().gap == 18
+    assert store.load().workspaces[0].id == "office"
+
+
+def test_commit_preserves_unedited_preferences_changed_while_open():
+    pc = PrefsController(Settings(gap=4, launch_at_login=False))
+    pc.set_gap(18)
+    pc.set_shortcut(Action.LEFT_HALF, "ctrl+alt+l")
+    current = Settings(gap=4, launch_at_login=True)
+    current.shortcuts[Action.RIGHT_HALF] = "ctrl+shift+right"
+    saved: list[Settings] = []
+
+    assert pc.commit(on_save=saved.append, current_settings=current).ok
+
+    assert saved[0].gap == 18
+    assert saved[0].launch_at_login is True
+    assert saved[0].shortcuts[Action.LEFT_HALF] == "ctrl+alt+l"
+    assert saved[0].shortcuts[Action.RIGHT_HALF] == "ctrl+shift+right"
+
+
+def test_commit_reports_duplicate_introduced_by_concurrent_shortcut_change():
+    pc = PrefsController(Settings())
+    pc.set_shortcut(Action.LEFT_HALF, "ctrl+alt+l")
+    current = Settings()
+    current.shortcuts[Action.RIGHT_HALF] = "ctrl+alt+l"
+    saved: list[Settings] = []
+
+    report = pc.commit(on_save=saved.append, current_settings=current)
+
+    assert report.ok
+    assert any("shares combo" in warning for warning in report.warnings)
+    assert len(saved) == 1
+
+
+def test_commit_rejects_invalid_concurrent_setting_without_losing_edits():
+    pc = PrefsController(Settings(gap=4))
+    pc.set_gap(18)
+    current = Settings(gap=4, cycle_idle_timeout=11)
+    saved: list[Settings] = []
+
+    report = pc.commit(on_save=saved.append, current_settings=current)
+
+    assert not report.ok
+    assert any("cycle_idle_timeout" in error for error in report.errors)
+    assert saved == []
+    assert pc.baseline.gap == 4
+    assert pc.staged.gap == 18
+
+
 def test_commit_blocked_by_errors_does_not_fire_callbacks():
     pc = PrefsController(baseline=Settings())
     pc.staged.gap = -10  # bypass clamp → invalid
@@ -305,11 +367,10 @@ def test_open_prefs_window_end_to_end_almost_maximize_scale(tmp_path):
     almost_maximize_scale; assert the next ALMOST_MAXIMIZE dispatch
     honours the new value. Covers the iter 60 wiring all the way through
     open_prefs_window."""
+    from tests.conftest import FakeWindowManager, make_monitor
     from windows_rectangle.app import build
     from windows_rectangle.core.actions import Action
     from windows_rectangle.core.geometry import Rect
-
-    from tests.conftest import FakeWindowManager, make_monitor
 
     m1 = make_monitor(1, 0, 0, 1920, 1080, primary=True)
     wm = FakeWindowManager(monitors=[m1])

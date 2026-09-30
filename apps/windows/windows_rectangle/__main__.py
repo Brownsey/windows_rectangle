@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import signal
+import subprocess
 import sys
 import time
 
@@ -51,6 +52,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--headless",
         action="store_true",
         help="run without Qt - hotkeys + dispatcher only, no tray UI",
+    )
+    startup = runtime.add_mutually_exclusive_group()
+    startup.add_argument(
+        "--tray", action="store_true", help="run the tray app without opening Preferences"
+    )
+    startup.add_argument(
+        "--open-preferences", action="store_true", help="open Preferences on startup"
     )
     runtime.add_argument(
         "--command-line",
@@ -154,6 +162,15 @@ def _setup_logging(level_name: str) -> None:
     install_file_handler(level=level)
 
 
+def _default_autostart_command() -> str:
+    """Build the registry command for this executable and launch mode."""
+    parts = [sys.executable]
+    if not getattr(sys, "frozen", False):
+        parts.extend(("-m", "windows_rectangle"))
+    parts.append("--tray")
+    return subprocess.list2cmdline(parts)
+
+
 def _run_headless(ctx) -> int:
     """Stdlib-only main loop: drain the ActionBus on a ~60 Hz schedule.
 
@@ -174,8 +191,8 @@ def _run_headless(ctx) -> int:
 
     _log.info("running headless — Ctrl+C to exit")
     # No overlay to repaint in headless mode, so 60 Hz is wasteful.
-    # 30 Hz keeps hotkey latency under ~33 ms (still imperceptible) and
-    # halves CPU usage while idle.
+    # 30 Hz schedules a drain roughly every 33 ms and halves timer wakeups
+    # versus 60 Hz. OS scheduling and individual actions can add latency.
     HEADLESS_POLL_HZ = 30
     period = 1.0 / HEADLESS_POLL_HZ
     while not stop:
@@ -185,7 +202,7 @@ def _run_headless(ctx) -> int:
     return 0
 
 
-def _run_qt(ctx) -> int:
+def _run_qt(ctx, *, open_preferences: bool = False) -> int:
     """Qt loop with a 16ms QTimer that drains the ActionBus + drag preview.
 
     Single Qt event loop, single drain timer (brief §5 #8 "competing event
@@ -198,22 +215,24 @@ def _run_qt(ctx) -> int:
     from .ui.overlay import hide as overlay_hide
     from .ui.overlay import install as install_overlay
     from .ui.overlay import show_for as overlay_show_for
-    from .ui.preferences import open_prefs_window
-    from .ui.prefs_dialog import build_dialog as build_prefs_dialog
+    from .ui.preferences import show as show_preferences
     from .ui.tray import install as install_tray
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     # The tray is the visible-anywhere control surface; on quit it calls
     # QApplication.quit() which unwinds the event loop.
 
     def _open_prefs() -> None:
         try:
-            open_prefs_window(ctx, dialog_factory=build_prefs_dialog)
+            show_preferences(ctx)
         except Exception:  # noqa: BLE001
             _log.exception("preferences dialog failed")
 
     tray = install_tray(ctx, on_open_preferences=_open_prefs)
     _log.info("tray installed")
+    if open_preferences:
+        _open_prefs()
     # Snap-preview overlay (frameless translucent click-through, brief §3).
     overlay: OverlayController | None = None
     try:
@@ -302,6 +321,9 @@ def _run_informational(args: argparse.Namespace) -> int:
         except json.JSONDecodeError as e:
             print(f"import failed: {args.import_config} is not valid JSON ({e})", file=sys.stderr)
             return 1
+        except ValueError as e:
+            print(f"import failed: {e}", file=sys.stderr)
+            return 1
 
         if args.dry_run:
             # Dry run: show the per-field changes without touching disk.
@@ -334,8 +356,7 @@ def _run_informational(args: argparse.Namespace) -> int:
             from .adapters.win32_windows import Win32WindowManager
         except ImportError:
             print(
-                "--print-monitors requires Windows (pywin32). "
-                "Run on a Windows host or in a Win32 venv.",
+                "--print-monitors requires Windows. Run on a Windows host or in a Win32 venv.",
                 file=sys.stderr,
             )
             return 1
@@ -365,7 +386,7 @@ def main(argv: list[str] | None = None) -> int:
         return info_rc
 
     try:
-        ctx = bind_win32(command_line=args.command_line)
+        ctx = bind_win32(command_line=args.command_line or _default_autostart_command())
     except SecondInstanceError:
         _log.warning("another instance is already running — exiting")
         return 0
@@ -378,7 +399,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.headless:
             return _run_headless(ctx)
         try:
-            return _run_qt(ctx)
+            return _run_qt(
+                ctx,
+                open_preferences=args.open_preferences
+                or (getattr(sys, "frozen", False) and not args.tray),
+            )
         except ImportError:
             _log.warning("PySide6 not installed — falling back to --headless")
             return _run_headless(ctx)

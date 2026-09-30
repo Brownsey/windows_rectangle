@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Runs the bundled diagnostic flags against either the source tree or a
-    built dist\WindowsRectangle.exe and writes the combined output to a
+    built apps\windows\exe\WindowsRectangle.exe and writes the combined output to a
     plain-text file. Paste / attach that file when reporting an issue.
 
     The collected sections are:
@@ -19,7 +19,7 @@
 
 .PARAMETER Exe
     Path to a WindowsRectangle executable. If unset the script prefers
-    `dist\WindowsRectangle.exe` next to this script, falling back to
+    `apps\windows\exe\WindowsRectangle.exe` next to this script, falling back to
     `python -m windows_rectangle` against the source tree.
 
 .PARAMETER OutputFile
@@ -62,7 +62,7 @@ function Section($title) {
 
 function Resolve-Runner {
     if ($script:Exe) { return @{ Kind = "exe"; Cmd = $script:Exe } }
-    $distExe = Join-Path $here "dist\WindowsRectangle.exe"
+    $distExe = Join-Path $here "apps\windows\exe\WindowsRectangle.exe"
     if (Test-Path $distExe) {
         return @{ Kind = "exe"; Cmd = $distExe }
     }

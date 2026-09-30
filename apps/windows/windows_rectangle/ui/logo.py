@@ -106,12 +106,12 @@ def _logo_directories() -> tuple[Path, ...]:
     if env_dir:
         directories.append(Path(env_dir))
 
+    if getattr(sys, "frozen", False):
+        directories.append(Path(sys.executable).resolve().parent / "logo")
+
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         directories.append(Path(meipass) / "logo")
-
-    if getattr(sys, "frozen", False):
-        directories.append(Path(sys.executable).resolve().parent / "logo")
 
     directories.append(_repo_root() / "logo")
     return tuple(dict.fromkeys(directories))

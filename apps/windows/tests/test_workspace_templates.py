@@ -1,6 +1,7 @@
 """Tests for ready-to-edit application workspace templates."""
 
 import pytest
+
 from windows_rectangle.core.workspace_templates import (
     office_workspace,
     runescape_workspace,

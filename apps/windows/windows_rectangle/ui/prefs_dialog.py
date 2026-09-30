@@ -154,11 +154,9 @@ def build_dialog(pc: PrefsController):
                 pc.set_shortcut(action, text)
             else:
                 pc.clear_shortcut(action)
-        except ShortcutParseError as e:
+        except ShortcutParseError:
             _log.debug("shortcut parse failed", exc_info=True)
-            validation.setText(f"⛔ {action.value}: {e}")
-            ok_btn.setEnabled(False)
-            return
+            pc.staged.shortcuts[action] = text
         refresh_validation()
 
     shortcuts_table.itemChanged.connect(on_table_change)

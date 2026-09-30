@@ -98,3 +98,38 @@ def test_latest_value_threaded_producers():
     assert final is not None
     # No exceptions raised, slot cleared.
     assert lv.pop() is None
+
+
+def test_latest_value_preserves_write_during_pop():
+    """A producer write between read and clear must remain available."""
+    read_started = threading.Event()
+    resume_read = threading.Event()
+    consumed: list[int | None] = []
+    reader_ident: int | None = None
+
+    class PausedRead(LatestValue[int]):
+        def __getattribute__(self, name):
+            value = super().__getattribute__(name)
+            if name in ("_value", "_values") and threading.get_ident() == reader_ident:
+                read_started.set()
+                assert resume_read.wait(timeout=2)
+            return value
+
+    lv = PausedRead(1)
+
+    def consume():
+        nonlocal reader_ident
+        reader_ident = threading.get_ident()
+        consumed.append(lv.pop())
+
+    reader = threading.Thread(target=consume)
+    writer = threading.Thread(target=lambda: lv.set(2))
+    reader.start()
+    assert read_started.wait(timeout=2)
+    writer.start()
+    writer.join(timeout=2)
+    assert not writer.is_alive()
+    resume_read.set()
+    reader.join(timeout=2)
+    assert not reader.is_alive()
+    assert consumed[0] == 2 or lv.pop() == 2

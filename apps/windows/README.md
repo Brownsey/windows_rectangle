@@ -19,9 +19,8 @@ From the repository root:
 
 The launcher:
 
-- stops any existing Windows Rectangle process,
 - creates `.venv` when needed,
-- installs the Windows runtime and developer dependencies,
+- installs missing Windows runtime and developer dependencies,
 - opens the Preferences window by default.
 
 Useful launcher commands:
@@ -84,7 +83,7 @@ The build script:
 - installs runtime, dev, and packaging dependencies,
 - runs the full quality gate,
 - builds `apps/windows/exe/WindowsRectangle.exe`,
-- smoke-tests the packaged executable with `--version`,
+- smoke-tests the packaged executable with `--check-install`,
 - copies bundled runtime files into `apps/windows/exe/_internal`,
 - creates a versioned zip plus SHA-256 checksums in `apps/windows/exe`.
 

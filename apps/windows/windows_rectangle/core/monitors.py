@@ -67,7 +67,16 @@ def move_to_monitor(
     if source.handle == destination.handle:
         return window
     fracs = relative_position(window, source.work_area)
-    return apply_relative_position(fracs, destination.work_area)
+    target = apply_relative_position(fracs, destination.work_area)
+    area = destination.work_area
+    width = min(target.width, area.width)
+    height = min(target.height, area.height)
+    return Rect(
+        max(area.left, min(target.x, area.right - width)),
+        max(area.top, min(target.y, area.bottom - height)),
+        width,
+        height,
+    )
 
 
 def overlap_area(window: Rect, monitor: MonitorInfo) -> int:

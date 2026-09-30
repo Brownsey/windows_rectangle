@@ -5,6 +5,7 @@ argparse layer and the early-exit paths (second instance, no Win32).
 """
 
 import pytest
+
 from windows_rectangle.__main__ import _parse_args
 
 
@@ -18,6 +19,108 @@ def test_parse_args_defaults():
 def test_parse_args_headless_flag():
     args = _parse_args(["--headless"])
     assert args.headless is True
+
+
+def test_parse_args_accepts_login_tray_flag():
+    assert _parse_args(["--tray"]).tray is True
+
+
+def test_parse_args_accepts_open_preferences_flag():
+    assert _parse_args(["--open-preferences"]).open_preferences is True
+
+
+@pytest.mark.parametrize(
+    ("frozen", "expected"),
+    [
+        (False, '"C:\\Program Files\\Python\\python.exe" -m windows_rectangle --tray'),
+        (True, '"C:\\Program Files\\Rectangle\\rectangle.exe" --tray'),
+    ],
+)
+def test_default_autostart_command_quotes_paths(monkeypatch, frozen, expected):
+    import windows_rectangle.__main__ as m
+
+    monkeypatch.setattr(
+        m.sys,
+        "executable",
+        (
+            r"C:\Program Files\Rectangle\rectangle.exe"
+            if frozen
+            else r"C:\Program Files\Python\python.exe"
+        ),
+    )
+    monkeypatch.setattr(m.sys, "frozen", frozen, raising=False)
+    assert m._default_autostart_command() == expected
+
+
+def test_main_passes_default_autostart_command_to_bind(monkeypatch):
+    import windows_rectangle.__main__ as m
+
+    commands = []
+    monkeypatch.setattr(m, "_setup_logging", lambda *_: None)
+
+    class Context:
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(
+        m, "bind_win32", lambda **kw: commands.append(kw["command_line"]) or Context()
+    )
+    monkeypatch.setattr(m, "_run_headless", lambda *_: 0)
+    monkeypatch.setattr(m.sys, "executable", r"C:\Program Files\Python\python.exe")
+    monkeypatch.setattr(m.sys, "frozen", False, raising=False)
+    assert m.main(["--headless"]) == 0
+    assert commands == ['"C:\\Program Files\\Python\\python.exe" -m windows_rectangle --tray']
+
+
+def test_qt_tray_survives_last_dialog_close(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets")
+    import windows_rectangle.__main__ as m
+    import windows_rectangle.ui.overlay as overlay
+    import windows_rectangle.ui.tray as tray
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    monkeypatch.setattr(tray, "install", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(overlay, "install", lambda: None)
+    monkeypatch.setattr(QtWidgets.QApplication, "exec", lambda self: 0)
+
+    class Context:
+        def drain_actions(self):
+            pass
+
+        def maintenance(self):
+            pass
+
+    assert m._run_qt(Context()) == 0
+    assert not app.quitOnLastWindowClosed()
+
+
+@pytest.mark.parametrize(
+    ("frozen", "flags", "expected"),
+    [
+        (True, [], True),
+        (True, ["--tray"], False),
+        (False, ["--open-preferences"], True),
+    ],
+)
+def test_main_selects_preferences_startup_mode(monkeypatch, frozen, flags, expected):
+    import windows_rectangle.__main__ as m
+
+    launched = []
+
+    class Context:
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(m, "_setup_logging", lambda *_: None)
+    monkeypatch.setattr(m, "bind_win32", lambda **_: Context())
+    monkeypatch.setattr(
+        m, "_run_qt", lambda _ctx, *, open_preferences: launched.append(open_preferences) or 0
+    )
+    monkeypatch.setattr(m.sys, "frozen", frozen, raising=False)
+
+    assert m.main(flags) == 0
+    assert launched == [expected]
 
 
 def test_parse_args_command_line():
@@ -168,7 +271,7 @@ def test_import_missing_file_returns_1(monkeypatch, capsys, tmp_path):
 def test_print_monitors_uses_win32_adapter(monkeypatch, capsys):
     """Verify --print-monitors short-circuits before bind_win32 and calls
     Win32WindowManager.list_monitors. The adapter is monkey-patched so
-    the test passes on a Windows host with pywin32 OR a non-Windows host
+    the test passes on a Windows host OR a non-Windows host
     (the import fallback is exercised in the next test)."""
     import sys as sys_mod
     import types
@@ -327,6 +430,23 @@ def test_import_bad_json_returns_1(monkeypatch, capsys, tmp_path):
     assert rc == 1
     err = capsys.readouterr().err
     assert "not valid JSON" in err
+
+
+def test_import_invalid_settings_returns_1_without_changing_config(monkeypatch, capsys, tmp_path):
+    import windows_rectangle.__main__ as m
+    from windows_rectangle.adapters.json_config import JsonConfigStore
+    from windows_rectangle.ports.config_store import Settings
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(m, "bind_win32", lambda **_: (_ for _ in ()).throw(AssertionError()))
+    store = JsonConfigStore()
+    store.save(Settings(gap=8))
+    source = tmp_path / "invalid.json"
+    source.write_text('{"gap": "wide"}', encoding="utf-8")
+
+    assert m.main(["--import-config", str(source)]) == 1
+    assert "gap must be an integer" in capsys.readouterr().err
+    assert store.load().gap == 8
 
 
 def test_setup_logging_sets_root_level():

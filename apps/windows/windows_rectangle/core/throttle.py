@@ -1,15 +1,9 @@
-"""Rate-limit + latest-value helpers (brief §5 #7).
-
-The `WH_MOUSE_LL` hook must return fast or Windows drops it. Pattern:
-    - Hook stores the cursor coords into a `LatestValue` (O(1), no I/O).
-    - A polling timer reads the latest value at ~60 Hz (`Throttle`) and
-      does the snap-zone + overlay work off the hook thread.
-"""
+"""Rate-limit and latest-value helpers for bounded polling work."""
 
 from __future__ import annotations
 
-import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
@@ -41,35 +35,35 @@ class Throttle:
 
 
 class LatestValue(Generic[T]):
-    """Single-slot lock-free-ish latest-value latch.
+    """Single-slot handoff for producers and one consumer.
 
-    Producers overwrite the slot atomically (Python assignment is
-    GIL-atomic for object refs). The consumer takes the value with
-    `pop()`, which atomically clears the slot. No queueing — older
-    writes are silently dropped, which is exactly what the mouse hook
-    needs (we only care about the most recent cursor position).
+    Deque append/pop operations are atomic on CPython. Producers overwrite
+    older values; a consumer pop cannot erase a value appended afterward.
     """
 
-    __slots__ = ("_value", "_lock")
+    __slots__ = ("_values",)
 
     def __init__(self, initial: T | None = None) -> None:
-        self._value: T | None = initial
-        # The lock guards the pop-and-clear pair, not the assignment.
-        self._lock = threading.Lock()
+        self._values: deque[T] = deque(maxlen=1)
+        if initial is not None:
+            self._values.append(initial)
 
     def set(self, value: T) -> None:
-        self._value = value
+        self._values.append(value)
 
     def pop(self) -> T | None:
         """Take the latest value and clear the slot. None if empty."""
-        with self._lock:
-            v = self._value
-            self._value = None
-            return v
+        try:
+            return self._values.pop()
+        except IndexError:
+            return None
 
     def peek(self) -> T | None:
-        return self._value
+        try:
+            return self._values[-1]
+        except IndexError:
+            return None
 
     @property
     def has_value(self) -> bool:
-        return self._value is not None
+        return bool(self._values)

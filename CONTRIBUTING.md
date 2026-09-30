@@ -24,11 +24,11 @@ to validate.
 
 ## Project layout
 
-See `BRIEF.md` §4 for the hexagonal/ports-and-adapters layout. The
+See `apps/windows/BRIEF.md` §4 for the hexagonal/ports-and-adapters layout. The
 short version:
 
 ```
-windows_rectangle/
+apps/windows/windows_rectangle/
 ├── core/        # pure logic — Rect math, action transforms, dispatcher
 ├── ports/       # Protocols / ABCs — window manager, hotkeys, config
 ├── adapters/    # Windows-specific implementations
@@ -37,8 +37,7 @@ windows_rectangle/
 └── __main__.py  # CLI entry point (`python -m windows_rectangle`)
 ```
 
-`core/` imports nothing OS-specific; `adapters/` is where pywin32 +
-ctypes live; `ui/` lazy-imports PySide6.
+`core/` imports nothing OS-specific; `adapters/` uses stdlib ctypes for Win32 calls; `ui/` lazy-imports PySide6.
 
 ## Conventions
 
@@ -57,8 +56,8 @@ ctypes live; `ui/` lazy-imports PySide6.
 ## Running the tests
 
 ```powershell
-python -m pytest                          # 460+ tests, ~5s
-python -m pytest tests/test_diagnostics.py  # one module
+python -m pytest                          # complete suite
+python -m pytest apps/windows/tests/test_diagnostics.py  # one module
 python -m pytest -k "binding"             # by name
 python -m pytest --co -q                  # list test ids
 ```
@@ -80,13 +79,13 @@ you can pipe it into CI.
 
 ## What changes need a brief update?
 
-`BRIEF.md` is the architectural spec — bump the iteration log when you
+`apps/windows/BRIEF.md` is the architectural spec — bump the iteration log when you
 change something the brief describes (a new "hard problem", a different
 boundary, a new port). Day-to-day feature changes go to `CHANGELOG.md`.
 
 ## CI
 
-The GitHub Actions workflow at `.github/workflows/ci.yml` runs pytest
+The GitHub Actions workflow at `.github/workflows/windows-ci.yml` runs pytest
 on the `windows-latest` runner. Adapter tests need Windows; `core/` and
 `ports/` tests would pass anywhere.
 
@@ -96,4 +95,4 @@ on the `windows-latest` runner. Adapter tests need Windows; `core/` and
 - [ ] `python -m pytest` passes locally.
 - [ ] `python -m windows_rectangle --check-install` reports OK on your dev box.
 - [ ] `CHANGELOG.md` (Unreleased) updated if the change is user-visible.
-- [ ] `BRIEF.md` iteration log bumped if the architectural surface changed.
+- [ ] `apps/windows/BRIEF.md` iteration log bumped if the architectural surface changed.

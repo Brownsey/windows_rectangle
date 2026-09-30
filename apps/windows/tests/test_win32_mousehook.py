@@ -8,10 +8,12 @@ shutdown cleans up.
 On non-Windows: constructor raises.
 """
 
+import ctypes
 import sys
 import time
 
 import pytest
+
 from windows_rectangle.adapters.win32_mousehook import (
     EVENT_LBUTTON_DOWN,
     EVENT_MOVE,
@@ -55,3 +57,24 @@ def test_event_kinds_are_distinct():
     assert EVENT_MOVE != EVENT_LBUTTON_DOWN
     assert EVENT_MOVE == "move"
     assert EVENT_LBUTTON_DOWN == "lbutton_down"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="win32 only")
+def test_install_failure_raises_from_constructor(monkeypatch):
+    def fail_install(self):
+        self._startup_error = OSError("hook install failed")
+        self._stopped.set()
+        self._started.set()
+
+    monkeypatch.setattr(Win32MouseHook, "_run", fail_install)
+    with pytest.raises(RuntimeError, match="hook install failed"):
+        Win32MouseHook(on_event=lambda *a: None)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="win32 only")
+def test_hook_result_type_is_pointer_sized():
+    hook = Win32MouseHook(on_event=lambda *a: None)
+    try:
+        assert ctypes.sizeof(hook._hook_proc._restype_) == ctypes.sizeof(ctypes.c_void_p)
+    finally:
+        hook.shutdown()

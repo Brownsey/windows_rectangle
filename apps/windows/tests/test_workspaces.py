@@ -1,6 +1,9 @@
 """Tests for named multi-window workspace planning."""
 
+from itertools import product
+
 import pytest
+
 from windows_rectangle.core.geometry import Rect
 from windows_rectangle.core.workspaces import (
     NormalizedRect,
@@ -65,6 +68,142 @@ def test_match_workspace_windows_is_geometry_independent_and_one_to_one():
     )
     assert [(match.placement_id, match.handle) for match in result.matches] == [("alice", 1)]
     assert result.unmatched_placements == ("bob",)
+
+
+def test_specific_rule_claims_its_window_before_earlier_broad_rule():
+    rect = NormalizedRect(0, 0, 5000, 5000)
+    placements = (
+        WorkspacePlacement("broad", "Any browser", WindowMatcher(process_name="chrome.exe"), rect),
+        WorkspacePlacement(
+            "specific",
+            "Inbox",
+            WindowMatcher(process_name="chrome.exe", title_contains="Inbox"),
+            rect,
+        ),
+    )
+    windows = [WindowIdentity(1, "Inbox", "chrome.exe"), WindowIdentity(2, "Docs", "chrome.exe")]
+    result = match_workspace_windows(placements, windows)
+    assert [(m.placement_id, m.handle) for m in result.matches] == [("broad", 2), ("specific", 1)]
+
+
+def test_regex_overlap_keeps_the_only_window_for_an_exact_title():
+    rect = NormalizedRect(0, 0, 5000, 5000)
+    placements = (
+        WorkspacePlacement(
+            "regex", "Either", WindowMatcher(process_name="app", title_regex=r"Window [12]"), rect
+        ),
+        WorkspacePlacement(
+            "exact", "First", WindowMatcher(process_name="app", title_contains="Window 1"), rect
+        ),
+    )
+    windows = [WindowIdentity(1, "Window 1", "app"), WindowIdentity(2, "Window 2", "app")]
+
+    result = match_workspace_windows(placements, windows)
+
+    assert [(match.placement_id, match.handle) for match in result.matches] == [
+        ("regex", 2),
+        ("exact", 1),
+    ]
+    assert result.unmatched_placements == ()
+
+
+def test_overlapping_equal_size_rules_find_all_possible_windows():
+    rect = NormalizedRect(0, 0, 5000, 5000)
+    placements = tuple(
+        WorkspacePlacement(name, name, WindowMatcher(title_regex=pattern), rect)
+        for name, pattern in (
+            ("first", r"Window [12]"),
+            ("second", r"Window [23]"),
+            ("third", r"Window [12]"),
+        )
+    )
+    windows = [WindowIdentity(i, f"Window {i}", "app") for i in (1, 2, 3)]
+
+    result = match_workspace_windows(placements, windows)
+
+    assert len(result.matches) == 3
+    assert len({match.handle for match in result.matches}) == 3
+    assert result.unmatched_placements == ()
+
+
+def test_duplicate_window_handle_is_only_assigned_once():
+    rect = NormalizedRect(0, 0, 5000, 5000)
+    placements = (
+        WorkspacePlacement("first", "First", WindowMatcher(title_contains="Window"), rect),
+        WorkspacePlacement("second", "Second", WindowMatcher(title_contains="Window"), rect),
+    )
+    windows = [WindowIdentity(1, "Window", "app"), WindowIdentity(1, "Window", "app")]
+
+    result = match_workspace_windows(placements, windows)
+
+    assert [(match.placement_id, match.handle) for match in result.matches] == [("first", 1)]
+    assert result.unmatched_placements == ("second",)
+
+
+def test_matching_preserves_casefold_exe_suffix_regex_and_window_order():
+    rect = NormalizedRect(0, 0, 5000, 5000)
+    placements = (
+        WorkspacePlacement(
+            "unicode",
+            "Unicode",
+            WindowMatcher(process_name="CHROME.EXE", title_contains="straße", title_regex=r"tÄb$"),
+            rect,
+        ),
+        WorkspacePlacement("first", "First", WindowMatcher(title_regex=r"Window [12]"), rect),
+        WorkspacePlacement("second", "Second", WindowMatcher(title_regex=r"Window [12]"), rect),
+    )
+    windows = [
+        WindowIdentity(10, "STRASSE TäB", "chrome"),
+        WindowIdentity(1, "Window 1", "app"),
+        WindowIdentity(2, "Window 2", "app"),
+    ]
+
+    result = match_workspace_windows(placements, windows)
+
+    assert [(match.placement_id, match.handle) for match in result.matches] == [
+        ("unicode", 10),
+        ("first", 1),
+        ("second", 2),
+    ]
+
+
+def test_small_overlap_cases_reach_maximum_cardinality():
+    windows = [WindowIdentity(i, f"Window {i}", "app") for i in (1, 2, 3)]
+    rules = (
+        WindowMatcher(title_regex=r"Window [12]"),
+        WindowMatcher(title_regex=r"Window [23]"),
+        WindowMatcher(title_contains="Window 1"),
+        WindowMatcher(process_name="APP.EXE"),
+    )
+    rect = NormalizedRect(0, 0, 5000, 5000)
+    for matchers in product(rules, repeat=3):
+        placements = tuple(
+            WorkspacePlacement(str(index), str(index), matcher, rect)
+            for index, matcher in enumerate(matchers)
+        )
+        candidates = [
+            {index for index, window in enumerate(windows) if matcher.score(window)}
+            for matcher in matchers
+        ]
+        possible = (
+            choice
+            for choice in product((None, 0, 1, 2), repeat=3)
+            if all(index is None or index in candidates[p] for p, index in enumerate(choice))
+        )
+        maximum = max(
+            sum(index is not None for index in choice)
+            for choice in possible
+            if len({index for index in choice if index is not None})
+            == sum(index is not None for index in choice)
+        )
+
+        result = match_workspace_windows(placements, windows)
+
+        assert len(result.matches) == maximum, matchers
+        assert len({match.handle for match in result.matches}) == len(result.matches)
+        assert all(
+            match.handle - 1 in candidates[int(match.placement_id)] for match in result.matches
+        )
 
 
 def test_invalid_regex_and_empty_matcher_are_rejected():
