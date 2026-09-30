@@ -12,12 +12,14 @@ class DragWindows(FakeWindowManager):
     moving = None
     escape = False
     queries = 0
+    escape_queries = 0
 
     def get_drag_window(self):
         self.queries += 1
         return self.moving
 
     def is_escape_pressed(self):
+        self.escape_queries += 1
         return self.escape
 
 
@@ -56,6 +58,28 @@ def test_content_drag_does_not_start_window_snap():
     tick(ctx)
     assert windows.move_log == []
     assert not ctx.drag.active
+
+
+def test_completed_click_without_captured_window_stops_native_idle_queries():
+    ctx, windows, event = setup_drag()
+    event("lbutton_down", 200, 200)
+    event("lbutton_up", 200, 200)
+    for _ in range(1000):
+        tick(ctx)
+    assert windows.queries == 0
+    assert windows.escape_queries == 0
+    assert not ctx.drag.active
+
+
+def test_new_press_after_completed_click_can_start_native_drag():
+    ctx, windows, event = setup_drag()
+    event("lbutton_down", 200, 200)
+    event("lbutton_up", 200, 200)
+    tick(ctx)
+    event("lbutton_down", 200, 110)
+    windows.moving = 101
+    tick(ctx)
+    assert ctx.drag.active
 
 
 def test_hook_callback_never_queries_or_moves_windows():

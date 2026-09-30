@@ -951,6 +951,11 @@ class _DragInput:
             self._consumed_generation = generation
         if self._cancelled:
             return
+        if not pressed and self._handle is None:
+            # A click completed before any native window move was captured.
+            # Retire its persistent snapshot so idle ticks skip Win32 queries.
+            self.reset()
+            return
         windows = self.ctx.windows
         try:
             if getattr(windows, "is_escape_pressed", lambda: False)():
