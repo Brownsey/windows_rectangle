@@ -240,7 +240,14 @@ def _apply_named_workspace(ctx: AppContext, workspace_id: str, tray) -> None:
         _log.exception("workspace restore failed")
         tray.showMessage("Workspace restore failed", str(exc))
         return
-    tray.showMessage("Workspace restored", _workspace_result_text(result))
+    moved = result.moved
+    if not result.placements:
+        title = "Nothing to restore"
+    elif moved == len(result.placements):
+        title = "Workspace restored"
+    else:
+        title = "Workspace partly restored" if moved else "Workspace not restored"
+    tray.showMessage(title, _workspace_result_text(result))
 
 
 def _workspace_result_text(result) -> str:

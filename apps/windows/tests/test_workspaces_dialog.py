@@ -300,6 +300,103 @@ def test_workspace_controls_reachable_at_960_by_520(workspace_qt, tmp_path):
     assert dialog.placements.height() >= 60
 
 
+def test_workspace_controls_reachable_on_512_by_360_screen(workspace_qt, tmp_path, monkeypatch):
+    qt_widgets, app = workspace_qt
+    from PySide6 import QtCore
+
+    from windows_rectangle.ui.workspaces_dialog import _build
+
+    app.setStyle("windowsvista")
+    monkeypatch.setattr(
+        qt_widgets.QApplication,
+        "primaryScreen",
+        lambda: SimpleNamespace(availableGeometry=lambda: QtCore.QRect(0, 0, 512, 360)),
+    )
+    context, _store = _workspace_context(tmp_path)
+    dialog = _build(context)
+    dialog.window.show()
+    app.processEvents()
+
+    assert dialog.window.width() <= 512
+    assert dialog.window.height() <= 360
+    scroll = dialog.window.findChild(qt_widgets.QScrollArea, "workspaceContentScroll")
+    assert scroll is not None
+    assert scroll.horizontalScrollBar().maximum() == 0
+    assert scroll.verticalScrollBar().maximum() > 0
+    buttons = {
+        button.text(): button for button in dialog.window.findChildren(qt_widgets.QPushButton)
+    }
+    for label in (
+        "Start from template…",
+        "New empty workspace",
+        "Capture current windows…",
+        "Duplicate workspace",
+        "Delete workspace",
+        "Add application…",
+        "Remove selected rule",
+        "Record current positions",
+        "Test matches",
+        "Restore now",
+        "Done",
+    ):
+        button = buttons[label]
+        for area in reversed(dialog.window.findChildren(qt_widgets.QScrollArea)):
+            area.ensureWidgetVisible(button)
+        app.processEvents()
+        top_left = button.mapTo(dialog.window, QtCore.QPoint(0, 0))
+        assert button.isVisible(), label
+        assert 0 <= top_left.x() <= dialog.window.width() - button.width(), label
+        assert 0 <= top_left.y() <= dialog.window.height() - button.height(), label
+
+
+def test_compact_workspace_save_failure_status_fits_screen(workspace_qt, tmp_path, monkeypatch):
+    qt_widgets, app = workspace_qt
+    from PySide6 import QtCore
+
+    from windows_rectangle.ui.workspaces_dialog import _build
+
+    monkeypatch.setattr(
+        qt_widgets.QApplication,
+        "primaryScreen",
+        lambda: SimpleNamespace(availableGeometry=lambda: QtCore.QRect(0, 0, 512, 360)),
+    )
+    context, store = _workspace_context(tmp_path)
+    dialog = _build(context)
+    dialog.window.show()
+    app.processEvents()
+
+    def fail_save(_settings):
+        raise OSError(
+            "Access to the configuration file was denied by another program. "
+            "Close the editor using the file and retry saving your changes."
+        )
+
+    store.save = fail_save
+    dialog.name_edit.setText("Project revised")
+    dialog.name_edit.editingFinished.emit()
+    app.processEvents()
+
+    assert dialog.editor.is_dirty
+    assert dialog.status.text().startswith("Autosave failed:")
+    assert dialog.window.width() <= 512
+    assert dialog.window.height() <= 360
+    assert dialog.status.wordWrap()
+    assert dialog.status.height() >= dialog.status.fontMetrics().lineSpacing() * 2
+    assert dialog.status.width() <= dialog.window.width()
+    assert dialog.apply_button.isVisible()
+    scroll = dialog.window.findChild(qt_widgets.QScrollArea, "workspaceContentScroll")
+    restore = next(
+        button
+        for button in dialog.window.findChildren(qt_widgets.QPushButton)
+        if button.text() == "Restore now"
+    )
+    scroll.ensureWidgetVisible(restore)
+    app.processEvents()
+    restore_top = restore.mapTo(dialog.window, QtCore.QPoint(0, 0))
+    assert restore_top.y() >= 0
+    assert restore_top.y() + restore.height() <= dialog.window.height()
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows native layout")
 def test_native_workspace_actions_fit_at_200_percent_without_scrolling():
     script = dedent("""

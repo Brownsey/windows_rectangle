@@ -7,6 +7,37 @@ display + QApplication.
 
 import importlib
 
+import pytest
+
+
+@pytest.mark.parametrize(
+    ("statuses", "title"),
+    [
+        (("moved", "moved"), "Workspace restored"),
+        (("moved", "not_found"), "Workspace partly restored"),
+        (("moved", "blocked"), "Workspace partly restored"),
+        (("not_found",), "Workspace not restored"),
+        (("blocked",), "Workspace not restored"),
+        ((), "Nothing to restore"),
+    ],
+)
+def test_tray_restore_title_matches_outcome(statuses, title):
+    from types import SimpleNamespace
+
+    from windows_rectangle.core.workspace_service import PlacementResult, WorkspaceResult
+    from windows_rectangle.ui.tray import _apply_named_workspace, _workspace_result_text
+
+    result = WorkspaceResult(
+        tuple(PlacementResult(str(index), status) for index, status in enumerate(statuses))
+    )
+    notices = []
+    ctx = SimpleNamespace(apply_named_workspace=lambda _workspace_id: result)
+    tray = SimpleNamespace(showMessage=lambda *args: notices.append(args))
+
+    _apply_named_workspace(ctx, "saved", tray)
+
+    assert notices == [(title, _workspace_result_text(result))]
+
 
 def test_tray_module_imports_without_pyside6():
     mod = importlib.import_module("windows_rectangle.ui.tray")

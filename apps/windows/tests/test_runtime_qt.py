@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -12,6 +13,25 @@ from windows_rectangle.core.geometry import Rect
 from windows_rectangle.ports.config_store import Settings
 
 from .conftest import FakeWindowManager, make_monitor
+
+
+@pytest.fixture
+def schedule():
+    """Keep test timers alive, then stop them before the next Qt event loop."""
+    qt_core = pytest.importorskip("PySide6.QtCore")
+    timers = []
+
+    def later(delay, callback):
+        timer = qt_core.QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(callback)
+        timers.append(timer)
+        timer.start(delay)
+        return timer
+
+    yield later
+    for timer in timers:
+        timer.stop()
 
 
 def runtime(monkeypatch, windows=None):
@@ -47,15 +67,15 @@ def count_drains(monkeypatch, ctx):
     return calls
 
 
-def test_qt_idle_has_no_repeating_16ms_drain(monkeypatch):
+def test_qt_idle_has_no_repeating_16ms_drain(monkeypatch, schedule):
     qt_core, app, entry, ctx, _ = runtime(monkeypatch)
     calls = count_drains(monkeypatch, ctx)
-    qt_core.QTimer.singleShot(120, app.quit)
+    schedule(120, app.quit)
     assert entry._run_qt(ctx) == 0
     assert len(calls) <= 2
 
 
-def test_qt_maintenance_runs_on_separate_deadline(monkeypatch):
+def test_qt_maintenance_runs_on_separate_deadline(monkeypatch, schedule):
     qt_core, app, entry, ctx, _ = runtime(monkeypatch)
     calls = count_drains(monkeypatch, ctx)
     maintenance = []
@@ -68,23 +88,23 @@ def test_qt_maintenance_runs_on_separate_deadline(monkeypatch):
 
     monkeypatch.setattr(AppContext, "maintenance", counted)
     ctx.prune_interval = 0.03
-    qt_core.QTimer.singleShot(115, app.quit)
+    schedule(115, app.quit)
     assert entry._run_qt(ctx) == 0
     assert len(calls) <= 2
     assert len(maintenance) >= 3
 
 
-def test_qt_drains_action_already_queued_at_startup(monkeypatch):
+def test_qt_drains_action_already_queued_at_startup(monkeypatch, schedule):
     qt_core, app, entry, ctx, windows = runtime(monkeypatch)
     ctx.bus.submit(Action.LEFT_HALF)
     calls = count_drains(monkeypatch, ctx)
-    qt_core.QTimer.singleShot(120, app.quit)
+    schedule(120, app.quit)
     assert entry._run_qt(ctx) == 0
     assert windows.move_log == [(101, Rect(0, 0, 960, 1040))]
     assert sum(calls) == 1
 
 
-def test_qt_initial_drain_exception_retries_queued_action(monkeypatch):
+def test_qt_initial_drain_exception_retries_queued_action(monkeypatch, schedule):
     qt_core, app, entry, ctx, windows = runtime(monkeypatch)
     original = AppContext.drain_actions
     attempts = []
@@ -94,36 +114,42 @@ def test_qt_initial_drain_exception_retries_queued_action(monkeypatch):
             attempts.append(1)
             if len(attempts) == 1:
                 raise RuntimeError("one failed drain")
-        return original(self)
+        result = original(self)
+        if self is ctx and windows.move_log:
+            app.quit()
+        return result
 
     monkeypatch.setattr(AppContext, "drain_actions", flaky)
     ctx.bus.submit(Action.LEFT_HALF)
-    qt_core.QTimer.singleShot(350, app.quit)
+    schedule(2000, app.quit)  # Bounded failure path; success quits on dispatch.
     assert entry._run_qt(ctx) == 0
     assert len(attempts) >= 2
     assert windows.move_log == [(101, Rect(0, 0, 960, 1040))]
     assert ctx.bus.pending() == 0
 
 
-def test_qt_repeated_drain_exceptions_retry_on_timer_not_busy_loop(monkeypatch):
+def test_qt_repeated_drain_exceptions_retry_on_timer_not_busy_loop(monkeypatch, schedule):
     qt_core, app, entry, ctx, _ = runtime(monkeypatch)
     attempts = []
 
     def broken(self):
         if self is ctx:
-            attempts.append(1)
+            attempts.append(time.perf_counter())
+            if len(attempts) == 3:
+                app.quit()
             raise RuntimeError("still failing")
 
     monkeypatch.setattr(AppContext, "drain_actions", broken)
     monkeypatch.setattr(entry._log, "exception", lambda *_args, **_kwargs: None)
     ctx.bus.submit(Action.LEFT_HALF)
-    qt_core.QTimer.singleShot(350, app.quit)
+    schedule(2000, app.quit)  # Bounded failure path; success quits on third retry.
     assert entry._run_qt(ctx) == 0
-    assert 2 <= len(attempts) <= 30
+    assert len(attempts) == 3
+    assert all(b - a >= 0.005 for a, b in zip(attempts, attempts[1:], strict=False))
     assert ctx.bus.pending() == 1
 
 
-def test_qt_cross_thread_action_wakes_and_dispatches_on_gui_thread(monkeypatch):
+def test_qt_cross_thread_action_wakes_and_dispatches_on_gui_thread(monkeypatch, schedule):
     qt_core, app, entry, ctx, windows = runtime(monkeypatch)
     calls = count_drains(monkeypatch, ctx)
     gui_thread = threading.get_ident()
@@ -136,8 +162,8 @@ def test_qt_cross_thread_action_wakes_and_dispatches_on_gui_thread(monkeypatch):
 
     monkeypatch.setattr(FakeWindowManager, "set_window_rect", recorded_set)
     worker = threading.Thread(target=lambda: ctx.bus.submit(Action.LEFT_HALF))
-    qt_core.QTimer.singleShot(20, worker.start)
-    qt_core.QTimer.singleShot(350, app.quit)
+    schedule(20, worker.start)
+    schedule(350, app.quit)
     assert entry._run_qt(ctx) == 0
     worker.join(timeout=1)
     assert windows.move_log == [(101, Rect(0, 0, 960, 1040))], (ctx.bus.pending(), calls)
@@ -145,7 +171,7 @@ def test_qt_cross_thread_action_wakes_and_dispatches_on_gui_thread(monkeypatch):
     assert 1 <= len(calls) <= 3
 
 
-def test_qt_burst_coalesces_wakes_and_drains_bounded_batches(monkeypatch):
+def test_qt_burst_coalesces_wakes_and_drains_bounded_batches(monkeypatch, schedule):
     qt_core, app, entry, ctx, _ = runtime(monkeypatch)
     calls = count_drains(monkeypatch, ctx)
 
@@ -153,8 +179,8 @@ def test_qt_burst_coalesces_wakes_and_drains_bounded_batches(monkeypatch):
         for _ in range(40):
             ctx.bus.submit(Action.LEFT_HALF)
 
-    qt_core.QTimer.singleShot(5, lambda: threading.Thread(target=burst).start())
-    qt_core.QTimer.singleShot(500, app.quit)
+    schedule(5, lambda: threading.Thread(target=burst).start())
+    schedule(500, app.quit)
     assert entry._run_qt(ctx) == 0
     assert sum(calls) == 40
     assert max(calls) <= 16
@@ -162,7 +188,7 @@ def test_qt_burst_coalesces_wakes_and_drains_bounded_batches(monkeypatch):
     assert ctx.bus.pending() == 0
 
 
-def test_qt_workspace_request_wakes_from_worker_thread(monkeypatch):
+def test_qt_workspace_request_wakes_from_worker_thread(monkeypatch, schedule):
     qt_core, app, entry, ctx, _ = runtime(monkeypatch)
     calls = count_drains(monkeypatch, ctx)
     gui_thread = threading.get_ident()
@@ -173,8 +199,8 @@ def test_qt_workspace_request_wakes_from_worker_thread(monkeypatch):
         lambda self, workspace_id: applied.append((workspace_id, threading.get_ident())),
     )
     worker = threading.Thread(target=lambda: ctx.queue_workspace("saved"))
-    qt_core.QTimer.singleShot(20, worker.start)
-    qt_core.QTimer.singleShot(120, app.quit)
+    schedule(20, worker.start)
+    schedule(120, app.quit)
     assert entry._run_qt(ctx) == 0
     worker.join(timeout=1)
     assert applied == [("saved", gui_thread)]
@@ -210,7 +236,7 @@ def drag_runtime(monkeypatch):
     return qt_core, app, entry, ctx, windows, event
 
 
-def test_qt_completed_click_stops_active_timer(monkeypatch):
+def test_qt_completed_click_stops_active_timer(monkeypatch, schedule):
     qt_core, app, entry, ctx, _, event = drag_runtime(monkeypatch)
     calls = count_drains(monkeypatch, ctx)
     observed = {}
@@ -219,36 +245,36 @@ def test_qt_completed_click_stops_active_timer(monkeypatch):
         event("lbutton_down", 200, 200)
         event("lbutton_up", 200, 200)
 
-    qt_core.QTimer.singleShot(20, click)
-    qt_core.QTimer.singleShot(70, lambda: observed.update(early=len(calls)))
-    qt_core.QTimer.singleShot(130, lambda: observed.update(late=len(calls)))
-    qt_core.QTimer.singleShot(145, app.quit)
+    schedule(20, click)
+    schedule(70, lambda: observed.update(early=len(calls)))
+    schedule(130, lambda: observed.update(late=len(calls)))
+    schedule(145, app.quit)
     assert entry._run_qt(ctx) == 0
     assert observed["early"] == observed["late"] == 1
     assert not ctx.has_pending_work()
 
 
-def test_qt_polling_covers_late_move_and_captured_native_release(monkeypatch):
+def test_qt_polling_covers_late_move_and_captured_native_release(monkeypatch, schedule):
     qt_core, app, entry, ctx, windows, event = drag_runtime(monkeypatch)
     calls = count_drains(monkeypatch, ctx)
     observed = {}
-    qt_core.QTimer.singleShot(20, lambda: event("lbutton_down", 200, 110))
-    qt_core.QTimer.singleShot(90, lambda: setattr(windows, "moving", 101))
-    qt_core.QTimer.singleShot(170, lambda: observed.update(late_move=ctx.drag.active))
-    qt_core.QTimer.singleShot(180, lambda: event("lbutton_up", 200, 110))
-    qt_core.QTimer.singleShot(240, lambda: observed.update(release_pending=ctx.has_pending_work()))
-    qt_core.QTimer.singleShot(250, lambda: setattr(windows, "moving", None))
+    schedule(20, lambda: event("lbutton_down", 200, 110))
+    schedule(90, lambda: setattr(windows, "moving", 101))
+    schedule(170, lambda: observed.update(late_move=ctx.drag.active))
+    schedule(180, lambda: event("lbutton_up", 200, 110))
+    schedule(240, lambda: observed.update(release_pending=ctx.has_pending_work()))
+    schedule(250, lambda: setattr(windows, "moving", None))
 
     def mark_done():
         observed["done"] = len(calls)
-        qt_core.QTimer.singleShot(70, mark_stable)
+        schedule(70, mark_stable)
 
     def mark_stable():
         observed["stable"] = len(calls)
         app.quit()
 
-    qt_core.QTimer.singleShot(320, mark_done)
-    qt_core.QTimer.singleShot(1000, app.quit)  # Guard a failed callback path.
+    schedule(320, mark_done)
+    schedule(1000, app.quit)  # Guard a failed callback path.
     assert entry._run_qt(ctx) == 0
     assert observed["late_move"]
     assert observed["release_pending"]
@@ -256,7 +282,7 @@ def test_qt_polling_covers_late_move_and_captured_native_release(monkeypatch):
     assert not ctx.has_pending_work()
 
 
-def test_qt_facade_cancel_hides_preview_and_returns_idle(monkeypatch):
+def test_qt_facade_cancel_hides_preview_and_returns_idle(monkeypatch, schedule):
     qt_core, app, entry, ctx, _ = runtime(monkeypatch)
     from windows_rectangle.ui import overlay
 
@@ -273,16 +299,16 @@ def test_qt_facade_cancel_hides_preview_and_returns_idle(monkeypatch):
         ctx.begin_drag(Rect(100, 100, 800, 600))
         ctx.drag_update(2, 500)
 
-    qt_core.QTimer.singleShot(20, begin)
-    qt_core.QTimer.singleShot(55, ctx.cancel_drag)
-    qt_core.QTimer.singleShot(100, app.quit)
+    schedule(20, begin)
+    schedule(55, ctx.cancel_drag)
+    schedule(100, app.quit)
     assert entry._run_qt(ctx) == 0
     assert [kind for kind, _ in changes] == ["show", "hide"]
     assert not ctx.has_pending_work()
     assert len(calls) <= 5
 
 
-def test_qt_deferred_snap_wakes_dispatch_without_mouse_hook(monkeypatch):
+def test_qt_deferred_snap_wakes_dispatch_without_mouse_hook(monkeypatch, schedule):
     qt_core, app, entry, ctx, windows = runtime(monkeypatch)
     calls = count_drains(monkeypatch, ctx)
 
@@ -291,17 +317,17 @@ def test_qt_deferred_snap_wakes_dispatch_without_mouse_hook(monkeypatch):
         ctx.drag_update(2, 500)
         ctx.end_drag_via_bus()
 
-    qt_core.QTimer.singleShot(20, defer_snap)
-    qt_core.QTimer.singleShot(150, app.quit)
+    schedule(20, defer_snap)
+    schedule(150, app.quit)
     assert entry._run_qt(ctx) == 0
     assert windows.move_log == [(101, Rect(0, 0, 960, 1040))]
     assert sum(calls) == 1
     assert not ctx.has_pending_work()
 
 
-def test_qt_teardown_removes_wake_callbacks(monkeypatch):
+def test_qt_teardown_removes_wake_callbacks(monkeypatch, schedule):
     qt_core, app, entry, ctx, _ = runtime(monkeypatch)
-    qt_core.QTimer.singleShot(20, app.quit)
+    schedule(20, app.quit)
     assert entry._run_qt(ctx) == 0
     assert ctx.bus.on_submit is None
     assert ctx.wake_ui is None

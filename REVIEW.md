@@ -98,9 +98,75 @@ This iteration fixes the observed issues:
 The complete source gate passed on Windows/Python 3.13.13: **809 tests**, Ruff
 lint and formatting (112 files), and strict mypy checks (21 core source files).
 Native Qt integration, isolated JSON persistence and 200% scale layout checks
-cover the changed interactions. Source performance measurements do not verify
-a newly packaged executable. The release hashes and executable measurements in
-the historical review below apply only to that earlier snapshot.
+cover the changed interactions. Independent validation and a distinct final
+review found and resolved a failed-drain recovery defect before commit: a Qt
+callback error now retries pending work on the bounded timer instead of leaving
+the wake latch stuck. Tests cover both one-time and repeated failures.
+
+### Packaged runtime at `7b3cd12`
+
+The canonical build completed with the already-verified dependencies and source
+snapshot `c54d2e9ac7cf9ccb8a57b6a1c8193220aff3526f817cd96c15eb2fa034875367`
+(123 source, test and build-input files). The package's import diagnostics passed
+all eight required imports. An independent check verified both sidecar hashes,
+ZIP integrity, all 202 member contents and exact agreement between the archive
+and portable folder file sets, including the Windows Qt platform plugin.
+
+- Executable: 2,237,280 bytes; SHA-256
+  `41712957101b48d660bcb792f5c68784759093b88dde90a07b2033ffd79d3f08`.
+- ZIP: 41,403,913 bytes; SHA-256
+  `0317c8a5085982ccab542e2f5c6ae0be0498ccb6c88763f225a08176f385c1ae`.
+
+Three isolated launches requested the default shortcuts and enabled dragging.
+Preferences became visible in 3.261, 4.827 and 3.609 seconds (median 3.609 s).
+Each run sampled 20 seconds with Preferences visible, then closed only that
+window and sampled another 20 seconds with the app still in the tray. All six
+samples reported CPU time below Windows' observed 15.625 ms accounting
+resolution. Tray-only process cycles ranged from 0.91 to 1.45 million per
+sample, and working sets stayed stable at 128.8–131.27 MiB. These observations
+do not establish literal zero CPU usage or a startup improvement.
+
+All three processes exited gracefully with code 0. Their isolated logs showed
+the five expected Windows error 1409 shortcut conflicts and no other logged
+warnings or errors. The user's Run registry value remained unchanged. This
+packaged check verifies enabled configuration and observed behavior; the source
+probe above separately inspected the installed native hook. Reproducible local
+evidence is retained in `build/review/measure_frozen_enabled.py`,
+`frozen-enabled-performance.json` and the three corresponding log files.
+
+### Small-desktop and CI follow-up
+
+The first [remote Windows matrix run](https://github.com/Brownsey/windows_rectangle/actions/runs/36796482392)
+exposed dialog overflow on its 512×360 logical desktop. Preferences now keeps
+its actions outside the scrolling body, and Workspaces uses a single column on
+screens narrower than 960 logical pixels. The wider workspace layout retains
+its docked actions. Native 200% captures verify fitting 480×328 frames for the
+controlled compact desktop, including five shortcut failures and long save
+errors. Gap and cycle-time controls now display their units.
+
+The expanded audit also exercised shortcut recording and focus return, workspace
+templates, capture, canvas positioning and tray navigation. It found a tray
+notification that claimed success when windows were missing; titles now
+distinguish complete, partial, failed and empty restores. An independent native
+capture/persist/restore journey restored two disposable HWNDs exactly, with every
+move restricted to those handles. A compact JSON save-failure/retry/reopen
+journey independently confirmed that failed writes preserve the saved state.
+
+The same CI run exposed one timing-sensitive Qt test. Tests now own and stop
+their timers, and error-recovery checks finish on actual dispatch with a bounded
+failure watchdog. A separate reproduction proved that an abandoned quit timer
+can end a later Qt event loop; the exact cause of that earlier CI failure is not
+established. No runtime behavior or required assertion was removed to obtain a
+pass.
+
+The follow-up local gate passed **820 tests**, Ruff lint/formatting and strict
+core type checks. Independent checks passed 55 UI tests, 18 tray/service tests
+and 15 runtime Qt tests. The corresponding 123-file source snapshot is
+`3eca1b325f67654963c87013ac066b86550362e22a324256202b7c4db80d5bda`.
+The remote matrix is rerun on the review branch after publishing these fixes.
+
+The review below is historical: its source snapshot, test counts, executable
+hashes and measurements precede this iteration.
 
 Review date: 30 September 2026. Baseline: `cfbd77d`. Scope: the complete
 repository, with implementation and validation concentrated on the Windows

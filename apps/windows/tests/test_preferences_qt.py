@@ -237,8 +237,9 @@ def test_qt_preferences_buttons_fit_scaled_desktop():
     script = dedent("""
         import json
         from PySide6 import QtCore, QtWidgets
+        from windows_rectangle.app import BindingReport
         from windows_rectangle.ports.config_store import Settings
-        from windows_rectangle.ui.preferences import _build_window
+        from windows_rectangle.ui.preferences import _build_window, ordered_actions
         class Context:
             settings = Settings()
             config_store = None
@@ -257,6 +258,40 @@ def test_qt_preferences_buttons_fit_scaled_desktop():
             "apply_fits": screen.contains(apply_bottom),
         }))
         controller.window.close()
+
+        class SizedWidgets:
+            class QApplication:
+                @staticmethod
+                def primaryScreen():
+                    class Screen:
+                        @staticmethod
+                        def availableGeometry():
+                            return QtCore.QRect(0, 0, 512, 360)
+                    return Screen()
+
+            def __getattr__(self, name):
+                return getattr(QtWidgets, name)
+
+        class FailedContext(Context):
+            last_binding_report = BindingReport(failed=tuple(
+                (action, "ctrl+alt+left", "already registered")
+                for action in list(ordered_actions())[:5]
+            ))
+
+        narrow = _build_window(FailedContext(), QtCore, SizedWidgets())
+        narrow.window.show()
+        app.processEvents()
+        frame = narrow.window.frameGeometry()
+        buttons = narrow.window.findChild(QtWidgets.QDialogButtonBox)
+        print(json.dumps({
+            "narrow_frame": [frame.width(), frame.height()],
+            "narrow_actions_fit": all(
+                narrow.window.rect().contains(
+                    button.mapTo(narrow.window, QtCore.QPoint(button.width() - 1, button.height() - 1))
+                ) for button in buttons.buttons() if button.isVisible()
+            ),
+        }))
+        narrow.window.close()
     """)
     env = os.environ.copy()
     env["QT_QPA_PLATFORM"] = "windows"
@@ -271,10 +306,83 @@ def test_qt_preferences_buttons_fit_scaled_desktop():
         check=True,
         timeout=30,
     )
-    geometry = json.loads(result.stdout)
+    geometry, narrow = (json.loads(line) for line in result.stdout.splitlines())
 
     assert geometry["frame_fits"], geometry
     assert geometry["apply_fits"], geometry
+    assert narrow["narrow_frame"][0] <= 512, narrow
+    assert narrow["narrow_frame"][1] <= 360, narrow
+    assert narrow["narrow_actions_fit"], narrow
+
+
+@pytest.mark.parametrize("failed_count", [0, 5])
+def test_qt_preferences_fit_512_by_360_available_screen(qt_app, qt_modules, failed_count):
+    qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+
+    class SizedWidgets:
+        class QApplication:
+            @staticmethod
+            def primaryScreen():
+                class Screen:
+                    @staticmethod
+                    def availableGeometry():
+                        return qt_core.QRect(0, 0, 512, 360)
+
+                return Screen()
+
+        def __getattr__(self, name):
+            return getattr(qt_widgets, name)
+
+    ctx = SpyContext()
+    if failed_count:
+        ctx.last_binding_report = BindingReport(
+            failed=tuple(
+                (action, "ctrl+alt+left", "already registered")
+                for action in list(preferences.ordered_actions())[:failed_count]
+            )
+        )
+    controller = preferences._build_window(ctx, qt_core, SizedWidgets())
+    window = controller.window
+    window.show()
+    qt_app.processEvents()
+
+    assert window.frameGeometry().width() <= 512
+    assert window.frameGeometry().height() <= 360
+    for text in ("Save", "Apply", "Restore Defaults") + (
+        ("Retry shortcuts",) if failed_count else ()
+    ):
+        button = _button_box_button(controller, qt_widgets, text)
+        bottom_right = button.mapTo(window, qt_core.QPoint(button.width() - 1, button.height() - 1))
+        assert button.isVisible()
+        assert window.rect().contains(bottom_right), text
+    if failed_count:
+        content_scroll = window.findChild(qt_widgets.QScrollArea, "preferencesContentScroll")
+        warning_center = controller.binding_status_label.mapTo(
+            content_scroll.viewport(), controller.binding_status_label.rect().center()
+        )
+        assert content_scroll.viewport().rect().contains(warning_center)
+
+    tabs = window.findChild(qt_widgets.QTabWidget, "preferencesTabs")
+    assert tabs.height() <= 200
+    tabs.setCurrentIndex(1)
+    qt_app.processEvents()
+    general_scroll = window.findChild(qt_widgets.QScrollArea, "generalScroll")
+    assert general_scroll is not None
+    content_scroll = window.findChild(qt_widgets.QScrollArea, "preferencesContentScroll")
+    for control in (controller.gap_spin, controller.cycle_spin, controller.launch_checkbox):
+        general_scroll.ensureWidgetVisible(control)
+        content_scroll.ensureWidgetVisible(control)
+        qt_app.processEvents()
+        center = control.mapTo(general_scroll.viewport(), control.rect().center())
+        assert general_scroll.viewport().rect().contains(center), control.objectName()
+        outer_center = control.mapTo(content_scroll.viewport(), control.rect().center())
+        assert content_scroll.viewport().rect().contains(outer_center), control.objectName()
+
+
+def test_qt_general_values_show_units(qt_app, qt_modules):
+    controller = _build_controller(qt_app, qt_modules)
+    assert controller.gap_spin.suffix() == " px"
+    assert controller.cycle_spin.suffix() == " s"
 
 
 def test_qt_shortcut_search_filters_rows_and_sections(qt_app, qt_modules):
