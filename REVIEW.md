@@ -163,7 +163,40 @@ The follow-up local gate passed **820 tests**, Ruff lint/formatting and strict
 core type checks. Independent checks passed 55 UI tests, 18 tray/service tests
 and 15 runtime Qt tests. The corresponding 123-file source snapshot is
 `3eca1b325f67654963c87013ac066b86550362e22a324256202b7c4db80d5bda`.
-The remote matrix is rerun on the review branch after publishing these fixes.
+The second remote matrix run passed 819 tests in each Python version but exposed
+an outdated native layout assertion: it required all workspace commands to be
+initially visible even on the compact desktop. The corrected test preserves
+initial toolbar visibility at 960 logical pixels and above. On narrower screens
+it verifies that every command scrolls fully into its viewport, without
+horizontal overflow; Save and Done must remain initially visible. Independent
+validation passed all 15 workspace tests, including the native 200% check, and
+a distinct review found no blocking issue. Only this test file changed after
+the package build; the updated 123-file snapshot is
+`8ee3cdd9393ec721a08a2c1bec7ce36e4ddea80006fb2445598131ffb37dac1b`.
+
+### Final package with compact desktop support
+
+The canonical build at `1271714` passed its frozen import smoke check. Independent
+validation confirmed all eight required imports and optional PySide6, matching
+sidecar checksums, a clean ZIP CRC, and exact agreement between all 202 unique
+archive members and the portable folder. Subsequent changes affect tests and
+this report only; production and build inputs remain unchanged.
+
+- Executable: 2,238,470 bytes; SHA-256
+  `c707c933e93a402286a307549da2d1cd8806f6b1ac0caab50fade195c25f739c`.
+- ZIP: 41,406,583 bytes; SHA-256
+  `373ce87dc4fc030949a01f1b55ed32ab49d64b4f3db322c226ddc854a87eb385`.
+
+Three isolated launches of this executable showed Preferences in 3.403, 2.854
+and 4.524 seconds (median 3.403 s). Each sampled 20 seconds with Preferences
+visible and another 20 seconds in the tray. CPU time remained below the observed
+15.625 ms accounting resolution in all six samples. Tray samples recorded
+607,860–1,054,413 process cycles and stable working sets of 129.43–131.69 MiB.
+All three exited gracefully, logged only the five expected shortcut conflicts
+and left the user's Run registry value unchanged. These are bounded local
+observations, not proof of zero CPU use or a startup speedup. Current evidence
+is in `build/review/frozen-enabled-performance.json`; the earlier package's
+results are retained separately under `build/review/release-7b3cd12`.
 
 The review below is historical: its source snapshot, test counts, executable
 hashes and measurements precede this iteration.

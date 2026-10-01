@@ -269,29 +269,42 @@ def test_save_retry_updates_workspace_list_without_reopen(workspace_qt, tmp_path
     assert not dialog.editor.is_dirty
 
 
-def test_workspace_controls_reachable_at_960_by_520(workspace_qt, tmp_path):
+def test_workspace_controls_visible_at_960_by_520_without_scrolling(
+    workspace_qt, tmp_path, monkeypatch
+):
     qt_widgets, app = workspace_qt
     from PySide6 import QtCore
 
     from windows_rectangle.ui.workspaces_dialog import _build
 
     app.setStyle("windowsvista")
+    monkeypatch.setattr(
+        qt_widgets.QApplication,
+        "primaryScreen",
+        lambda: SimpleNamespace(availableGeometry=lambda: QtCore.QRect(0, 0, 960, 520)),
+    )
     context, _store = _workspace_context(tmp_path)
     dialog = _build(context)
-    dialog.window.resize(960, 520)
     dialog.window.show()
     app.processEvents()
 
     assert dialog.window.width() <= 960
     assert dialog.window.height() <= 520
+    assert dialog.window.findChild(qt_widgets.QScrollArea, "workspaceContentScroll") is None
     buttons = {
         button.text(): button for button in dialog.window.findChildren(qt_widgets.QPushButton)
     }
-    for label in ("New empty workspace", "Add application…", "Test matches", "Restore now", "Done"):
+    for label in (
+        "New empty workspace",
+        "Add application…",
+        "Remove selected rule",
+        "Record current positions",
+        "Test matches",
+        "Restore now",
+        "Save now",
+        "Done",
+    ):
         button = buttons[label]
-        for area in dialog.window.findChildren(qt_widgets.QScrollArea):
-            area.ensureWidgetVisible(button)
-        app.processEvents()
         top_left = button.mapTo(dialog.window, QtCore.QPoint(0, 0))
         assert button.isVisible()
         assert top_left.x() >= 0 and top_left.x() + button.width() <= dialog.window.width()
@@ -398,7 +411,7 @@ def test_compact_workspace_save_failure_status_fits_screen(workspace_qt, tmp_pat
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows native layout")
-def test_native_workspace_actions_fit_at_200_percent_without_scrolling():
+def test_native_workspace_actions_fit_or_scroll_at_200_percent():
     script = dedent("""
         import json
         from PySide6 import QtCore, QtWidgets
@@ -415,14 +428,51 @@ def test_native_workspace_actions_fit_at_200_percent_without_scrolling():
         buttons = {button.text(): button for button in dialog.window.findChildren(QtWidgets.QPushButton)}
         screen = dialog.window.screen().availableGeometry()
         frame = dialog.window.frameGeometry()
+
+        def fully_visible(button):
+            rect = QtCore.QRect(button.mapTo(dialog.window, QtCore.QPoint(0, 0)), button.size())
+            if not dialog.window.rect().contains(rect):
+                return False
+            for area in dialog.window.findChildren(QtWidgets.QScrollArea):
+                if area.isAncestorOf(button):
+                    in_viewport = QtCore.QRect(
+                        button.mapTo(area.viewport(), QtCore.QPoint(0, 0)), button.size()
+                    )
+                    if not area.viewport().rect().contains(in_viewport):
+                        return False
+            return button.isVisible()
+
+        footer_initial = all(fully_visible(buttons[label]) for label in ("Done", "Save now"))
+        toolbar = (
+            "Add application…", "Remove selected rule", "Record current positions",
+            "Test matches", "Restore now",
+        )
+        compact_actions = (
+            "Start from template…", "New empty workspace", "Capture current windows…",
+            "Duplicate workspace", "Delete workspace", *toolbar,
+        )
+        compact_scroll = dialog.window.findChild(QtWidgets.QScrollArea, "workspaceContentScroll")
+        wide = screen.width() >= 960
+        if wide:
+            actions_visible = {
+                label: fully_visible(buttons[label]) for label in toolbar
+            }
+        else:
+            actions_visible = {}
+            if compact_scroll is not None:
+                for label in compact_actions:
+                    compact_scroll.ensureWidgetVisible(buttons[label], 0, 0)
+                    app.processEvents()
+                    actions_visible[label] = fully_visible(buttons[label])
         print(json.dumps({
             "width": dialog.window.width(), "height": dialog.window.height(),
             "available": [screen.width(), screen.height()],
             "frame_fits": screen.contains(frame),
-            "done_bottom": buttons["Done"].mapTo(dialog.window, QtCore.QPoint(0, buttons["Done"].height())).y(),
-            "add_bottom": buttons["Add application…"].mapTo(dialog.window, QtCore.QPoint(0, buttons["Add application…"].height())).y(),
-            "test_bottom": buttons["Test matches"].mapTo(dialog.window, QtCore.QPoint(0, buttons["Test matches"].height())).y(),
-            "restore_bottom": buttons["Restore now"].mapTo(dialog.window, QtCore.QPoint(0, buttons["Restore now"].height())).y(),
+            "footer_initial": footer_initial,
+            "wide": wide,
+            "compact_scroll": compact_scroll is not None,
+            "horizontal_overflow": compact_scroll.horizontalScrollBar().maximum() if compact_scroll else None,
+            "actions_visible": actions_visible,
         }))
         dialog.window.hide()
     """)
@@ -439,7 +489,10 @@ def test_native_workspace_actions_fit_at_200_percent_without_scrolling():
     layout = json.loads(result.stdout)
     assert layout["frame_fits"]
     assert layout["height"] <= layout["available"][1]
-    assert layout["done_bottom"] <= layout["height"]
-    assert layout["add_bottom"] <= layout["height"]
-    assert layout["test_bottom"] <= layout["height"]
-    assert layout["restore_bottom"] <= layout["height"]
+    assert layout["footer_initial"]
+    assert layout["actions_visible"] and all(layout["actions_visible"].values())
+    if layout["wide"]:
+        assert not layout["compact_scroll"]
+    else:
+        assert layout["compact_scroll"]
+        assert layout["horizontal_overflow"] == 0
