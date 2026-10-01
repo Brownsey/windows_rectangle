@@ -173,6 +173,11 @@ validation passed all 15 workspace tests, including the native 200% check, and
 a distinct review found no blocking issue. Only this test file changed after
 the package build; the updated 123-file snapshot is
 `8ee3cdd9393ec721a08a2c1bec7ce36e4ddea80006fb2445598131ffb37dac1b`.
+The fresh local gate passed all 820 tests in 44.03 seconds. The
+[final Windows matrix run](https://github.com/Brownsey/windows_rectangle/actions/runs/36799180906)
+at `da5273c` passed all 820 tests on both Python 3.11 and 3.13, with no skipped
+cases, plus Ruff lint/formatting and strict core type checks. The only subsequent
+change records that result in this report.
 
 ### Final package with compact desktop support
 
