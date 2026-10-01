@@ -241,6 +241,8 @@ Native 200% captures show the repaired focus and scrolling behavior:
 
 ![Tab reaches Restore now in the compact workspace editor](research/windows-workspace-compact-keyboard.png)
 
+![The Position chooser opens from the keyboard](research/windows-workspace-position-keyboard.png)
+
 The local full gate passed **833 tests** in 44.84 seconds, plus Ruff lint and
 formatting and strict core type checks. The corresponding 123-file source,
 test and build-input snapshot is
@@ -250,6 +252,35 @@ including native modal acceptance and cancellation. A distinct final review
 found no remaining Critical or Important issue in the keyboard changes.
 These captures and keyboard tests do not establish screen-reader compatibility
 or complete accessibility conformance.
+
+The [Windows matrix for `fe94a47`](https://github.com/Brownsey/windows_rectangle/actions/runs/36801520861)
+also passed all 833 tests on Python 3.11 and 3.13 without skips, plus lint,
+formatting and strict core type checks. The canonical package build completed
+from the same source snapshot. Independent archive checks verified both sidecar
+checksums, ZIP CRC and exactly 202 unique safe paths matching every portable
+folder file. Frozen diagnostics passed all eight required imports and optional
+PySide6 with an empty stderr and no configuration writes.
+
+- Executable: 2,239,415 bytes; SHA-256
+  `d2215024b297f8e19be595b3d626eec9df2d8293720d20ad1fe3ed798e94b2b1`.
+- ZIP: 41,406,026 bytes; SHA-256
+  `03952aee8d0975759d2ea14848c316a86b4d0006e32acc49bff9979a290e4465`.
+
+Three isolated launches of this exact executable showed Preferences in 3.520,
+4.477 and 4.174 seconds (median 4.174 s). Each measured 20 seconds with the
+window visible and another 20 seconds after closing it to the tray. The process
+CPU-time counter did not advance in any of the six observations; its observed
+accounting granularity is 15.625 ms, so this is not a claim of zero CPU use.
+Tray samples recorded 934,091–1,509,057 process cycles and stable working sets
+of 127.69–131.69 MiB. All three exited cleanly, logged only the five expected
+shortcut conflicts and preserved the user's Run registry value. These bounded
+samples do not establish a startup speedup or regression. The current JSON
+result is `build/review/frozen-enabled-performance.json`.
+
+The installed-hook post-click sample above uses a synthetic callback. A
+measurement after a real physical mouse click remains pending; the isolated
+interactive probe is prepared, but that check requires a user's click. It does
+not register shortcuts, move other windows or write user settings.
 
 The review below is historical: its source snapshot, test counts, executable
 hashes and measurements precede this iteration.
