@@ -24,6 +24,8 @@ callbacks. This keeps the controller importable without any adapters.
 from __future__ import annotations
 
 import copy
+import html
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -389,8 +391,10 @@ class PreferencesController:
         rows,
         sections,
         status_label,
+        binding_status_label,
         save_button,
         apply_button,
+        retry_button,
         gap_spin,
         cycle_spin,
         almost_spin,
@@ -403,8 +407,10 @@ class PreferencesController:
         self.rows = rows
         self.sections = sections
         self.status_label = status_label
+        self.binding_status_label = binding_status_label
         self.save_button = save_button
         self.apply_button = apply_button
+        self.retry_button = retry_button
         self.gap_spin = gap_spin
         self.cycle_spin = cycle_spin
         self.almost_spin = almost_spin
@@ -498,6 +504,63 @@ class PreferencesController:
         self.status_label.style().polish(self.status_label)
         self.save_button.setEnabled(state != "error" and self.dirty)
         self.apply_button.setEnabled(state != "error" and self.dirty)
+        self._refresh_binding_status()
+
+    def _refresh_binding_status(self) -> None:
+        report = getattr(self.ctx, "last_binding_report", None)
+        if report is None or not report.failed_count:
+            self.binding_status_label.hide()
+            self.retry_button.hide()
+            return
+        details = [
+            f"{action_label(action)} ({combo}): "
+            f"{error.strip().splitlines()[0] if error.strip() else 'Registration failed'}"
+            for action, combo, error in report.failed
+        ]
+        details.extend(
+            f"{name} ({combo}): "
+            f"{error.strip().splitlines()[0] if error.strip() else 'Registration failed'}"
+            for _workspace_id, name, combo, error in report.workspace_failed
+        )
+        count = report.failed_count
+        paused = getattr(self.ctx, "paused", False) or report.paused
+        summary = (
+            f"{'Shortcuts paused. ' if paused else ''}"
+            f"Saved settings: {count} shortcut{'s' if count != 1 else ''} unavailable."
+        )
+        visible = details[:2]
+        if count > 2:
+            visible.append(f"{count - 2} more; see Binding status in the tray.")
+        full_text = "\n".join((summary, *details))
+        tooltip_text = html.escape(full_text).replace("\n", "<br>")
+        self.binding_status_label.setText("\n".join((summary, *visible)))
+        self.binding_status_label.setToolTip(f"<div>{tooltip_text}</div>")
+        self.binding_status_label.setAccessibleDescription(full_text)
+        self.binding_status_label.show()
+        self.retry_button.setEnabled(not paused)
+        self.retry_button.setToolTip(
+            "Resume shortcuts before retrying" if paused else "Retry registering saved shortcuts"
+        )
+        self.retry_button.show()
+
+    def retry_shortcuts(self) -> None:
+        report = getattr(self.ctx, "last_binding_report", None)
+        if (
+            report is None
+            or not report.failed_count
+            or report.paused
+            or getattr(self.ctx, "paused", False)
+        ):
+            return
+        try:
+            self.ctx.rebind_hotkeys()
+        except Exception as exc:  # noqa: BLE001 — keep the failed binding visible
+            self._refresh_binding_status()
+            self.binding_status_label.setText(
+                f"{self.binding_status_label.text()}\nRetry failed: {exc}"
+            )
+            return
+        self._refresh_binding_status()
 
     def mark_dirty(self) -> None:
         self.dirty = any(
@@ -527,6 +590,7 @@ class PreferencesController:
         finally:
             if hotkeys is not None:
                 self.ctx.rebind_hotkeys()
+        self._refresh_binding_status()
         if sequence is not None:
             self.shortcut_widgets[action].setKeySequence(sequence)
             self.mark_dirty()
@@ -538,9 +602,12 @@ class PreferencesController:
         try:
             if self.ctx.config_store is not None:
                 self.ctx.config_store.save(candidate)
+            binding_report = getattr(self.ctx, "last_binding_report", None)
             retry_failed_bindings = (
                 candidate.shortcuts == self.ctx.settings.shortcuts
-                and getattr(getattr(self.ctx, "last_binding_report", None), "failed_count", 0) > 0
+                and getattr(binding_report, "failed_count", 0) > 0
+                and not getattr(self.ctx, "paused", False)
+                and not getattr(binding_report, "paused", False)
             )
             self.ctx.apply_settings(candidate)
             if retry_failed_bindings:
@@ -550,7 +617,7 @@ class PreferencesController:
             self.status_label.setProperty("status", "error")
             return
         self.load_settings(self.ctx.settings)
-        if close:
+        if close and not getattr(getattr(self.ctx, "last_binding_report", None), "failed_count", 0):
             self.window.hide()
 
 
@@ -562,6 +629,8 @@ def show(ctx) -> PreferencesController:
     if isinstance(existing, PreferencesController):
         if not existing.dirty:
             existing.load_settings(ctx.settings)
+        else:
+            existing._refresh_binding_status()
         existing.window.show()
         existing.window.raise_()
         existing.window.activateWindow()
@@ -720,10 +789,21 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
     status.setObjectName("preferencesStatus")
     status.setWordWrap(True)
     root.addWidget(status)
+    binding_status = qt_widgets.QLabel()
+    binding_status.setObjectName("bindingStatus")
+    binding_status.setAccessibleName("Shortcut registration status")
+    binding_status.setTextFormat(qt_core.Qt.PlainText)
+    binding_status.setWordWrap(True)
+    binding_status.hide()
+    root.addWidget(binding_status)
     buttons = qt_widgets.QDialogButtonBox()
     save_button = buttons.addButton("Save", qt_widgets.QDialogButtonBox.AcceptRole)
     apply_button = buttons.addButton("Apply", qt_widgets.QDialogButtonBox.ApplyRole)
     restore_button = buttons.addButton("Restore Defaults", qt_widgets.QDialogButtonBox.ResetRole)
+    retry_button = buttons.addButton("Retry shortcuts", qt_widgets.QDialogButtonBox.ActionRole)
+    retry_button.setObjectName("retryShortcutsButton")
+    retry_button.setAccessibleName("Retry shortcuts")
+    retry_button.hide()
     root.addWidget(buttons)
     controller = PreferencesController(
         ctx,
@@ -732,8 +812,10 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
         rows,
         sections,
         status,
+        binding_status,
         save_button,
         apply_button,
+        retry_button,
         gap_spin,
         cycle_spin,
         almost_spin,
@@ -741,6 +823,22 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
         launch_checkbox,
     )
     window.controller = controller
+    subscribe = getattr(ctx, "subscribe_settings", None)
+    if subscribe is not None:
+        controller_ref = weakref.ref(controller)
+        alive = True
+
+        def on_destroyed(_object=None) -> None:
+            nonlocal alive
+            alive = False
+
+        def on_settings_changed(_settings: Settings) -> None:
+            current = controller_ref()
+            if alive and current is not None:
+                current._refresh_binding_status()
+
+        window.destroyed.connect(on_destroyed)
+        subscribe(on_settings_changed)
     controller.load_settings(ctx.settings)
 
     def filter_shortcuts(query: str) -> None:
@@ -769,6 +867,7 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
             control.toggled.connect(controller.mark_dirty)
     save_button.clicked.connect(lambda: controller.save(close=True))
     apply_button.clicked.connect(lambda: controller.save(close=False))
+    retry_button.clicked.connect(controller.retry_shortcuts)
 
     def restore_defaults():
         for action, button in shortcut_widgets.items():
@@ -787,5 +886,7 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
         QPushButton#shortcutButton { text-align: left; padding-left: 12px; }
         QLabel#preferencesStatus[status="error"] { color: #a52323; }
         QLabel#preferencesStatus[status="warning"] { color: #80540c; }
+        QLabel#bindingStatus { background: #fff5df; color: #70480a;
+            border: 1px solid #ecd59e; border-radius: 6px; padding: 6px 8px; }
     """)
     return controller

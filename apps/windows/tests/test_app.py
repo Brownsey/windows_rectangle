@@ -873,6 +873,83 @@ def test_subscribe_settings_isolates_exceptions(windows):
     assert len(c_called) == 1
 
 
+def test_direct_rebind_notifies_after_binding_report_recovers(windows):
+    class RecoveringHotkeys(FakeHotkeys):
+        reject = True
+
+        def register(self, combo, callback):
+            if self.reject and combo == "ctrl+alt+left":
+                raise RuntimeError("shortcut occupied")
+            return super().register(combo, callback)
+
+    hotkeys = RecoveringHotkeys()
+    ctx = build(Settings(shortcuts={Action.LEFT_HALF: "ctrl+alt+left"}), windows, hotkeys=hotkeys)
+    assert ctx.rebind_hotkeys() == 0
+    assert ctx.last_binding_report.failed_count == 1
+    observed: list[tuple[int, int, Settings]] = []
+
+    def broken(_settings):
+        raise RuntimeError("subscriber failed")
+
+    ctx.subscribe_settings(broken)
+    ctx.subscribe_settings(
+        lambda settings: observed.append(
+            (ctx.last_binding_report.failed_count, ctx.last_binding_report.bound_count, settings)
+        )
+    )
+    hotkeys.reject = False
+
+    assert ctx.rebind_hotkeys() == 1
+
+    assert observed == [(0, 1, ctx.settings)]
+
+
+def test_apply_settings_rebind_notifies_once_after_autostart_sync(windows):
+    from windows_rectangle.adapters.winreg_autostart import MemoryAutoStart
+
+    autostart = MemoryAutoStart()
+    hotkeys = FakeHotkeys()
+    ctx = build(
+        Settings(shortcuts={Action.LEFT_HALF: "ctrl+alt+left"}),
+        windows,
+        hotkeys=hotkeys,
+        autostart=autostart,
+        autostart_command_line=r"C:\app.exe",
+    )
+    observed: list[tuple[int, int, int, bool]] = []
+    ctx.subscribe_settings(
+        lambda _settings: observed.append(
+            (
+                ctx.settings.gap,
+                ctx.dispatcher.gap,
+                ctx.last_binding_report.bound_count,
+                autostart.is_enabled(),
+            )
+        )
+    )
+
+    ctx.apply_settings(
+        Settings(shortcuts={Action.LEFT_HALF: "ctrl+alt+l"}, gap=23, launch_at_login=True)
+    )
+
+    assert observed == [(23, 23, 1, True)]
+
+
+def test_paused_direct_rebind_notifies_after_report_refresh(windows):
+    ctx = build(Settings(), windows, hotkeys=FakeHotkeys())
+    assert ctx.pause_hotkeys() is True
+    observed: list[tuple[bool, int]] = []
+    ctx.subscribe_settings(
+        lambda _settings: observed.append(
+            (ctx.last_binding_report.paused, ctx.last_binding_report.bound_count)
+        )
+    )
+
+    assert ctx.rebind_hotkeys() == 0
+
+    assert observed == [(True, 0)]
+
+
 def test_maintenance_rate_limits_pruning(windows):
     """Two calls within prune_interval → second one is a noop and never
     walks the dicts."""

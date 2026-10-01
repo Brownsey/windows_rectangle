@@ -1,5 +1,107 @@
 # Windows code review and performance analysis
 
+## Runtime and experience iteration — 1 October 2026
+
+The follow-up starts from `2fbbcf4` and targets measured tray-runtime work and
+observed interaction failures. It retains the existing Qt design and adds no
+dependencies. The measurements below describe local source runs; they do not
+replace the earlier executable's separately identified release evidence.
+
+### Runtime measurements
+
+The normal tray runtime was measured with the native mouse hook installed and
+default shortcuts requested. Both runs bound 23 shortcuts; five were rejected
+because other applications already held them. Each process used isolated
+configuration, disabled registry synchronization and left the user's Run entry
+unchanged. After two seconds of settling, the probe sampled process CPU time,
+`QueryProcessCycleTime`, memory and actual Qt drain/paint events for 20 seconds.
+
+| Metric | Continuous polling | Queued wakeups |
+| --- | ---: | ---: |
+| Action/drag drain calls | 1,248 | 0 |
+| Process cycles | 1,701,204,878 | 3,131,816 |
+| Process CPU time | 0.0938 s | Below the observed 15.625 ms accounting resolution |
+| Working set at end | 52.72 MiB | 53.06 MiB |
+| Qt paint events | 0 | 0 |
+
+The paired sample recorded approximately 99.8% fewer process cycles while idle.
+This is a local idle result, not a whole-application speedup or a claim of zero
+CPU usage. The stronger structural evidence is that no periodic action/drag
+drain runs while idle. Queued notifications wake the UI for work; the 16 ms
+timer remains active during dragging and queued batches. Maintenance has its
+own minute-scale timer. Mouse motion does not flood Qt with queued signals.
+Maintenance restarts its single-shot timer after cleanup so late timer delivery
+cannot cause the next cleanup to be skipped by the internal rate limit.
+The implementation follows Qt's
+[queued receiver-thread delivery and timer ownership rules](https://doc.qt.io/qt-6/threads-qobject.html).
+
+A further native-adapter run delivered a synthetic completed-click callback
+before sampling. It recorded zero subsequent drain/paint calls over 20 seconds,
+1.43 million process cycles and a stable 53.39 MiB working set. This confirms
+return to idle after the completed-click state; it is not a physical mouse-input
+test. The hook remained installed, and the user's registry setting was unchanged.
+
+A second probe compared the committed polling entry point with the new entry
+point using the same core and fake window manager. A worker submitted 100
+actions at varying phases, and the actual Qt loop dispatched them. Submission
+to window-manager invocation fell from **7.935 ms median / 15.185 ms p95** to
+**0.318 ms median / 0.700 ms p95**. This isolates scheduling latency; it excludes
+physical keyboard input, native window movement and compositor presentation.
+
+The optional headless runtime also wakes on queued input. In paired native-input
+idle samples of approximately 20 seconds, drain calls fell from 464 to 76 and
+process cycles from 97,773,042 to 29,844,428 (about 69.5% fewer). Working set stayed
+near 22 MiB. Its idle wait is capped at 250 ms to keep Ctrl+C responsive on the
+supported Windows/Python 3.13 runtime; active work retains 30 Hz polling. The
+signal handler only sets a flag. Controlled-clock tests verify scheduling and
+actual maintenance, and a bounded subprocess test exercises SIGINT cleanup.
+
+The native overlay was also measured with synthetic snap coordinates. Over a
+six-second stationary preview, 376 input ticks caused **zero repeated show,
+hide or paint calls**. Twelve size-changing zone transitions caused twelve
+paints, taking 0.140625 seconds of process CPU time over six seconds (2.344% of
+one core). Same-size position changes reused the painted surface. No rendering
+rewrite was justified by these results.
+
+GPU Engine counters returned 861 valid engine samples but no instance for the
+overlay process; the normal tray probes likewise exposed no process instance.
+**GPU utilization is unmeasured**, not zero. Desktop compositor work can belong
+to another process. These observations establish paint suppression, not an
+end-to-end GPU utilization percentage.
+
+Local evidence and runnable probes are retained under ignored `build/review`:
+`profile_source_runtime.py`, `source-runtime-before-scheduler.json`,
+`source-runtime-baseline.json`, `dispatch_latency_probe.py` and
+`overlay_runtime_probe.py`, with their JSON outputs. The completed-click run is
+`profile_source_runtime_after_click.py` and `source-runtime-after-click.json`.
+
+### Native UI audit
+
+The audit exercised the actual Qt widgets against an isolated JSON store and
+controlled window/hotkey adapters. Native Windows captures contained readable
+fonts; earlier offscreen captures with missing glyphs were excluded from visual
+conclusions. Keyboard traversal, shortcut duplicates, failed saves, persistence
+after reopening, workspace creation, matching and restore were exercised.
+
+This iteration fixes the observed issues:
+
+- Preferences must show saved shortcuts that Windows could not register and
+  offer retry without changing or writing settings. Retry must preserve dirty
+  edits, use current saved settings and respect pause. External text must remain
+  literal text rather than Qt markup.
+- Editing a workspace rule must invalidate its previous match result.
+- Restore feedback must distinguish full success, partial restoration and no
+  windows moved, including blocked moves.
+- A successful save after failure must update the visible workspace name.
+- Workspace controls must remain reachable on a 960×520 logical desktop.
+
+The complete source gate passed on Windows/Python 3.13.13: **809 tests**, Ruff
+lint and formatting (112 files), and strict mypy checks (21 core source files).
+Native Qt integration, isolated JSON persistence and 200% scale layout checks
+cover the changed interactions. Source performance measurements do not verify
+a newly packaged executable. The release hashes and executable measurements in
+the historical review below apply only to that earlier snapshot.
+
 Review date: 30 September 2026. Baseline: `cfbd77d`. Scope: the complete
 repository, with implementation and validation concentrated on the Windows
 runtime, persistence, native boundaries, UI, launchers and packaging.

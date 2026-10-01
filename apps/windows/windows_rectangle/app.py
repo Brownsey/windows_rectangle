@@ -154,10 +154,8 @@ class AppContext:
     # idle — calling Qt's hide() on an already-hidden widget burns time).
     _preview_state: Rect | None = field(default=None, init=False, repr=False)
     # Monotonic wall-clock of the last cycle/history prune. Initialised
-    # to -inf so the very first maintenance() call always runs. The
-    # QTimer invokes maintenance() on every tick but prune work only
-    # runs at most once per `prune_interval` seconds — sweeping every
-    # 16ms would call IsWindow() across the whole history dict each tick.
+    # to -inf so the first maintenance() call runs. Qt schedules later
+    # calls on a separate coarse timer, away from the active 16 ms drain.
     _last_prune: float = field(default=float("-inf"), init=False, repr=False)
     prune_interval: float = 60.0
     # Subscribers invoked after apply_settings has fully wired the new
@@ -187,6 +185,7 @@ class AppContext:
     # toggle so a user can free up the keymap during full-screen apps
     # without losing their bindings.
     paused: bool = field(default=False, init=False, repr=False)
+    wake_ui: Callable[[], None] | None = field(default=None, init=False, repr=False)
     _workspace_queue: queue.Queue[str] = field(
         default_factory=lambda: queue.Queue(maxsize=64), init=False, repr=False
     )
@@ -215,7 +214,7 @@ class AppContext:
         self.dispatcher.almost_maximize_scale = settings.almost_maximize_scale
         self.drag.gap = settings.gap
         if (shortcuts_changed or workspace_shortcuts_changed) and self.hotkeys is not None:
-            self.rebind_hotkeys()
+            self.rebind_hotkeys(notify=False)
         # Mirror the drag-to-edge toggle into the WH_MOUSE_LL lifecycle.
         # Lifts the restart restriction that bind_mousehook used to
         # document — enabling drag-to-edge now installs the hook on the
@@ -357,7 +356,7 @@ class AppContext:
         """
         self._settings_subscribers.append(callback)
 
-    def rebind_hotkeys(self) -> int:
+    def rebind_hotkeys(self, *, notify: bool = True) -> int:
         """Unregister every hotkey and re-register from `self.settings.shortcuts`.
 
         Returns the count of successful (re-)registrations. No-op if no
@@ -382,12 +381,17 @@ class AppContext:
                 ),
                 paused=True,
             )
+            if notify:
+                self._notify_settings_subscribers()
             return 0
         try:
             self.hotkeys.unregister_all()
         except Exception:  # noqa: BLE001
             _log.exception("hotkey unregister_all raised — continuing with rebind")
-        return bind_hotkeys_via_bus(self, self.hotkeys.register)
+        bound = bind_hotkeys_via_bus(self, self.hotkeys.register)
+        if notify:
+            self._notify_settings_subscribers()
+        return bound
 
     def sync_autostart(self) -> None:
         """Reconcile the AutoStart adapter with `settings.launch_at_login`.
@@ -419,6 +423,9 @@ class AppContext:
         self.drag.monitors = self.windows.list_monitors()
         self.drag.gap = self.settings.gap
         self.drag.start(window)
+        wake = self.wake_ui
+        if wake is not None:
+            wake()
 
     def begin_drag_for_active_window(self) -> bool:
         """Look up the foreground window and begin a drag session for it.
@@ -459,6 +466,9 @@ class AppContext:
         Returns the dispatched Action so callers can show feedback.
         """
         hit = self.drag.finish()
+        wake = self.wake_ui
+        if wake is not None:
+            wake()
         if hit is None or hit.action is None:
             return None
         handle, self._drag_handle = self._drag_handle, None
@@ -479,19 +489,39 @@ class AppContext:
         handle, self._drag_handle = self._drag_handle, None
         if handle is not None:
             self._pending_snap = (handle, hit)
+            wake = self.wake_ui
+            if wake is not None:
+                wake()
         return hit.action
 
     def cancel_drag(self) -> None:
         """Escape press / drag abort: drop the session without dispatching."""
+        was_active = self.drag.active or self._preview_state is not None
         self.drag.cancel()
         self._drag_handle = None
+        wake = self.wake_ui
+        if was_active and wake is not None:
+            wake()
+
+    def has_pending_work(self) -> bool:
+        """Whether the Qt loop needs another 16 ms drain."""
+        if (
+            self.bus.pending()
+            or not self._workspace_queue.empty()
+            or self._pending_snap is not None
+            or self.drag.active
+            or self._preview_state is not None
+        ):
+            return True
+        return self._mousehook is not None and self._mousehook[1].needs_poll
 
     # ----- ActionBus draining (brief §5 #6) --------------------------
 
     def drain_actions(self) -> int:
         """Drain queued hotkey-triggered Actions into the dispatcher.
 
-        Called by the Qt main thread on a timer. Returns the count drained.
+        Called by the Qt main thread on wake or during active polling.
+        Returns the count drained.
         """
         if self._mousehook is not None:
             self._mousehook[1].poll()
@@ -532,6 +562,9 @@ class AppContext:
         """Non-blocking producer path used by the Win32 hotkey thread."""
         try:
             self._workspace_queue.put_nowait(workspace_id)
+            wake = self.wake_ui
+            if wake is not None:
+                wake()
             return True
         except queue.Full:
             _log.warning("workspace queue full; dropped %s", workspace_id)
@@ -563,14 +596,14 @@ class AppContext:
     ) -> bool:
         """Drive the overlay from the current drag-session state.
 
-        Called by the Qt main thread on the same timer as drain_actions.
+        Called by the Qt main thread after drain_actions.
         Polls the session for a snap hit; if one is current shows the
         overlay at the target rect, otherwise hides it. Returns True iff
         the overlay should be visible after this call.
 
         Hot-path safety: the callbacks only fire when the visible state
         actually changes (show with a new rect, or hide-after-show).
-        Idle ticks — by far the common case at 60 Hz — do nothing.
+        Identical active-drag rects do not repaint.
         """
         if not self.drag.active:
             if self._preview_state is not None:
@@ -593,11 +626,10 @@ class AppContext:
     def maintenance(self, now: float | None = None) -> int:
         """Periodic upkeep: prune cycle/history entries for closed windows.
 
-        Called from the same 16ms tick as drain_actions/drain_drag_preview.
-        Internally rate-limited to once every `prune_interval` seconds —
-        IsWindow() across every recorded HWND would be wasteful at 60 Hz,
-        but a stale-entry sweep once a minute keeps memory bounded for a
-        tray app that stays open all day (brief §5 #9, "validate with
+        Called on startup and from a separate interval timer. Internally
+        rate-limited to once every `prune_interval` seconds. A stale-entry
+        sweep once a minute keeps memory bounded for a tray app that stays
+        open all day (brief §5 #9, "validate with
         IsWindow(hwnd) and evict stale entries").
 
         Returns the count of entries pruned (0 on rate-limited calls).
@@ -674,7 +706,7 @@ class AppContext:
         # Strand-proof: drop any in-flight session so drain_drag_preview
         # hides the overlay and ctx.drag.active goes back to False.
         if self.drag.active:
-            self.drag.cancel()
+            self.cancel_drag()
 
     def shutdown(self) -> int:
         """Run every registered cleanup (brief §5 #11). Returns count."""
@@ -922,6 +954,14 @@ class _DragInput:
             return "idle"
         return "dragging" if self.ctx.drag.active else "armed"
 
+    @property
+    def needs_poll(self) -> bool:
+        snapshot = self._latest
+        return snapshot is not None and (
+            snapshot[0] != self._consumed_generation
+            or (not self._cancelled and (snapshot[1] or self._handle is not None))
+        )
+
     def on_event(self, kind: str, x: int, y: int) -> None:
         # Hook thread: constant memory, no native calls, dispatch or logging.
         if kind == "lbutton_down":
@@ -932,6 +972,9 @@ class _DragInput:
         elif kind != "move" or not self._pressed:
             return
         self._latest = (self._generation, self._pressed, x, y)
+        wake = self.ctx.wake_ui
+        if kind == "lbutton_down" and wake is not None:
+            wake()
 
     def reset(self) -> None:
         self.ctx.cancel_drag()

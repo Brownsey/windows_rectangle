@@ -136,8 +136,9 @@ class WorkspaceDialog:
         self.autosave()
 
     def edit_placement(self, item) -> None:
-        if self.loading or not self.selected_id or item.column() == 5:
+        if self.loading or not self.selected_id or item.column() >= 5:
             return
+        self.invalidate_matches()
         row = item.row()
         try:
             placement_id = str(self.placements.item(row, 0).data(0x0100))
@@ -155,6 +156,20 @@ class WorkspaceDialog:
             return
         self.autosave()
 
+    def invalidate_matches(self) -> None:
+        from PySide6 import QtCore
+
+        self.match_results.clear()
+        previous = self.placements.blockSignals(True)
+        try:
+            for row in range(self.placements.rowCount()):
+                cell = self.placements.item(row, 6)
+                if cell is not None:
+                    cell.setText("Not tested")
+                    cell.setData(QtCore.Qt.ForegroundRole, None)
+        finally:
+            self.placements.blockSignals(previous)
+
     def autosave(self, success_text: str = "Saved automatically") -> bool:
         store = getattr(self.ctx, "config_store", None)
         outcome = self.editor.autosave(
@@ -171,6 +186,14 @@ class WorkspaceDialog:
         self.update_validation()
         self.status.setText(success_text)
         self.status.setProperty("status", "saved")
+        item = self.workspace_list.currentItem()
+        if item is not None and self.selected_id:
+            workspace = self.editor.get(self.selected_id)
+            item.setText(workspace.name)
+            item.setToolTip(
+                f"{len(workspace.placements)} windows"
+                + (f" · {workspace.shortcut}" if workspace.shortcut else "")
+            )
         return True
 
     def commit(self, close: bool = False) -> bool:
@@ -201,13 +224,14 @@ def show(ctx) -> WorkspaceDialog:
 
 
 def _build(ctx) -> WorkspaceDialog:
-    from PySide6 import QtWidgets
+    from PySide6 import QtCore, QtWidgets
 
     window = QtWidgets.QDialog()
     window.setObjectName("workspaceEditor")
     window.setWindowTitle("Windows Rectangle — Workspaces")
-    window.setMinimumSize(940, 620)
-    window.resize(1040, 700)
+    window.setMinimumSize(700, 400)
+    available = QtWidgets.QApplication.primaryScreen().availableGeometry()
+    window.resize(min(1040, available.width() - 32), min(700, available.height() - 48))
     root = QtWidgets.QVBoxLayout(window)
 
     title = QtWidgets.QLabel("Workspaces")
@@ -298,10 +322,21 @@ def _build(ctx) -> WorkspaceDialog:
     tools.addWidget(record_positions)
     tools.addWidget(test_matches)
     tools.addWidget(restore)
-    detail_layout.addLayout(tools)
 
+    detail_scroll = QtWidgets.QScrollArea()
+    detail_scroll.setObjectName("workspaceDetailScroll")
+    detail_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+    detail_scroll.setWidgetResizable(True)
+    detail_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+    detail.setMinimumHeight(460)
+    detail_scroll.setWidget(detail)
+    detail_column = QtWidgets.QWidget()
+    detail_column_layout = QtWidgets.QVBoxLayout(detail_column)
+    detail_column_layout.setContentsMargins(0, 0, 0, 0)
+    detail_column_layout.addWidget(detail_scroll, 1)
+    detail_column_layout.addLayout(tools)
     splitter.addWidget(left)
-    splitter.addWidget(detail)
+    splitter.addWidget(detail_column)
     splitter.setSizes([250, 750])
     root.addWidget(splitter, 1)
 
@@ -495,6 +530,7 @@ def _add_application(controller: WorkspaceDialog, QtWidgets) -> None:
         controller.update_validation(str(exc))
         return
     controller.load_selected()
+    controller.invalidate_matches()
     controller.autosave("Application rule saved automatically")
 
 
@@ -563,6 +599,7 @@ def _delete_rule(controller: WorkspaceDialog) -> None:
         return
     controller.editor.delete_placement(controller.selected_id, str(item.data(0x0100)))
     controller.load_selected()
+    controller.invalidate_matches()
     controller.autosave("Application rule removed")
 
 
@@ -603,11 +640,16 @@ def _restore(controller: WorkspaceDialog, QtWidgets) -> None:
     moved = result.moved
     missing = sum(item.status == "not_found" for item in result.placements)
     blocked = sum(item.status == "blocked" for item in result.placements)
-    QtWidgets.QMessageBox.information(
-        controller.window,
-        "Workspace restored",
-        f"{moved} moved · {missing} not found · {blocked} blocked.",
-    )
+    summary = f"{moved} moved · {missing} not found · {blocked} blocked."
+    if not workspace.placements:
+        QtWidgets.QMessageBox.warning(
+            controller.window, "Nothing to restore", "No windows in this workspace."
+        )
+    elif missing or blocked:
+        title = "Workspace partly restored" if moved else "Workspace not restored"
+        QtWidgets.QMessageBox.warning(controller.window, title, summary)
+    else:
+        QtWidgets.QMessageBox.information(controller.window, "Workspace restored", summary)
 
 
 def _apply_style(window) -> None:

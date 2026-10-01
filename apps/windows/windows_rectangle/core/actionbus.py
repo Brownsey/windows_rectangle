@@ -30,6 +30,7 @@ class ActionBus:
     """
 
     maxsize: int = 256
+    on_submit: Callable[[], None] | None = None
     _q: queue.Queue[Action] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -44,6 +45,9 @@ class ActionBus:
         """
         try:
             self._q.put_nowait(action)
+            wake = self.on_submit
+            if wake is not None:
+                wake()
             return True
         except queue.Full:
             # Drop one (the oldest) and retry once. Logs a warning so the
@@ -54,6 +58,9 @@ class ActionBus:
                 self._q.put_nowait(action)
             except (queue.Empty, queue.Full):  # another producer/consumer won the race
                 pass
+            wake = self.on_submit
+            if wake is not None:
+                wake()
             return False
 
     # ----- consumer side (main / dispatcher thread) -------------------

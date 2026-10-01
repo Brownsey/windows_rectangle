@@ -29,6 +29,7 @@ _log = logging.getLogger(__name__)
 _WM_HOTKEY = 0x0312
 _WM_APP = 0x8000
 _WM_APP_WAKE = _WM_APP + 1
+_ERROR_HOTKEY_ALREADY_REGISTERED = 1409
 
 
 class Win32Hotkeys:
@@ -82,6 +83,11 @@ class Win32Hotkeys:
         self._next_id += 1
         ok, err = self._request(("register", hotkey_id, mod_mask, vk, callback, ack), ack)
         if not ok:
+            if err == _ERROR_HOTKEY_ALREADY_REGISTERED:
+                raise HotkeyRegistrationError(
+                    f"Shortcut {combo!r} is already in use by another application or Windows "
+                    f"(Windows error {err})"
+                )
             raise HotkeyRegistrationError(f"RegisterHotKey failed for {combo!r}: err={err}")
         return hotkey_id
 

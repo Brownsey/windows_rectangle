@@ -196,3 +196,41 @@ def test_resize_only_seen_on_release_is_not_mistaken_for_translation():
     event("lbutton_up", 2, 500)
     tick(ctx)
     assert windows.move_log == []
+
+
+def test_pending_input_stays_active_through_late_move_and_native_release():
+    ctx, windows, event = setup_drag()
+    event("lbutton_down", 200, 110)
+    tick(ctx)
+    assert ctx.has_pending_work()  # Windows has not entered its move loop yet.
+    windows.moving = 101
+    tick(ctx)
+    assert ctx.has_pending_work()
+    event("lbutton_up", 2, 500)
+    tick(ctx)
+    assert ctx.has_pending_work()  # Native move loop still owns the HWND.
+    windows.moving = None
+    tick(ctx)
+    assert not ctx.has_pending_work()
+
+
+def test_escape_or_hook_shutdown_retires_active_input():
+    ctx, windows, event = setup_drag()
+    event("lbutton_down", 200, 110)
+    windows.moving = 101
+    tick(ctx)
+    windows.escape = True
+    tick(ctx)
+    assert not ctx.has_pending_work()
+    windows.escape = False
+    event("lbutton_down", 200, 110)
+    tick(ctx)
+    assert ctx.has_pending_work()
+
+    class Hook:
+        def shutdown(self):
+            pass
+
+    ctx._mousehook = (Hook(), ctx._mousehook[1])
+    ctx.stop_mousehook()
+    assert not ctx.has_pending_work()

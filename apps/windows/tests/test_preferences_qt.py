@@ -11,15 +11,19 @@ import os
 import subprocess
 import sys
 from contextlib import suppress
+from copy import deepcopy
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
+from windows_rectangle.app import EMPTY_BINDING_REPORT, BindingReport, bind_hotkeys_via_bus, build
 from windows_rectangle.core.actions import DEFAULT_SHORTCUTS, Action
 from windows_rectangle.core.shortcuts import normalise
 from windows_rectangle.ports.config_store import Settings
 from windows_rectangle.ui import preferences
+
+from .conftest import FakeWindowManager
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -53,6 +57,10 @@ class SpyContext:
         self.hotkeys = hotkeys
         self.applied: list[Settings] = []
         self.rebind_calls = 0
+        self.last_binding_report = EMPTY_BINDING_REPORT
+        self.next_binding_report: BindingReport | None = None
+        self.settings_at_rebind: list[Settings] = []
+        self.paused = False
 
     def apply_settings(self, settings: Settings) -> None:
         self.applied.append(settings)
@@ -60,6 +68,9 @@ class SpyContext:
 
     def rebind_hotkeys(self) -> int:
         self.rebind_calls += 1
+        self.settings_at_rebind.append(deepcopy(self.settings))
+        if self.next_binding_report is not None:
+            self.last_binding_report = self.next_binding_report
         return sum(1 for combo in self.settings.shortcuts.values() if combo.strip())
 
 
@@ -115,6 +126,34 @@ def _button_box_button(controller: preferences.PreferencesController, qt_widgets
         if button.text() == text:
             return button
     raise AssertionError(f"missing dialog button {text!r}")
+
+
+def _failed_binding_report(*, paused: bool = False) -> BindingReport:
+    return BindingReport(
+        failed=((Action.LEFT_HALF, "ctrl+alt+left", "already registered"),), paused=paused
+    )
+
+
+def _real_context_with_failed_hotkey():
+    class FakeHotkeys:
+        def __init__(self) -> None:
+            self.reject = True
+            self.registered: list[str] = []
+
+        def register(self, combo, _callback):
+            if self.reject and combo == "ctrl+alt+left":
+                raise RuntimeError("already registered")
+            self.registered.append(combo)
+            return len(self.registered)
+
+        def unregister_all(self) -> None:
+            self.registered.clear()
+
+    hotkeys = FakeHotkeys()
+    ctx = build(Settings(), FakeWindowManager(), hotkeys=hotkeys)
+    bind_hotkeys_via_bus(ctx, hotkeys.register)
+    assert ctx.last_binding_report.failed_count == 1
+    return ctx, hotkeys
 
 
 def _write_test_png(qt_gui, path) -> None:
@@ -496,18 +535,208 @@ def test_qt_save_general_settings_skips_rebind_and_hides_window(qt_app, qt_modul
 
 
 def test_qt_save_retries_previous_binding_failure(qt_app, qt_modules):
-    from windows_rectangle.app import BindingReport
-
     ctx = SpyContext()
-    ctx.last_binding_report = BindingReport(
-        failed=((Action.LEFT_HALF, "ctrl+alt+left", "already registered"),)
-    )
+    ctx.last_binding_report = _failed_binding_report()
     controller = _build_controller(qt_app, qt_modules, ctx)
     controller.gap_spin.setValue(18)
 
     controller.save(close=False)
 
     assert ctx.rebind_calls == 1
+
+
+def test_qt_failed_binding_visible_retry_uses_saved_settings(qt_app, qt_modules):
+    qt_core, _qt_gui, qt_widgets, qt_test = qt_modules
+    config = SpyConfigStore()
+    ctx = SpyContext(config_store=config)
+    ctx.last_binding_report = _failed_binding_report()
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    binding_status = controller.window.findChild(qt_widgets.QLabel, "bindingStatus")
+    retry = controller.window.findChild(qt_widgets.QPushButton, "retryShortcutsButton")
+
+    assert controller.status_label.text() == "All changes saved"
+    assert binding_status is not None and binding_status.isVisible()
+    assert "1 shortcut unavailable" in binding_status.text()
+    assert "Left Half" in binding_status.text()
+    assert "ctrl+alt+left" in binding_status.text()
+    assert "already registered" in binding_status.text()
+    assert retry is not None and retry.isVisible() and retry.isEnabled()
+    assert retry.accessibleName() == "Retry shortcuts"
+
+    controller.gap_spin.setValue(18)
+    retry.click()
+    qt_app.processEvents()
+
+    assert ctx.rebind_calls == 1
+    assert ctx.settings_at_rebind[0].gap == 0
+    assert ctx.settings.gap == 0
+    assert config.saved == []
+    assert ctx.applied == []
+    assert controller.gap_spin.value() == 18
+    assert controller.status_label.text() == "Unsaved changes"
+    assert binding_status.isVisible()
+
+    ctx.next_binding_report = BindingReport(bound=((Action.LEFT_HALF, "ctrl+alt+left"),))
+    retry.setFocus()
+    qt_test.QTest.keyClick(retry, qt_core.Qt.Key_Space)
+    qt_app.processEvents()
+
+    assert ctx.rebind_calls == 2
+    assert not binding_status.isVisible()
+    assert not retry.isVisible()
+    assert controller.dirty is True
+
+
+def test_qt_retry_keeps_shortcut_validation_error(qt_app, qt_modules):
+    _qt_core, qt_gui, qt_widgets, _qt_test = qt_modules
+    ctx = SpyContext()
+    ctx.last_binding_report = _failed_binding_report()
+    ctx.next_binding_report = BindingReport()
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    duplicate = qt_gui.QKeySequence("Ctrl+Alt+L")
+    controller.shortcut_widgets[Action.LEFT_HALF].setKeySequence(duplicate)
+    controller.shortcut_widgets[Action.RIGHT_HALF].setKeySequence(duplicate)
+    controller.mark_dirty()
+    assert controller.status_label.property("status") == "error"
+
+    _button_box_button(controller, qt_widgets, "Retry shortcuts").click()
+
+    assert controller.status_label.property("status") == "error"
+    assert "duplicates" in controller.status_label.text()
+    assert not controller.apply_button.isEnabled()
+    assert controller.dirty is True
+
+
+def test_qt_retry_keeps_save_error(qt_app, qt_modules):
+    _qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+
+    class FailingStore:
+        def save(self, _settings: Settings) -> None:
+            raise OSError("disk full")
+
+    ctx = SpyContext(config_store=FailingStore())
+    ctx.last_binding_report = _failed_binding_report()
+    ctx.next_binding_report = BindingReport()
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    controller.gap_spin.setValue(18)
+    controller.save(close=False)
+    assert controller.status_label.property("status") == "error"
+    assert "disk full" in controller.status_label.text()
+
+    _button_box_button(controller, qt_widgets, "Retry shortcuts").click()
+
+    assert controller.status_label.property("status") == "error"
+    assert "disk full" in controller.status_label.text()
+    assert controller.dirty is True
+    assert ctx.settings.gap == 0
+
+
+def test_qt_binding_failure_displays_markup_as_literal_text(qt_app, qt_modules):
+    qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+    ctx = SpyContext()
+    ctx.last_binding_report = BindingReport(
+        workspace_failed=(("office", "<b>Office</b>", "ctrl+alt+o", "<i>blocked</i>"),)
+    )
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    binding_status = controller.window.findChild(qt_widgets.QLabel, "bindingStatus")
+
+    assert binding_status.textFormat() == qt_core.Qt.PlainText
+    assert "<b>Office</b>" in binding_status.text()
+    assert "<i>blocked</i>" in binding_status.text()
+    assert "&lt;b&gt;Office&lt;/b&gt;" in binding_status.toolTip()
+    assert "&lt;i&gt;blocked&lt;/i&gt;" in binding_status.toolTip()
+    assert "<b>Office</b>" in binding_status.accessibleDescription()
+
+
+def test_qt_retry_is_disabled_while_shortcuts_paused(qt_app, qt_modules):
+    _qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+    ctx = SpyContext()
+    ctx.paused = True
+    ctx.last_binding_report = _failed_binding_report(paused=True)
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    binding_status = controller.window.findChild(qt_widgets.QLabel, "bindingStatus")
+    retry = controller.window.findChild(qt_widgets.QPushButton, "retryShortcutsButton")
+
+    assert binding_status.isVisible()
+    assert "paused" in binding_status.text().casefold()
+    assert not retry.isEnabled()
+    controller.retry_shortcuts()
+    assert ctx.rebind_calls == 0
+    assert ctx.last_binding_report.failed_count == 1
+
+
+def test_qt_general_save_while_paused_keeps_failed_binding_visible(qt_app, qt_modules):
+    _qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+    ctx = SpyContext()
+    ctx.paused = True
+    ctx.last_binding_report = _failed_binding_report(paused=True)
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    controller.gap_spin.setValue(18)
+
+    controller.save(close=False)
+
+    assert ctx.settings.gap == 18
+    assert ctx.rebind_calls == 0
+    assert ctx.last_binding_report.failed_count == 1
+    assert controller.window.findChild(qt_widgets.QLabel, "bindingStatus").isVisible()
+
+
+def test_qt_tray_pause_resume_refreshes_live_binding_feedback_without_losing_edits(
+    qt_app, qt_modules, caplog
+):
+    qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+    ctx, hotkeys = _real_context_with_failed_hotkey()
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    binding_status = controller.window.findChild(qt_widgets.QLabel, "bindingStatus")
+    retry = controller.window.findChild(qt_widgets.QPushButton, "retryShortcutsButton")
+    controller.gap_spin.setValue(18)
+
+    assert ctx.pause_hotkeys() is True
+    qt_app.processEvents()
+
+    assert "paused" in binding_status.text().casefold()
+    assert not retry.isEnabled()
+    assert controller.gap_spin.value() == 18
+    assert controller.dirty is True
+    assert controller.status_label.text() == "Unsaved changes"
+
+    hotkeys.reject = False
+    assert ctx.resume_hotkeys() is True
+    qt_app.processEvents()
+
+    assert not binding_status.isVisible()
+    assert not retry.isVisible()
+    assert controller.gap_spin.value() == 18
+    assert controller.status_label.text() == "Unsaved changes"
+
+    controller.window.deleteLater()
+    qt_core.QCoreApplication.sendPostedEvents(None, qt_core.QEvent.DeferredDelete)
+    ctx.pause_hotkeys()
+    assert "settings subscriber raised" not in caplog.text
+
+
+def test_qt_save_stays_open_when_os_rejects_saved_shortcut(qt_app, qt_modules):
+    _qt_core, qt_gui, qt_widgets, _qt_test = qt_modules
+    config = SpyConfigStore()
+
+    class FailingBindContext(SpyContext):
+        def apply_settings(self, settings: Settings) -> None:
+            super().apply_settings(settings)
+            self.last_binding_report = _failed_binding_report()
+
+    ctx = FailingBindContext(config_store=config)
+    controller = _build_controller(qt_app, qt_modules, ctx)
+    controller.shortcut_widgets[Action.LEFT_HALF].setKeySequence(qt_gui.QKeySequence("Ctrl+Alt+L"))
+    controller.mark_dirty()
+
+    _button_box_button(controller, qt_widgets, "Save").click()
+    qt_app.processEvents()
+
+    assert len(config.saved) == 1
+    assert controller.dirty is False
+    assert controller.status_label.text() == "All changes saved"
+    assert controller.window.isVisible()
+    assert controller.window.findChild(qt_widgets.QLabel, "bindingStatus").isVisible()
 
 
 def test_qt_apply_persists_without_closing_window(qt_app, qt_modules):

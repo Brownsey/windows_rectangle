@@ -85,11 +85,20 @@ def test_qt_tray_survives_last_dialog_close(monkeypatch):
     monkeypatch.setattr(QtWidgets.QApplication, "exec", lambda self: 0)
 
     class Context:
+        from windows_rectangle.core.actionbus import ActionBus
+
+        bus = ActionBus()
+        prune_interval = 60.0
+        wake_ui = None
+
         def drain_actions(self):
             pass
 
         def maintenance(self):
             pass
+
+        def has_pending_work(self):
+            return False
 
     assert m._run_qt(Context()) == 0
     assert not app.quitOnLastWindowClosed()

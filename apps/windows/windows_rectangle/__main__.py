@@ -172,43 +172,79 @@ def _default_autostart_command() -> str:
 
 
 def _run_headless(ctx) -> int:
-    """Stdlib-only main loop: drain the ActionBus on a ~60 Hz schedule.
+    """Stdlib-only loop: wake on input, poll at 30 Hz only while active.
 
     Exits cleanly on SIGINT.
     """
+    import threading
+
     stop = False
+    wake = threading.Event()
 
     def _on_sig(*_):
         nonlocal stop
         stop = True
 
-    import contextlib
+    previous_handlers = []
+    previous_submit = ctx.bus.on_submit
+    previous_wake = ctx.wake_ui
+    try:
+        for signum in (signal.SIGINT, getattr(signal, "SIGTERM", None)):
+            if signum is None:
+                continue
+            try:
+                previous = signal.getsignal(signum)
+                signal.signal(signum, _on_sig)
+                previous_handlers.append((signum, previous))
+            except ValueError:
+                if signum == signal.SIGINT:
+                    raise
 
-    signal.signal(signal.SIGINT, _on_sig)
-    if hasattr(signal, "SIGTERM"):
-        with contextlib.suppress(ValueError):
-            signal.signal(signal.SIGTERM, _on_sig)  # ValueError off main thread
-
-    _log.info("running headless — Ctrl+C to exit")
-    # No overlay to repaint in headless mode, so 60 Hz is wasteful.
-    # 30 Hz schedules a drain roughly every 33 ms and halves timer wakeups
-    # versus 60 Hz. OS scheduling and individual actions can add latency.
-    HEADLESS_POLL_HZ = 30
-    period = 1.0 / HEADLESS_POLL_HZ
-    while not stop:
-        ctx.drain_actions()
-        ctx.maintenance()
-        time.sleep(period)
-    return 0
+        ctx.bus.on_submit = wake.set
+        ctx.wake_ui = wake.set
+        _log.info("running headless — Ctrl+C to exit")
+        active_period = 1.0 / 30
+        maintenance_period = max(0.001, ctx.prune_interval)
+        next_maintenance = time.monotonic()
+        while not stop:
+            wake.clear()  # Before drain: a producer arriving during drain stays set.
+            if stop:
+                break
+            ctx.drain_actions()
+            now = time.monotonic()
+            if now >= next_maintenance:
+                ctx.maintenance(now=now)
+                next_maintenance = now + maintenance_period
+            if stop:
+                break
+            # Python 3.13 Windows waits may not respond to SIGINT. A 250 ms
+            # idle cap bounds Ctrl+C latency without returning to 30 Hz work.
+            timeout = min(
+                active_period if ctx.has_pending_work() else 0.25,
+                max(0.0, next_maintenance - time.monotonic()),
+            )
+            if stop:
+                break
+            if timeout > 0:
+                wake.wait(timeout)
+        return 0
+    finally:
+        ctx.bus.on_submit = previous_submit
+        ctx.wake_ui = previous_wake
+        for signum, previous in reversed(previous_handlers):
+            if signal.getsignal(signum) is _on_sig:
+                signal.signal(signum, previous)
 
 
 def _run_qt(ctx, *, open_preferences: bool = False) -> int:
-    """Qt loop with a 16ms QTimer that drains the ActionBus + drag preview.
+    """Qt loop woken by input, with 16 ms polling only while work is active.
 
     Single Qt event loop, single drain timer (brief §5 #8 "competing event
     loops"). The mouse hook + hotkey pump each have their own daemon
     Win32 message loops; both marshal back here via ActionBus/LatestValue.
     """
+    import threading
+
     from PySide6 import QtCore, QtWidgets
 
     from .ui.overlay import OverlayController
@@ -245,9 +281,7 @@ def _run_qt(ctx, *, open_preferences: bool = False) -> int:
     app._tray = tray  # type: ignore[attr-defined]
     app._overlay = overlay  # type: ignore[attr-defined]
 
-    # Hoist the overlay show/hide closures so they aren't reallocated
-    # 60×/sec on the Qt timer. (drain_drag_preview already dedups so they
-    # rarely actually fire, but the lambda creation happens every tick.)
+    # Hoist the overlay show/hide closures for the active drag loop.
     if overlay is not None:
 
         def _on_show(rect) -> None:
@@ -258,19 +292,98 @@ def _run_qt(ctx, *, open_preferences: bool = False) -> int:
     else:
         _on_show = _on_hide = None  # type: ignore[assignment]
 
-    def _tick() -> None:
-        ctx.drain_actions()
-        if overlay is not None:
-            ctx.drain_drag_preview(on_show=_on_show, on_hide=_on_hide)
-        ctx.maintenance()  # rate-limited cycle/history prune (brief §5 #9)
+    class _WakeReceiver(QtCore.QObject):
+        requested = QtCore.Signal()
 
+        def __init__(self) -> None:
+            super().__init__()
+            self._lock = threading.Lock()
+            self._queued = False
+            self._active = False
+            self._closed = False
+            self.requested.connect(self._receive, QtCore.Qt.ConnectionType.QueuedConnection)
+
+        def wake(self) -> None:
+            # The hook thread must never wait for Qt or another producer.
+            if not self._lock.acquire(False):
+                return
+            try:
+                if self._closed or self._queued or self._active:
+                    return
+                self._queued = True
+                self.requested.emit()
+            finally:
+                self._lock.release()
+
+        def _receive(self) -> None:
+            with self._lock:
+                if self._closed:
+                    return
+                self._queued = False  # Release before draining; no lost producer wake.
+                self._active = True
+            _tick()
+
+        def idle(self) -> None:
+            with self._lock:
+                self._active = False
+            # Close the race with a producer that arrived as the timer stopped.
+            if ctx.has_pending_work():
+                self.wake()
+
+        def close(self) -> None:
+            with self._lock:
+                self._closed = True
+                self._queued = False
+                self._active = False
+
+    wake = _WakeReceiver()
     timer = QtCore.QTimer()
-    timer.setInterval(16)  # ~60 Hz; brief §5 #7 mouse-snap throttle target
+    timer.setInterval(16)  # Active drag and queued batches retain ~60 Hz.
+
+    def _tick() -> None:
+        try:
+            ctx.drain_actions()
+            if overlay is not None:
+                ctx.drain_drag_preview(on_show=_on_show, on_hide=_on_hide)
+        except Exception:  # noqa: BLE001 — keep the UI scheduler alive after a failed drain
+            _log.exception("Qt drain failed")
+        try:
+            pending = ctx.has_pending_work()
+        except Exception:  # noqa: BLE001 — retry a failed state check on the active timer
+            _log.exception("Qt pending-work check failed")
+            pending = True
+        if pending:
+            if not timer.isActive():
+                timer.start()
+        else:
+            timer.stop()
+            wake.idle()
+
     timer.timeout.connect(_tick)
-    timer.start()
-    rc = app.exec()
-    timer.stop()
-    return rc
+    maintenance_timer = QtCore.QTimer()
+    maintenance_timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
+    maintenance_timer.setSingleShot(True)
+    maintenance_timer.setInterval(max(1, int(ctx.prune_interval * 1000)))
+
+    def _maintain() -> None:
+        ctx.maintenance()
+        maintenance_timer.start()
+
+    maintenance_timer.timeout.connect(_maintain)
+    ctx.bus.on_submit = wake.wake
+    ctx.wake_ui = wake.wake
+    try:
+        ctx.maintenance()
+        maintenance_timer.start()
+        if ctx.has_pending_work():
+            wake.wake()
+        return app.exec()
+    finally:
+        wake.close()
+        ctx.bus.on_submit = None
+        ctx.wake_ui = None
+        timer.stop()
+        maintenance_timer.stop()
 
 
 def _run_informational(args: argparse.Namespace) -> int:

@@ -9,12 +9,39 @@ On non-Windows: constructor raises.
 """
 
 import sys
+import threading
 import time
 
 import pytest
 
 from windows_rectangle.adapters.win32_hotkeys import Win32Hotkeys
 from windows_rectangle.ports.hotkeys import HotkeyRegistrationError
+
+
+def _register_with_request_failure(monkeypatch, reason: int | str) -> str:
+    hotkeys = object.__new__(Win32Hotkeys)
+    hotkeys._stopped = threading.Event()
+    hotkeys._next_id = 1
+    monkeypatch.setattr(hotkeys, "_request", lambda _command, _ack: (False, reason))
+    with pytest.raises(HotkeyRegistrationError) as error:
+        hotkeys.register("ctrl+alt+c", lambda: None)
+    return str(error.value)
+
+
+def test_register_explains_windows_hotkey_already_registered(monkeypatch):
+    message = _register_with_request_failure(monkeypatch, 1409)
+
+    assert "ctrl+alt+c" in message
+    assert "already in use by another application" in message
+    assert "1409" in message
+
+
+@pytest.mark.parametrize("reason", [87, "wake failed", "1409"])
+def test_register_preserves_unknown_request_failure(monkeypatch, reason):
+    message = _register_with_request_failure(monkeypatch, reason)
+
+    assert f"err={reason}" in message
+    assert "already in use" not in message
 
 
 def test_construction_blocked_off_windows():

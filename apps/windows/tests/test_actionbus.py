@@ -125,3 +125,21 @@ def test_drain_limit_preserves_remaining_actions_for_later_ticks():
     assert seen == [Action.CENTER, Action.LEFT_HALF]
     assert bus.drain(seen.append, limit=2) == 1
     assert seen[-1] is Action.RIGHT_HALF
+
+
+def test_submit_wakes_consumer_after_success_and_overflow():
+    wakes = []
+    bus = ActionBus(maxsize=1)
+    bus.on_submit = lambda: wakes.append(1)
+    assert bus.submit(Action.LEFT_HALF)
+    assert not bus.submit(Action.RIGHT_HALF)
+    assert wakes == [1, 1]
+
+
+def test_removed_submit_wake_callback_does_not_run():
+    wakes = []
+    bus = ActionBus()
+    bus.on_submit = lambda: wakes.append(1)
+    bus.on_submit = None
+    bus.submit(Action.CENTER)
+    assert wakes == []
