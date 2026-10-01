@@ -662,12 +662,12 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
     window.setObjectName("preferencesWindow")
     window.setWindowTitle("Windows Rectangle")
     window.setWindowIcon(build_qicon(QtGui))
-    window.setMinimumSize(400, 280)
     available = qt_widgets.QApplication.primaryScreen().availableGeometry()
+    compact = available.width() < 760 or available.height() < 480
+    window.setMinimumSize(400 if compact else 720, 280)
     window.resize(min(920, available.width() - 32), min(700, available.height() - 48))
     window.setFont(QtGui.QFont("Segoe UI", 10))
     root = qt_widgets.QVBoxLayout(window)
-    compact = available.width() < 640 or available.height() < 480
     root.setContentsMargins(*(12, 8, 12, 8) if compact else (22, 18, 22, 18))
     root.setSpacing(6 if compact else 14)
     content_layout = root
@@ -697,6 +697,7 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
     header.addWidget(brand)
     heading = qt_widgets.QLabel("Windows Rectangle")
     heading.setObjectName("preferencesHeading")
+    heading.setWordWrap(compact)
     header.addWidget(heading, 1)
     content_layout.addLayout(header)
 
@@ -726,6 +727,8 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
     scroll = qt_widgets.QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(qt_widgets.QFrame.NoFrame)
+    if compact:
+        scroll.setFocusPolicy(qt_core.Qt.NoFocus)
     content = qt_widgets.QWidget()
     rows_layout = qt_widgets.QVBoxLayout(content)
     rows_layout.setSpacing(5)
@@ -759,8 +762,10 @@ def _build_window(ctx, qt_core, qt_widgets) -> PreferencesController:
             row = qt_widgets.QFrame()
             row.setObjectName("shortcutRow")
             row.setProperty("action", action.value)
-            row_layout = qt_widgets.QHBoxLayout(row)
+            row_layout = qt_widgets.QVBoxLayout(row) if compact else qt_widgets.QHBoxLayout(row)
             row_layout.setContentsMargins(10, 3, 10, 3)
+            if compact:
+                row_layout.setSpacing(3)
             row_layout.addWidget(qt_widgets.QLabel(action_label(action)), 1)
             button = ShortcutButton()
             button.setObjectName("shortcutButton")

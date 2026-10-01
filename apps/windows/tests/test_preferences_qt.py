@@ -379,6 +379,85 @@ def test_qt_preferences_fit_512_by_360_available_screen(qt_app, qt_modules, fail
         assert content_scroll.viewport().rect().contains(outer_center), control.objectName()
 
 
+@pytest.mark.parametrize("screen_size", [(512, 360), (640, 520), (700, 520)])
+def test_qt_compact_shortcut_rows_keep_labels_and_keys_readable(qt_app, qt_modules, screen_size):
+    qt_core, qt_gui, qt_widgets, qt_test = qt_modules
+
+    class SizedWidgets:
+        class QApplication:
+            @staticmethod
+            def primaryScreen():
+                class Screen:
+                    @staticmethod
+                    def availableGeometry():
+                        return qt_core.QRect(0, 0, *screen_size)
+
+                return Screen()
+
+        def __getattr__(self, name):
+            return getattr(qt_widgets, name)
+
+    controller = preferences._build_window(SpyContext(), qt_core, SizedWidgets())
+    window = controller.window
+    window.show()
+    qt_app.processEvents()
+    search = window.findChild(qt_widgets.QLineEdit, "shortcutSearch")
+    shortcut_scroll = next(
+        area
+        for area in window.findChildren(qt_widgets.QScrollArea)
+        if area.widget() is controller.rows[Action.LEFT_HALF].parentWidget()
+    )
+    assert shortcut_scroll.horizontalScrollBar().maximum() == 0
+    content_scroll = window.findChild(qt_widgets.QScrollArea, "preferencesContentScroll")
+    assert content_scroll.horizontalScrollBar().maximum() == 0
+
+    search.setFocus()
+    qt_test.QTest.keyClick(search, qt_core.Qt.Key_Tab)
+    qt_app.processEvents()
+    assert controller.shortcut_widgets[Action.LEFT_HALF].hasFocus(), qt_app.focusWidget()
+    first_button = controller.shortcut_widgets[Action.LEFT_HALF]
+    for area in (shortcut_scroll, content_scroll):
+        center = first_button.mapTo(area.viewport(), first_button.rect().center())
+        assert area.viewport().rect().contains(center), screen_size
+
+    controller.shortcut_widgets[Action.BOTTOM_VERTICAL_TWO_THIRDS].setKeySequence(
+        qt_gui.QKeySequence(preferences._qt_sequence_text("ctrl+alt+shift+pageup"))
+    )
+    assert controller.shortcut_widgets[Action.BOTTOM_VERTICAL_TWO_THIRDS].text() == (
+        "Ctrl+Alt+Shift+PgUp"
+    )
+    for action in (Action.LEFT_HALF, Action.BOTTOM_VERTICAL_TWO_THIRDS):
+        row = controller.rows[action]
+        label = row.findChild(qt_widgets.QLabel)
+        button = controller.shortcut_widgets[action]
+        shortcut_scroll.ensureWidgetVisible(button)
+        qt_app.processEvents()
+        viewport = shortcut_scroll.viewport()
+        for widget in (label, button):
+            left = widget.mapTo(viewport, qt_core.QPoint(0, 0)).x()
+            right = widget.mapTo(viewport, qt_core.QPoint(widget.width() - 1, 0)).x()
+            assert 0 <= left <= right < viewport.width(), action
+        assert label.fontMetrics().horizontalAdvance(label.text()) <= label.width()
+        assert button.fontMetrics().horizontalAdvance(button.text()) + 12 <= button.width()
+
+
+def test_qt_wide_preferences_cannot_resize_below_readable_layout(qt_app, qt_modules):
+    _qt_core, _qt_gui, qt_widgets, _qt_test = qt_modules
+    controller = _build_controller(qt_app, qt_modules)
+    window = controller.window
+
+    window.resize(400, 280)
+    qt_app.processEvents()
+
+    shortcut_scroll = next(
+        area
+        for area in window.findChildren(qt_widgets.QScrollArea)
+        if area.widget() is controller.rows[Action.LEFT_HALF].parentWidget()
+    )
+    assert window.width() >= window.minimumSizeHint().width()
+    assert shortcut_scroll.horizontalScrollBar().maximum() == 0
+
+
 def test_qt_general_values_show_units(qt_app, qt_modules):
     controller = _build_controller(qt_app, qt_modules)
     assert controller.gap_spin.suffix() == " px"

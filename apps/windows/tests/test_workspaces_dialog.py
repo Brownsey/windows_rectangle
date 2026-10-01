@@ -410,6 +410,267 @@ def test_compact_workspace_save_failure_status_fits_screen(workspace_qt, tmp_pat
     assert restore_top.y() + restore.height() <= dialog.window.height()
 
 
+@pytest.mark.parametrize(("screen_width", "screen_height"), [(512, 360), (960, 520)])
+def test_workspace_tab_leaves_placement_table_for_actions(
+    workspace_qt, tmp_path, monkeypatch, screen_width, screen_height
+):
+    qt_widgets, app = workspace_qt
+    from PySide6 import QtCore, QtTest
+
+    from windows_rectangle.ui.workspaces_dialog import _build
+
+    monkeypatch.setattr(
+        qt_widgets.QApplication,
+        "primaryScreen",
+        lambda: SimpleNamespace(
+            availableGeometry=lambda: QtCore.QRect(0, 0, screen_width, screen_height)
+        ),
+    )
+    context, _store = _workspace_context(tmp_path)
+    dialog = _build(context)
+    dialog.window.show()
+    dialog.workspace_list.setFocus()
+    app.processEvents()
+    assert "F2" in dialog.placements.accessibleDescription()
+
+    for _ in range(15):
+        if app.focusWidget() is dialog.placements:
+            break
+        QtTest.QTest.keyClick(app.focusWidget(), QtCore.Qt.Key_Tab)
+        app.processEvents()
+    assert app.focusWidget() is dialog.placements
+
+    QtTest.QTest.keyClick(dialog.placements, QtCore.Qt.Key_Tab)
+    app.processEvents()
+    assert isinstance(app.focusWidget(), qt_widgets.QPushButton)
+    assert app.focusWidget().text() == "Add application…"
+
+    QtTest.QTest.keyClick(app.focusWidget(), QtCore.Qt.Key_Tab, QtCore.Qt.ShiftModifier)
+    app.processEvents()
+    assert app.focusWidget() is dialog.placements
+    QtTest.QTest.keyClick(app.focusWidget(), QtCore.Qt.Key_Tab, QtCore.Qt.ShiftModifier)
+    app.processEvents()
+    assert app.focusWidget() is dialog.shortcut_edit
+    QtTest.QTest.keyClick(app.focusWidget(), QtCore.Qt.Key_Tab)
+    app.processEvents()
+    assert app.focusWidget() is dialog.placements
+
+    outer_scroll = dialog.window.findChild(qt_widgets.QScrollArea, "workspaceContentScroll")
+    for label in (
+        "Add application…",
+        "Remove selected rule",
+        "Record current positions",
+        "Test matches",
+        "Restore now",
+        "Done",
+    ):
+        QtTest.QTest.keyClick(app.focusWidget(), QtCore.Qt.Key_Tab)
+        app.processEvents()
+        focused = app.focusWidget()
+        assert isinstance(focused, qt_widgets.QPushButton), label
+        assert focused.text() == label
+        if outer_scroll is not None and outer_scroll.isAncestorOf(focused):
+            rect = QtCore.QRect(
+                focused.mapTo(outer_scroll.viewport(), QtCore.QPoint(0, 0)),
+                focused.size(),
+            )
+            assert outer_scroll.viewport().rect().contains(rect), label
+
+
+def test_workspace_table_arrow_edit_and_autosave_with_tab_exit(workspace_qt, tmp_path):
+    qt_widgets, app = workspace_qt
+    from PySide6 import QtCore, QtTest
+
+    from windows_rectangle.ui.workspaces_dialog import _build
+
+    context, store = _workspace_context(tmp_path)
+    dialog = _build(context)
+    dialog.window.show()
+    dialog.workspace_list.setFocus()
+    app.processEvents()
+    for _ in range(15):
+        if app.focusWidget() is dialog.placements:
+            break
+        QtTest.QTest.keyClick(app.focusWidget(), QtCore.Qt.Key_Tab)
+        app.processEvents()
+    assert app.focusWidget() is dialog.placements
+
+    assert dialog.placements.currentColumn() == 0
+    QtTest.QTest.keyClick(dialog.placements, QtCore.Qt.Key_Right)
+    assert dialog.placements.currentColumn() == 1
+    QtTest.QTest.keyClick(dialog.placements, QtCore.Qt.Key_F2)
+    app.processEvents()
+    editor = app.focusWidget()
+    assert isinstance(editor, qt_widgets.QLineEdit)
+    QtTest.QTest.keyClick(editor, QtCore.Qt.Key_A, QtCore.Qt.ControlModifier)
+    QtTest.QTest.keyClicks(editor, "firefox.exe")
+    QtTest.QTest.keyClick(editor, QtCore.Qt.Key_Return)
+    app.processEvents()
+
+    assert store.load().workspaces[0].placements[0].matcher.process_name == "firefox.exe"
+    assert dialog.placements.item(0, 1).text() == "firefox.exe"
+
+
+def test_workspace_position_preset_opens_with_keyboard_enter(workspace_qt, tmp_path, monkeypatch):
+    qt_widgets, app = workspace_qt
+    from PySide6 import QtCore, QtTest
+
+    from windows_rectangle.core.workspace_presets import preset_rect
+    from windows_rectangle.ui.workspaces_dialog import _build
+
+    context, store = _workspace_context(tmp_path)
+    dialog = _build(context)
+    dialog.window.show()
+    dialog.workspace_list.setFocus()
+    app.processEvents()
+    for _ in range(15):
+        if app.focusWidget() is dialog.placements:
+            break
+        QtTest.QTest.keyClick(app.focusWidget(), QtCore.Qt.Key_Tab)
+        app.processEvents()
+    assert app.focusWidget() is dialog.placements
+    for _ in range(5):
+        QtTest.QTest.keyClick(dialog.placements, QtCore.Qt.Key_Right)
+    assert dialog.placements.currentColumn() == 5
+
+    choices = []
+
+    def choose_preset(_parent, _title, _prompt, labels, _selected, _editable):
+        choices.append(labels)
+        return "Right half", True
+
+    monkeypatch.setattr(qt_widgets.QInputDialog, "getItem", choose_preset)
+    QtTest.QTest.keyClick(dialog.placements, QtCore.Qt.Key_Return)
+    app.processEvents()
+
+    assert choices
+    assert store.load().workspaces[0].placements[0].rect == preset_rect("right_half")
+
+
+def test_workspace_position_preset_still_opens_with_double_click(
+    workspace_qt, tmp_path, monkeypatch
+):
+    qt_widgets, app = workspace_qt
+    from PySide6 import QtCore, QtTest
+
+    from windows_rectangle.core.workspace_presets import preset_rect
+    from windows_rectangle.ui.workspaces_dialog import _build
+
+    context, store = _workspace_context(tmp_path)
+    dialog = _build(context)
+    dialog.window.show()
+    app.processEvents()
+    choices = []
+
+    def choose_preset(_parent, _title, _prompt, labels, _selected, _editable):
+        choices.append(labels)
+        return "Right half", True
+
+    monkeypatch.setattr(qt_widgets.QInputDialog, "getItem", choose_preset)
+    detail_scroll = dialog.window.findChild(qt_widgets.QScrollArea, "workspaceDetailScroll")
+    detail_scroll.verticalScrollBar().setValue(detail_scroll.verticalScrollBar().maximum())
+    item = dialog.placements.item(0, 5)
+    dialog.placements.scrollToItem(item)
+    app.processEvents()
+    position = dialog.placements.visualItemRect(item).center()
+    assert dialog.placements.viewport().rect().contains(position)
+    QtTest.QTest.mouseClick(dialog.placements.viewport(), QtCore.Qt.LeftButton, pos=position)
+    QtTest.QTest.mouseDClick(dialog.placements.viewport(), QtCore.Qt.LeftButton, pos=position)
+    app.processEvents()
+
+    assert len(choices) == 1
+    assert store.load().workspaces[0].placements[0].rect == preset_rect("right_half")
+
+
+@pytest.mark.parametrize("accept", [True, False])
+def test_position_keyboard_modal_does_not_close_workspace_editor(workspace_qt, tmp_path, accept):
+    qt_widgets, app = workspace_qt
+    from PySide6 import QtCore, QtTest
+
+    from windows_rectangle.core.workspace_presets import preset_rect
+    from windows_rectangle.ui.workspaces_dialog import _build
+
+    context, store = _workspace_context(tmp_path)
+    dialog = _build(context)
+    dialog.window.show()
+    dialog.workspace_list.setFocus()
+    app.processEvents()
+    for _ in range(15):
+        if app.focusWidget() is dialog.placements:
+            break
+        QtTest.QTest.keyClick(app.focusWidget(), QtCore.Qt.Key_Tab)
+        app.processEvents()
+    assert app.focusWidget() is dialog.placements
+    for _ in range(5):
+        QtTest.QTest.keyClick(dialog.placements, QtCore.Qt.Key_Right)
+    assert dialog.placements.currentColumn() == 5
+    opened = []
+    timed_out = []
+    poll = QtCore.QTimer(dialog.window)
+    poll.setInterval(10)
+    watchdog = QtCore.QTimer(dialog.window)
+    watchdog.setSingleShot(True)
+
+    def close_real_chooser():
+        modal = app.activeModalWidget()
+        if modal is None:
+            return
+        poll.stop()
+        opened.append(modal.windowTitle())
+        if accept:
+            combo = modal.findChild(qt_widgets.QComboBox)
+            combo.setCurrentText("Right half")
+            modal.accept()
+        else:
+            modal.reject()
+
+    def abort_chooser():
+        timed_out.append(True)
+        modal = app.activeModalWidget()
+        if modal is not None:
+            modal.reject()
+
+    poll.timeout.connect(close_real_chooser)
+    watchdog.timeout.connect(abort_chooser)
+    poll.start()
+    watchdog.start(3000)
+    try:
+        QtTest.QTest.keyClick(dialog.placements, QtCore.Qt.Key_Return)
+    finally:
+        poll.stop()
+        watchdog.stop()
+    app.processEvents()
+
+    assert not timed_out
+    assert opened == ["Choose position"]
+    assert dialog.window.isVisible()
+    assert app.focusWidget() is dialog.placements
+    expected = preset_rect("right_half") if accept else preset_rect("full")
+    assert store.load().workspaces[0].placements[0].rect == expected
+
+
+@pytest.mark.parametrize("key", ["return", "space"])
+def test_focused_done_button_keeps_keyboard_activation(workspace_qt, tmp_path, key):
+    qt_widgets, app = workspace_qt
+    from PySide6 import QtCore, QtTest
+
+    from windows_rectangle.ui.workspaces_dialog import _build
+
+    context, _store = _workspace_context(tmp_path)
+    dialog = _build(context)
+    dialog.window.show()
+    done = next(
+        button
+        for button in dialog.window.findChildren(qt_widgets.QPushButton)
+        if button.text() == "Done"
+    )
+    done.setFocus()
+    app.processEvents()
+    QtTest.QTest.keyClick(done, QtCore.Qt.Key_Return if key == "return" else QtCore.Qt.Key_Space)
+    app.processEvents()
+    assert not dialog.window.isVisible()
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows native layout")
 def test_native_workspace_actions_fit_or_scroll_at_200_percent():
     script = dedent("""

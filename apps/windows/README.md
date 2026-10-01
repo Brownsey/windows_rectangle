@@ -134,6 +134,10 @@ custom size—layouts are not limited to halves, thirds, or presets. Alternative
 arrange the real application windows on your desktop and select **Record current
 positions** to learn their exact sizes, positions, and monitors.
 
+For keyboard editing, use arrow keys to select a rule cell and **F2** to edit it.
+On the **Position** cell, press **Enter** to choose a preset. **Tab** and
+**Shift+Tab** move between the table and the surrounding controls.
+
 Valid changes save and apply automatically. If a shortcut, matcher, or storage error
 prevents saving, the editor keeps the change available for correction or retry instead
 of silently discarding it. Assigning a workspace shortcut restores every matched

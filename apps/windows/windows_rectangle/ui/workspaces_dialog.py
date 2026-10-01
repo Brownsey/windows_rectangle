@@ -290,7 +290,12 @@ def _build(ctx) -> WorkspaceDialog:
     placements = QtWidgets.QTableWidget()
     placements.setObjectName("workspacePlacements")
     placements.setAccessibleName("Window matching and placement rules")
-    placements.setToolTip("Double-click Position to choose a preset")
+    table_hint = (
+        "Arrow keys move between cells; F2 edits a rule. "
+        "Press Enter or double-click Position to choose a preset. Tab leaves the table."
+    )
+    placements.setToolTip(table_hint)
+    placements.setAccessibleDescription(table_hint)
     placements.setColumnCount(7)
     placements.setHorizontalHeaderLabels(
         [
@@ -305,6 +310,7 @@ def _build(ctx) -> WorkspaceDialog:
     )
     placements.horizontalHeader().setStretchLastSection(True)
     placements.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+    placements.setTabKeyNavigation(False)
     detail_layout.addWidget(placements, 1)
     add_rule = QtWidgets.QPushButton("Add application…")
     remove_rule = QtWidgets.QPushButton("Remove selected rule")
@@ -394,7 +400,27 @@ def _build(ctx) -> WorkspaceDialog:
     shortcut_edit.editingFinished.connect(controller.edit_workspace_fields)
     placements.itemChanged.connect(controller.edit_placement)
     placements.itemSelectionChanged.connect(lambda: _table_selected(controller))
-    placements.cellDoubleClicked.connect(
+
+    class PositionEnterFilter(QtCore.QObject):
+        def eventFilter(self, watched, event):
+            if (
+                watched is placements
+                and event.type() in (QtCore.QEvent.KeyPress, QtCore.QEvent.KeyRelease)
+                and event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter)
+                and placements.currentColumn() == 5
+                and placements.currentRow() >= 0
+            ):
+                if event.type() == QtCore.QEvent.KeyPress:
+                    _choose_position(controller, placements.currentRow(), QtWidgets)
+                    controller.window.activateWindow()
+                    placements.setFocus()
+                event.accept()
+                return True
+            return False
+
+    placements._position_enter_filter = PositionEnterFilter(placements)
+    placements.installEventFilter(placements._position_enter_filter)
+    placements.cellActivated.connect(
         lambda row, column: _choose_position(controller, row, QtWidgets) if column == 5 else None
     )
     template.clicked.connect(lambda: _create_from_template(controller, QtWidgets))

@@ -63,11 +63,23 @@ paints, taking 0.140625 seconds of process CPU time over six seconds (2.344% of
 one core). Same-size position changes reused the painted surface. No rendering
 rewrite was justified by these results.
 
-GPU Engine counters returned 861 valid engine samples but no instance for the
-overlay process; the normal tray probes likewise exposed no process instance.
-**GPU utilization is unmeasured**, not zero. Desktop compositor work can belong
-to another process. These observations establish paint suppression, not an
-end-to-end GPU utilization percentage.
+The initial GPU counter sample ended before the overlay's visible phases and
+cannot establish their GPU cost. A corrected probe recorded 3,157 valid GPU
+Engine readings with no invalid samples or counter errors. Six timestamped
+sample sets fell inside the stable and changing visible-overlay phases; none
+contained the overlay process's PID. The normal tray probes likewise exposed
+no process instance. **GPU utilization is unmeasured**, not zero. Desktop
+compositor work can belong to another process. These observations establish
+paint suppression, not an end-to-end GPU utilization percentage.
+
+In that corrected run, 375 stable-preview ticks again caused zero paints.
+Thirteen deliberate target transitions produced thirteen paints and used
+0.203125 seconds of CPU over six seconds (3.386% of one core). Production source
+was unchanged; these short samples do not establish a performance regression.
+No continuous repaint or unnecessary rendering work was
+observed that would justify replacing the native Qt overlay. The phase-aligned
+result is retained in `build/review/overlay_runtime_probe_visible_gpu.json`;
+the original probe result is preserved separately.
 
 Local evidence and runnable probes are retained under ignored `build/review`:
 `profile_source_runtime.py`, `source-runtime-before-scheduler.json`,
@@ -176,10 +188,10 @@ the package build; the updated 123-file snapshot is
 The fresh local gate passed all 820 tests in 44.03 seconds. The
 [final Windows matrix run](https://github.com/Brownsey/windows_rectangle/actions/runs/36799180906)
 at `da5273c` passed all 820 tests on both Python 3.11 and 3.13, with no skipped
-cases, plus Ruff lint/formatting and strict core type checks. The only subsequent
-change records that result in this report.
+cases, plus Ruff lint/formatting and strict core type checks. The next commit
+recorded that result; the later keyboard changes are validated separately below.
 
-### Final package with compact desktop support
+### Packaged runtime at `1271714`
 
 The canonical build at `1271714` passed its frozen import smoke check. Independent
 validation confirmed all eight required imports and optional PySide6, matching
@@ -200,8 +212,44 @@ visible and another 20 seconds in the tray. CPU time remained below the observed
 All three exited gracefully, logged only the five expected shortcut conflicts
 and left the user's Run registry value unchanged. These are bounded local
 observations, not proof of zero CPU use or a startup speedup. Current evidence
-is in `build/review/frozen-enabled-performance.json`; the earlier package's
+is retained under `build/review/release-1271714`; the earlier package's
 results are retained separately under `build/review/release-7b3cd12`.
+
+### Keyboard access follow-up
+
+The current native audit followed keyboard focus instead of manually scrolling
+each control into view. It found and corrected three observable failures:
+
+1. **Preferences shortcuts:** focusing a shortcut on a compact desktop scrolled
+   sideways and clipped its command name. Compact rows now put the label above
+   the shortcut, with no horizontal overflow. The heading wraps when necessary.
+   Regression checks cover 512, 640 and 700 logical pixel widths; wide windows
+   retain side-by-side rows and a readable minimum width. The font is unchanged.
+2. **Workspace actions:** Tab cycled indefinitely through the table's cells.
+   Qt now uses Tab and Shift+Tab to leave the table; arrow keys still navigate
+   cells, and F2 editing still commits through the real JSON store.
+3. **Position presets:** the chooser required a mouse double-click. Enter now
+   opens it as well; double-click still opens it exactly once. Independent
+   testing caught the original Enter also activating Done after the chooser
+   closed. The table now consumes that key and restores focus, so accepting or
+   cancelling leaves the editor open. The table's tooltip and accessible
+   description explain the keys, and the user guide records the same behavior.
+
+Native 200% captures show the repaired focus and scrolling behavior:
+
+![Compact Preferences keeps the focused shortcut and its command label readable](research/windows-preferences-compact-keyboard.png)
+
+![Tab reaches Restore now in the compact workspace editor](research/windows-workspace-compact-keyboard.png)
+
+The local full gate passed **833 tests** in 44.84 seconds, plus Ruff lint and
+formatting and strict core type checks. The corresponding 123-file source,
+test and build-input snapshot is
+`c82685762cac420d3011d7b4d9da84d8f77b1bd9758b015e9c9957a636e8836d`.
+Independent validation passed 44 Preferences tests and 24 workspace tests,
+including native modal acceptance and cancellation. A distinct final review
+found no remaining Critical or Important issue in the keyboard changes.
+These captures and keyboard tests do not establish screen-reader compatibility
+or complete accessibility conformance.
 
 The review below is historical: its source snapshot, test counts, executable
 hashes and measurements precede this iteration.

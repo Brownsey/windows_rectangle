@@ -23,18 +23,25 @@ packaging and pytest.
 
 ## Input and movement
 
-Global shortcuts run on a native message-pump thread. Callbacks enqueue actions;
-the main thread dispatches a bounded batch on its next timer tick. A bounded queue
-prevents unbounded memory growth, and newly submitted actions wait for a later
-batch. Workspace restores process one request per tick.
+Global shortcuts run on a native message-pump thread. Callbacks enqueue actions
+and request a coalesced Qt wakeup. The main thread dispatches a bounded batch;
+a 16 ms timer continues only while dragging or queued work remains. Once idle,
+the timer stops. A bounded queue prevents unbounded memory growth, and newly
+submitted actions wait for a later batch. Workspace restores process one request
+per drain. A separate single-shot timer handles periodic state cleanup.
 
 The low-level mouse hook only publishes the latest immutable input snapshot.
 It performs no window enumeration, DWM queries, geometry, logging or movement.
-The main timer checks Windows' native move/size loop, captures the moved HWND,
+The active drain checks Windows' native move/size loop, captures the moved HWND,
 and rejects content dragging, resize operations and cancelled moves. Snap release
 uses the latest cursor coordinates and exact target rectangle, without shortcut
 cycling or foreground-window reselection. Very short clicks entirely between
-timer ticks do not create a snap session.
+drains do not create a snap session.
+
+The optional headless loop uses a threading event to wake on input and polls at
+30 Hz while active. Idle waits are capped at 250 ms to keep Ctrl+C responsive on
+Windows/Python 3.13; cleanup has its own deadline. Both runtimes detach their
+wake callbacks when the loop ends.
 
 Win32 coordinates use physical pixels. Visible DWM frame bounds exclude invisible
 resize borders; placement expands them back to outer window bounds. The overlay
